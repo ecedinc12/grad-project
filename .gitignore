@@ -1,1 +1,11 @@
 .aider*
+
+# Project Output (Dataset Generation)
+output/
+
+# Large Assets (USD files, textures, models)
+assets/
+
+# Python/Environment
+__pycache__/
+*.pyc
