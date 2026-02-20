@@ -27,3 +27,53 @@ env/
 dist/
 build/
 *.egg-info/
+
+# Simulation Logs
+*.log
+*.usd.log
+
+# Local Configuration (if sensitive)
+config/generation_config.yaml
+
+# Isaac Sim cache and temporary files
+*.omniverse
+*.omniverse-cache
+omniverse_cache/
+.kit/
+
+# Python cache and virtual environment
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# Temporary files
+*.tmp
+*.temp
+
+# Simulation Logs
+*.log
+*.usd.log
+
+# Local Configuration (if sensitive)
+config/generation_config.yaml
+
+# Isaac Sim cache and temporary files
+*.omniverse
+*.omniverse-cache
+omniverse_cache/
+.kit/
+
+# Python cache and virtual environment
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# Temporary files
+*.tmp
+*.temp
