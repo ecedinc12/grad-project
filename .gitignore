@@ -1,6 +1,11 @@
 .aider*
 .aider.env
 
+# OS & Editor
+.DS_Store
+.vscode/
+.idea/
+
 # Project Output (Dataset Generation)
 output/
 
@@ -10,3 +15,15 @@ assets/
 # Python/Environment
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+
+# Virtual Environments
+venv/
+env/
+.env
+
+# Distribution / Packaging
+dist/
+build/
+*.egg-info/
