@@ -1,4 +1,5 @@
 .aider*
+.aider.env
 
 # Project Output (Dataset Generation)
 output/
