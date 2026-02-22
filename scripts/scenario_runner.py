@@ -12,6 +12,7 @@ import numpy as np
 
 from pxr import Usd, UsdGeom, Gf, UsdPhysics
 import omni.isaac.core.utils.prims as prim_utils
+import omni.isaac.core.utils.xforms as xform_utils
 from omni.isaac.core.utils.rotations import euler_angles_to_quat
 
 
@@ -115,37 +116,27 @@ class WorkerController:
             self._set_rotation_z(np.degrees(angle))
 
     def _get_position(self) -> Gf.Vec3f:
-        # Get local translation
-        # Note: In a real sim, use world transform cache
-        return self.xform.GetLocalTransformation().ExtractTranslation()
+        # Get world position
+        # Compute the world transform at the current time
+        world_transform = UsdGeom.Xformable(self.prim).ComputeLocalToWorldTransform(self.stage.GetTime())
+        return world_transform.ExtractTranslation()
 
     def _set_position(self, pos: Gf.Vec3f):
-        # Find or create translate op
-        # Simplified: Assumes translate op is first or standard
-        # For robustness, use omni.isaac.core.utils.xforms
-        translate_op = None
-        for op in self.xform.GetOrderedXformOps():
-            if op.GetOpType() == UsdGeom.XformOp.TypeTranslate:
-                translate_op = op
-                break
-        
-        if translate_op:
-            translate_op.Set(pos)
-        else:
-            self.xform.AddTranslateOp().Set(pos)
+        # Use omni.isaac.core.utils.xforms for robust position setting
+        xform_utils.set_world_pose(self.prim, position=pos)
 
     def _set_rotation_z(self, angle_deg: float):
-        # Find or create rotate Z op
-        rotate_op = None
-        for op in self.xform.GetOrderedXformOps():
-            if op.GetOpType() == UsdGeom.XformOp.TypeRotateZ:
-                rotate_op = op
-                break
-        
-        if rotate_op:
-            rotate_op.Set(angle_deg)
-        else:
-            self.xform.AddRotateZOp().Set(angle_deg)
+        # Get current position to preserve it
+        current_pos = self._get_position()
+        # Create a quaternion rotation around Z axis
+        # Convert angle to radians for quaternion
+        angle_rad = np.radians(angle_deg)
+        # Create a quaternion (w, x, y, z) for rotation around Z axis
+        # Using euler_angles_to_quat which expects (roll, pitch, yaw) in radians
+        # For rotation around Z axis, we use (0, 0, angle_rad)
+        quat = euler_angles_to_quat([0.0, 0.0, angle_rad])
+        # Set world pose with new orientation
+        xform_utils.set_world_pose(self.prim, position=current_pos, orientation=quat)
 
 
 class ScenarioRunner:
@@ -213,8 +204,12 @@ class ScenarioRunner:
         for worker in self.workers:
             worker.update(dt)
 
-    def randomize_scenario(self):
-        """Reset and randomize all worker states."""
+    def randomize_scenario(self, floor_height: float = 0.0):
+        """Reset and randomize all worker states.
+        
+        Args:
+            floor_height: The height of the floor to place workers above it.
+        """
         for worker in self.workers:
             worker.toggle_ppe()  # Randomize PPE
             
@@ -222,4 +217,6 @@ class ScenarioRunner:
             # In production, use valid navmesh points
             x = random.uniform(-5, 5)
             y = random.uniform(-5, 5)
-            worker._set_position(Gf.Vec3f(x, y, 0))
+            # Place worker slightly above the floor to avoid collision issues
+            z = floor_height + 1.0  # 1 meter above floor
+            worker._set_position(Gf.Vec3f(x, y, z))
