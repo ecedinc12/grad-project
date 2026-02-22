@@ -122,8 +122,11 @@ class WorkerController:
         return world_transform.ExtractTranslation()
 
     def _set_position(self, pos: Gf.Vec3f):
-        # Use omni.isaac.core.utils.xforms for robust position setting
-        xform_utils.set_world_pose(self.prim, position=pos)
+        # Get current orientation to preserve it
+        world_transform = UsdGeom.Xformable(self.prim).ComputeLocalToWorldTransform(self.stage.GetTime())
+        rotation = world_transform.ExtractRotationQuat()
+        # Set world pose with new position and current orientation
+        xform_utils.set_world_pose(self.prim, position=pos, orientation=rotation)
 
     def _set_rotation_z(self, angle_deg: float):
         # Get current position to preserve it
@@ -220,3 +223,7 @@ class ScenarioRunner:
             # Place worker slightly above the floor to avoid collision issues
             z = floor_height + 1.0  # 1 meter above floor
             worker._set_position(Gf.Vec3f(x, y, z))
+            
+            # Randomize rotation to face a random direction
+            angle_deg = random.uniform(0, 360)
+            worker._set_rotation_z(angle_deg)
