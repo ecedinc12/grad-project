@@ -20,7 +20,7 @@
     - **Geometry:** Import industrial props. Sanitize mesh complexity (<50k tris).
     - **Materials:** Enforce MDL graph conversion.
     - **Instancing:** Implement `omni.isaac.core.prims.GeometryPrim` with `instancer_path` for repetitive assets (pallets, racking).
-    - **Texture Compression:** Batch process textures to BC7/DDS using NVTT or equivalent.
+    - **Texture Optimization:** Resize >2K textures to 2048px maximum dimension. Convert to BC7/DDS using NVTT or equivalent.
 - [ ] **Character Integration**
     - Import rigged characters (USD Skel).
     - Verify `SkelAnimation` bindings.
@@ -32,12 +32,18 @@
     - Create `WorkerController` class to manage state: `IDLE`, `WALK`, `HAZARD_INTERACTION`.
 - [ ] **Hazard Scripting**
     - **PPE Compliance:** Boolean toggles on PPE visibility attributes.
-    - **Negative Samples:** Logic branch to spawn camera in empty zones or disable all actor spawning. Flag metadata `is_negative=True`.
     - **Geofence Breach:** use `omni.isaac.core.utils.prims.get_prim_at_path` to detect worker centroid vs. hazard zone volume.
+- [ ] **Negative Sample Generator**
+    - Implement `spawn_empty_variant()`: Disable spawning of workers/hazards for 10-15% of total generation steps.
+    - Randomize camera position within scene bounds during empty variant.
+    - Inject `{"is_negative": True}` into the annotation dictionary for all frames captured in this mode.
 - [ ] **Physics Triggers**
     - Setup Collision Callbacks for "Near Miss" or "Accident" events.
 
 ## 4. Sensor & Replicator Configuration (`scripts/data_writer.py`)
+- [ ] **Sensor Configuration**
+    - **RGB:** `omni.isaac.sensor.Camera` configured for standard color output (write to .png).
+    - **Depth:** `omni.isaac.sensor.Camera` with `type="distance_to_image_plane"` (write to .npy or .exr).
 - [ ] **Camera Rigging**
     - Instantiate `CameraRig` class wrapping `omni.isaac.sensor.Camera`.
     - **Orbit Logic:** Implement spherical coordinate sampler (Radius: $R$, Theta: $\theta$, Phi: $\phi$) -> Cartesian ($x,y,z$) transformation for camera placement.
@@ -49,6 +55,7 @@
     - Custom Writer inheriting from `omni.replicator.core.Writer`.
     - **Output Structure:**
         - RGB: `.png` (lossless).
+        - Depth: `.npy` or `.exr` (32-bit float).
         - Annotations: JSON (COCO style).
     - **VRAM Safety:** Implement `replicator.orchestrator.step(rt_subframes=N)` to clear buffers between writes.
 
@@ -69,3 +76,7 @@
         - Check JSON validity.
         - Check image readability.
         - Verify BBox coordinates $\in [0, W] \times [0, H]$.
+    - **Metric Validation:**
+        - Verify Negative Sample ratio (Target: 10-15% of total frames).
+        - Verify Annotation Density (Objects per frame > 0 for positive samples).
+        - Ensure annotation coverage >95% of visible objects in positive samples.
