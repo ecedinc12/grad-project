@@ -297,6 +297,20 @@ if __name__ == "__main__":
     """
     print("=== ScenarioRunner Module Test ===")
     
+    # Import ScenarioRunner from the correct module
+    # Since this is in a different file, we need to import it
+    # First, make sure we can import from the scripts directory
+    import sys
+    import os
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    
+    try:
+        from scenario_runner import ScenarioRunner
+    except ImportError as e:
+        print(f"ERROR: Could not import ScenarioRunner: {e}")
+        print("Make sure scenario_runner.py is in the same directory.")
+        exit(1)
+    
     # Create an in-memory stage for testing
     from pxr import Usd
     import omni.usd
