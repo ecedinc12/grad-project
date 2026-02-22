@@ -8,7 +8,25 @@
     - Validate GPU access via `torch.cuda.is_available()` within the Isaac Sim Python environment.
     - Confirm `omni.isaac.core` and `omni.replicator.core` importability.
 - [ ] **Project Skeleton Generation**
-    - specific subdirectories: `scripts/`, `assets/environments`, `assets/characters`, `assets/props`, `config/`, `output/`.
+    - Generate structure:
+        ```
+        grad-project/
+        ├── scripts/
+        │   ├── scene_builder.py      # Environment construction
+        │   ├── scenario_runner.py    # Hazard event orchestration  
+        │   ├── domain_randomizer.py  # DR configuration
+        │   └── data_writer.py        # Annotation export
+        ├── assets/
+        │   ├── environments/         # USD scene files
+        │   ├── characters/           # Worker models + animations
+        │   └── props/                # Industrial assets (machinery, PPE)
+        ├── config/
+        │   └── generation_config.yaml
+        ├── output/                   # Generated datasets (gitignored)
+        ├── spec.md
+        ├── task.md
+        └── instructions.md
+        ```
     - Initialize `config/generation_config.yaml` with default parameters (resolution: 1920x1080, samples: 100).
 
 ## 2. Environment & Asset Pipeline
@@ -43,7 +61,6 @@
 ## 4. Sensor & Replicator Configuration (`scripts/data_writer.py`)
 - [ ] **Sensor Configuration**
     - **RGB:** `omni.isaac.sensor.Camera` configured for standard color output (write to .png).
-    - **Depth:** `omni.isaac.sensor.Camera` with `type="distance_to_image_plane"` (write to .npy or .exr).
 - [ ] **Camera Rigging**
     - Instantiate `CameraRig` class wrapping `omni.isaac.sensor.Camera`.
     - **Orbit Logic:** Implement spherical coordinate sampler (Radius: $R$, Theta: $\theta$, Phi: $\phi$) -> Cartesian ($x,y,z$) transformation for camera placement.
@@ -55,7 +72,6 @@
     - Custom Writer inheriting from `omni.replicator.core.Writer`.
     - **Output Structure:**
         - RGB: `.png` (lossless).
-        - Depth: `.npy` or `.exr` (32-bit float).
         - Annotations: JSON (COCO style).
     - **VRAM Safety:** Implement `replicator.orchestrator.step(rt_subframes=N)` to clear buffers between writes.
 
