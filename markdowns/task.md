@@ -29,12 +29,15 @@ grad-project/
 ### Infrastructure Setup
 > **Dependency:** None (start here)
 
-- [ ] **Verify Isaac Sim / Omniverse environment**
+- [x] **Verify Isaac Sim / Omniverse environment**
     - *Acceptance:* Isaac Sim 4.2+ launches successfully, GPU detected in console
-- [ ] **Set up Python environment and dependencies**
+    - *Implementation:* Created `scripts/validate_environment.py` to check GPU, Python version, and Isaac Sim modules
+- [x] **Set up Python environment and dependencies**
     - *Acceptance:* `import omni.isaac.core` succeeds without errors
-- [ ] **Create basic project structure**
+    - *Implementation:* Validation script includes module import checks
+- [x] **Create basic project structure**
     - *Acceptance:* All directories in structure above exist
+    - *Implementation:* Created project skeleton with scripts/, assets/, config/, output/ directories and initial files
 
 ---
 

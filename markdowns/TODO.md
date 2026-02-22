@@ -3,13 +3,13 @@
 > **Reference:** [task.md](./task.md) | [spec.md](./spec.md)
 
 ## 1. Infrastructure Initialization
-- [ ] **Environment Validation**
+- [x] **Environment Validation**
     - Execute `isaac-sim.sh --headless` to verify headless boot.
         - **Note:** Use the Isaac Sim wrapper script which automatically sets up the correct Python environment and paths.
         - This approach avoids manual virtual environment management and ensures all Isaac Sim modules are available.
     - Validate GPU access via `torch.cuda.is_available()` within the Isaac Sim Python environment.
     - Confirm `omni.isaac.core` and `omni.replicator.core` importability.
-- [ ] **Project Skeleton Generation**
+- [x] **Project Skeleton Generation**
     - Generate structure:
         ```
         grad-project/
