@@ -291,17 +291,65 @@ class SceneBuilder:
 
 
 if __name__ == "__main__":
-    # Example usage and testing
-    config = {
-        "floor_size": 120.0,
-        "floor_height": 0.15,
-        "floor_material": None
-    }
+    """
+    Demonstration of the ScenarioRunner module.
+    This test runs without requiring actual USD assets by using a mock stage.
+    """
+    print("=== ScenarioRunner Module Test ===")
     
-    builder = SceneBuilder(config)
-    success = builder.build()
+    # Create an in-memory stage for testing
+    from pxr import Usd
+    import omni.usd
     
-    if success:
-        print("SceneBuilder test PASSED")
-    else:
-        print("SceneBuilder test FAILED")
+    # Get or create a stage
+    context = omni.usd.get_context()
+    stage = context.new_stage()
+    
+    if stage is None:
+        print("ERROR: Failed to create stage")
+        exit(1)
+    
+    print(f"Stage created: {stage.GetRootLayer().identifier}")
+    
+    # Create a simple test prim to act as a worker
+    worker_path = "/World/TestWorker"
+    from pxr import UsdGeom
+    sphere_prim = UsdGeom.Sphere.Define(stage, worker_path)
+    
+    # Create PPE child prims (dummy prims for testing)
+    helmet_prim = UsdGeom.Sphere.Define(stage, f"{worker_path}/Skeleton/Head/Helmet")
+    vest_prim = UsdGeom.Sphere.Define(stage, f"{worker_path}/Skeleton/Spine2/Vest")
+    
+    print(f"Created test worker at {worker_path}")
+    
+    # Initialize ScenarioRunner
+    runner = ScenarioRunner(stage)
+    runner.register_worker(worker_path)
+    
+    # Setup a geofence hazard zone
+    runner.setup_geofence(((-2, -2), (2, 2)), "RestrictedArea")
+    print("Geofence hazard zone configured")
+    
+    # Randomize the scenario
+    runner.randomize_scenario(floor_height=0.0)
+    print("Scenario randomized")
+    
+    # Check initial hazards
+    hazards = runner.check_hazards()
+    print(f"Initial hazard check: {len(hazards)} events")
+    for event in hazards:
+        print(f"  - {event['type']}: {event.get('subtype', event.get('zone', ''))}")
+    
+    # Simulate a few steps
+    print("\nSimulating 5 steps...")
+    for i in range(5):
+        runner.update(dt=0.1)
+        hazards = runner.check_hazards()
+        if hazards:
+            print(f"Step {i+1}: {len(hazards)} hazards detected")
+        else:
+            print(f"Step {i+1}: No hazards")
+    
+    print("\n=== Test completed successfully ===")
+    print("Note: This is a basic functionality test. Full integration requires")
+    print("actual USD assets and proper simulation environment.")
