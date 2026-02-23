@@ -9,7 +9,7 @@ import sys
 import os
 import gc
 import time
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 import yaml
 
 # CRITICAL: SimulationApp must be imported before any other Omniverse imports

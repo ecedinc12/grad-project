@@ -8,7 +8,7 @@ from typing import List, Tuple, Optional, Dict, Any
 import random
 import numpy as np
 
-from pxr import Usd, UsdGeom, UsdLux, Gf, Sdf
+from pxr import Usd, UsdGeom, UsdLux, Gf, Sdf, UsdPhysics
 import omni.replicator.core as rep
 from omni.isaac.core.utils.prims import create_prim, delete_prim
 
