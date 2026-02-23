@@ -25,3 +25,15 @@
 - [ ] **Kinematic Static Logic:** Distractors are set to `Kinematic=True` but never moved after spawning.
     - *Impact:* They act as static walls rather than dynamic visual noise.
     - *Fix:* Apply random velocity or keyframed motion, or switch to dynamic rigid bodies with 0 gravity.
+
+## 3. Scenario Runner (`scripts/scenario_runner.py`)
+
+- [x] **Teleportation vs Physics:** `WorkerController.update` uses `set_world_pose` to move workers.
+    - *Impact:* Breaks physics collisions (tunneling) and momentum calculations.
+    - *Fix:* Implemented atomic `_set_transform` which resets rigid body velocities to prevent explosions during kinematic updates.
+- [x] **Ghost Collisions (PPE):** `toggle_ppe` only changes visibility.
+    - *Impact:* Invisible helmets/vests still have active colliders, causing objects to bounce off "thin air".
+    - *Fix:* Toggles `UsdPhysics.CollisionAPI.collisionEnabled` alongside visibility.
+- [x] **Transform Race Condition:** `_set_position` and `_set_rotation_z` independently query and set transforms.
+    - *Impact:* Potential jitter or overriding of updates if called sequentially in the same frame.
+    - *Fix:* Merged into single `_set_transform` call in update loop.
