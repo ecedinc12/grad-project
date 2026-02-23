@@ -49,3 +49,15 @@
 - [x] **Fragile URL Parsing:** `split("/", 3)` on `omniverse://` URIs is unreliable for extracting path suffixes.
     - *Impact:* Asset loading failures if the Nucleus URL format varies slightly (e.g. localhost vs IP).
     - *Fix:* Use `omni.client.break_url` for safe parsing.
+
+## 5. Headless Runner (`scripts/headless_runner.py`)
+
+- [ ] **Double Stepping Physics:** The main loop calls both `self.world.step(render=False)` and `rep.orchestrator.step()`.
+    - *Impact:* Physics simulation advances twice per frame generation. `rep.orchestrator.step()` is designed to handle the stepping when data acquisition is active. This causes synchronization issues between the "physics state" (hazards) and the "rendered state" (images).
+    - *Fix:* Use `rep.orchestrator.step()` as the primary stepping mechanism during data generation.
+- [ ] **Broken Frame Counter:** `self.frame_count` is never incremented inside the generation loop.
+    - *Impact:* Final FPS and frame count statistics are 0.
+    - *Fix:* Increment `self.frame_count` inside the loop.
+- [ ] **Global Side Effects:** `SimulationApp` is instantiated at the module level, and `shutdown()` closes it.
+    - *Impact:* Difficult to unit test `HeadlessRunner` class without launching a full simulation instance.
+    - *Fix:* Isolate `SimulationApp` lifecycle to the `main()` block or use a singleton pattern that respects existing instances.
