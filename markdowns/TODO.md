@@ -3,98 +3,68 @@
 > **Reference:** [task.md](./task.md) | [spec.md](./spec.md)
 
 ## 1. Infrastructure Initialization
-- [x] **Environment Validation**
-    - Execute `isaac-sim.sh --headless` to verify headless boot.
-        - **Note:** Use the Isaac Sim wrapper script which automatically sets up the correct Python environment and paths.
-        - This approach avoids manual virtual environment management and ensures all Isaac Sim modules are available.
-    - Validate GPU access via `torch.cuda.is_available()` within the Isaac Sim Python environment.
-    - Confirm `omni.isaac.core` and `omni.replicator.core` importability.
+- [x] **Environment Validation** (`scripts/validate_environment.py`)
+    - [x] Execute `isaac-sim.sh --headless` to verify headless boot.
+    - [x] Validate GPU access via `torch.cuda.is_available()`.
+    - [x] Confirm `omni.isaac.core` and `omni.replicator.core` importability.
 - [x] **Project Skeleton Generation**
-    - Generate structure:
-        ```
-        grad-project/
-        ├── scripts/
-        │   ├── scene_builder.py      # Environment construction
-        │   ├── scenario_runner.py    # Hazard event orchestration  
-        │   ├── domain_randomizer.py  # DR configuration
-        │   └── data_writer.py        # Annotation export
-        ├── assets/
-        │   ├── environments/         # USD scene files
-        │   ├── characters/           # Worker models + animations
-        │   └── props/                # Industrial assets (machinery, PPE)
-        ├── config/
-        │   └── generation_config.yaml
-        ├── output/                   # Generated datasets (gitignored)
-        ├── spec.md
-        ├── task.md
-        └── instructions.md
-        ```
-    - Initialize `config/generation_config.yaml` with default parameters (resolution: 1920x1080, samples: 100).
+    - [x] Generate directory structure (scripts/, assets/, config/, output/).
+    - [x] Initialize `config/generation_config.yaml`.
 
 ## 2. Environment & Asset Pipeline
-- [ ] **Base Scene Construction (`scripts/scene_builder.py`)**
-    - Implement `create_stage()` using `omni.usr.get_context().new_stage()`.
-    - Setup default lighting: Dome Light (HDRI) + distant light for shadows.
-    - **Optimization:** Configure PhysicsScene for GPU dynamics (Broadphase: MBP, Solver: TGS).
+- [x] **Base Scene Construction (`scripts/scene_builder.py`)**
+    - [x] Implement `create_stage()`.
+    - [x] Setup default lighting: Dome Light + Distant Light.
+    - [x] Configure PhysicsScene for GPU dynamics (MBP/TGS).
+    - [x] Implement `create_industrial_floor()` with collisions.
 - [ ] **Asset Ingestion & Optimization**
-    - **Geometry:** Import industrial props. Sanitize mesh complexity (<50k tris).
-    - **Materials:** Enforce MDL graph conversion.
-    - **Instancing:** Implement `omni.isaac.core.prims.GeometryPrim` with `instancer_path` for repetitive assets (pallets, racking).
-    - **Texture Optimization:** Resize >2K textures to 2048px maximum dimension. Convert to BC7/DDS using NVTT or equivalent.
-- [ ] **Character Integration**
-    - Import rigged characters (USD Skel).
-    - Verify `SkelAnimation` bindings.
-    - Setup "PPE Slots" as toggleable Xforms (parenting helmet/vest meshes to bone attach points).
+    - [ ] **Map Default Nucleus Assets:** Identify paths for built-in Isaac Sim assets (e.g., `omniverse://localhost/NVIDIA/Assets/DigitalTwin/Assets/Warehouse/`).
+    - [ ] **Instancing Strategy:** Verify `SceneBuilder.add_asset_instance` handles Nucleus paths correctly.
+    - [ ] **Character Integration:**
+        - [x] `WorkerController` class structure defined.
+        - [ ] Link actual `UsdSkel` assets to the controller.
+        - [ ] Verify PPE toggle logic against actual asset hierarchy (`Helmet`, `Vest` Xforms).
 
 ## 3. Simulation Logic & Orchestration
-- [ ] **Navigation System (`scripts/scenario_runner.py`)**
-    - Implement `omni.isaac.motion_generation` or simple waypoint interpolation for worker movement.
-    - Create `WorkerController` class to manage state: `IDLE`, `WALK`, `HAZARD_INTERACTION`.
-- [ ] **Hazard Scripting**
-    - **PPE Compliance:** Boolean toggles on PPE visibility attributes.
-    - **Geofence Breach:** use `omni.isaac.core.utils.prims.get_prim_at_path` to detect worker centroid vs. hazard zone volume.
+- [x] **Navigation System (`scripts/scenario_runner.py`)**
+    - [x] Create `WorkerController` class (States: `IDLE`, `WALK`).
+    - [x] Implement basic linear movement logic.
+- [x] **Hazard Scripting**
+    - [x] **PPE Compliance:** Boolean toggles implemented in `WorkerController`.
+    - [x] **Geofence Breach:** `ScenarioRunner` checks worker coordinates against hazard bounds.
 - [ ] **Negative Sample Generator**
-    - Implement `spawn_empty_variant()`: Disable spawning of workers/hazards for 10-15% of total generation steps.
-    - Randomize camera position within scene bounds during empty variant.
-    - Inject `{"is_negative": True}` into the annotation dictionary for all frames captured in this mode.
+    - [ ] Implement `spawn_empty_variant()`: Logic to disable workers/hazards for 10-15% of frames.
+    - [ ] Inject `{"is_negative": True}` into annotation metadata.
 - [ ] **Physics Triggers**
-    - Setup Collision Callbacks for "Near Miss" or "Accident" events.
+    - [ ] Setup Collision Callbacks for "Near Miss" events (using `omni.isaac.core.physics`).
 
-## 4. Sensor & Replicator Configuration (`scripts/data_writer.py`)
+## 4. Sensor & Replicator Configuration (URGENT: Missing `scripts/data_writer.py`)
 - [ ] **Sensor Configuration**
-    - **RGB:** `omni.isaac.sensor.Camera` configured for standard color output (write to .png).
+    - [ ] **RGB:** Configure `omni.isaac.sensor.Camera` for standard output.
 - [ ] **Camera Rigging**
-    - Instantiate `CameraRig` class wrapping `omni.isaac.sensor.Camera`.
-    - **Orbit Logic:** Implement spherical coordinate sampler (Radius: $R$, Theta: $\theta$, Phi: $\phi$) -> Cartesian ($x,y,z$) transformation for camera placement.
-    - Focal Length Randomization: `camera.set_focal_length(random.uniform(18.0, 85.0))`.
+    - [ ] Instantiate `CameraRig` class.
+    - [ ] **Orbit Logic:** Implement spherical coordinate sampler ($R, \theta, \phi$).
+    - [ ] Randomize Focal Length (18mm - 85mm).
 - [ ] **Annotator Registry (Omni.Replicator)**
-    - Register `bounding_box_2d_tight`, `semantic_segmentation`, `instance_segmentation`.
-    - Map semantic labels: `class: worker`, `class: forklift`, `class: helmet`, `class: no_helmet`.
+    - [ ] Register `bounding_box_2d_tight`, `semantic_segmentation`.
+    - [ ] Map semantic labels: `class: worker`, `class: forklift`, `class: helmet`, `class: no_helmet`.
 - [ ] **Writer Implementation**
-    - Custom Writer inheriting from `omni.replicator.core.Writer`.
-    - **Output Structure:**
-        - RGB: `.png` (lossless).
-        - Annotations: JSON (COCO style).
-    - **VRAM Safety:** Implement `replicator.orchestrator.step(rt_subframes=N)` to clear buffers between writes.
+    - [ ] Create `scripts/data_writer.py`.
+    - [ ] Implement custom Writer inheriting from `omni.replicator.core.Writer`.
+    - [ ] Ensure VRAM safety (step clearing).
 
-## 5. Domain Randomization (DR) (`scripts/domain_randomizer.py`)
+## 5. Domain Randomization (URGENT: Missing `scripts/domain_randomizer.py`)
 - [ ] **Visual DR**
-    - **Lighting:** Randomize Dome Light intensity (500-3000 lux) and rotation.
-    - **Materials:** `omni.replicator.core.randomizer.materials` on background props.
+    - [ ] **Lighting:** Randomize Dome Light intensity/rotation.
+    - [ ] **Materials:** `omni.replicator.core.randomizer.materials` on background props.
 - [ ] **Scene DR**
-    - **Distractors:** Spawn flying geometric primitives (cubes/spheres) with collision disabled to test occlusion robustness.
-    - **Pose:** Randomize rotation/scale of static assets $\pm 10\%$.
+    - [ ] **Distractors:** Spawn flying primitives (cubes/spheres) to test occlusion.
+    - [ ] **Pose:** Randomize rotation/scale of static assets.
 
 ## 6. Execution & Validation
 - [ ] **Batch Runner**
-    - CLI wrapper: `python scripts/headless_runner.py --config config/generation_config.yaml`.
-    - Error handling: Try/Catch block around `step()` to catch CUDA OOM errors; auto-restart logic.
+    - [ ] CLI wrapper: `python scripts/headless_runner.py` (Main Entry Point).
+    - [ ] Integration: Connect `SceneBuilder`, `ScenarioRunner`, and `DataWriter`.
 - [ ] **Quality Assurance**
-    - Script `scripts/validate_dataset.py`:
-        - Check JSON validity.
-        - Check image readability.
-        - Verify BBox coordinates $\in [0, W] \times [0, H]$.
-    - **Metric Validation:**
-        - Verify Negative Sample ratio (Target: 10-15% of total frames).
-        - Verify Annotation Density (Objects per frame > 0 for positive samples).
-        - Ensure annotation coverage >95% of visible objects in positive samples.
+    - [ ] Script `scripts/validate_dataset.py` to check output JSON/PNG.
+    - [ ] Verify BBox coordinates and class balance.
