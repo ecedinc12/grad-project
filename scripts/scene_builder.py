@@ -150,6 +150,102 @@ class SceneBuilder:
             }
         )
     
+    def add_asset_from_nucleus(self, 
+                              path_suffix: str,
+                              prim_path: str,
+                              position: Gf.Vec3f = Gf.Vec3f(0, 0, 0),
+                              rotation: Gf.Vec3f = Gf.Vec3f(0, 0, 0),
+                              scale: float = 1.0,
+                              max_retries: int = 3) -> bool:
+        """
+        Robust wrapper to load assets from Nucleus server with retry logic.
+        
+        Args:
+            path_suffix: Relative path on Nucleus server (e.g., "/NVIDIA/Assets/...")
+            prim_path: Desired prim path in the stage.
+            position: XYZ position.
+            rotation: Euler angles in degrees (XYZ).
+            scale: Uniform scale factor.
+            max_retries: Number of retry attempts on failure.
+            
+        Returns:
+            True if successful, False otherwise.
+        """
+        import time
+        import omni.client
+        
+        # Construct full Nucleus URL
+        # Load config to get nucleus_server
+        try:
+            import yaml
+            with open("config/generation_config.yaml", 'r') as f:
+                config = yaml.safe_load(f)
+            nucleus_server = config['assets']['nucleus_server'].rstrip('/')
+        except Exception as e:
+            print(f"[SceneBuilder] Failed to load config: {e}")
+            return False
+        
+        full_url = f"{nucleus_server}{path_suffix}"
+        
+        # Validate file existence before attempting to reference
+        print(f"[SceneBuilder] Checking asset existence: {full_url}")
+        result = omni.client.stat(full_url)
+        if result != omni.client.Result.OK:
+            print(f"[SceneBuilder] Asset not found or inaccessible: {full_url}")
+            return False
+        
+        # Retry loop for adding reference
+        for attempt in range(max_retries):
+            try:
+                if attempt > 0:
+                    print(f"[SceneBuilder] Retry attempt {attempt + 1}/{max_retries} for {path_suffix}")
+                    time.sleep(0.5 * attempt)  # Exponential backoff
+                
+                # Use instancing if this asset has been loaded before
+                if full_url in self._asset_instances:
+                    stage_utils.add_reference_to_stage(
+                        usd_path=full_url,
+                        prim_path=prim_path,
+                        instanceable=True
+                    )
+                else:
+                    stage_utils.add_reference_to_stage(
+                        usd_path=full_url,
+                        prim_path=prim_path
+                    )
+                    self._asset_instances[full_url] = [prim_path]
+                
+                # Set transform
+                prim = self.stage.GetPrimAtPath(prim_path)
+                if prim:
+                    xform = UsdGeom.Xformable(prim)
+                    # Clear existing ops to avoid conflicts
+                    xform.ClearXformOpOrder()
+                    
+                    translate_op = xform.AddTranslateOp()
+                    rotate_op = xform.AddRotateXYZOp()
+                    scale_op = xform.AddScaleOp()
+                    
+                    translate_op.Set(position)
+                    rotate_op.Set(Gf.Vec3f(
+                        np.radians(rotation[0]),
+                        np.radians(rotation[1]),
+                        np.radians(rotation[2])
+                    ))
+                    scale_op.Set(Gf.Vec3f(scale, scale, scale))
+                    
+                    print(f"[SceneBuilder] Asset instance added: {prim_path} from {path_suffix}")
+                    return True
+                    
+            except Exception as e:
+                print(f"[SceneBuilder] Attempt {attempt + 1} failed for {path_suffix}: {e}")
+                if attempt == max_retries - 1:
+                    print(f"[SceneBuilder] All {max_retries} attempts failed for {path_suffix}")
+                    return False
+                continue
+        
+        return False
+
     def add_asset_instance(self, 
                           usd_path: str, 
                           prim_path: str,
@@ -169,6 +265,28 @@ class SceneBuilder:
         Returns:
             True if successful, False otherwise.
         """
+        # For Nucleus paths, use the new robust method
+        if usd_path.startswith("omniverse://") or usd_path.startswith("/NVIDIA/"):
+            # Extract path suffix
+            if usd_path.startswith("omniverse://"):
+                # Find the path after the server address
+                parts = usd_path.split("/", 3)
+                if len(parts) >= 4:
+                    path_suffix = "/" + parts[3]
+                else:
+                    path_suffix = usd_path
+            else:
+                path_suffix = usd_path
+            
+            return self.add_asset_from_nucleus(
+                path_suffix=path_suffix,
+                prim_path=prim_path,
+                position=position,
+                rotation=rotation,
+                scale=scale
+            )
+        
+        # Fallback for local paths
         try:
             # Use instancing if this asset has been loaded before
             if usd_path in self._asset_instances:
@@ -190,6 +308,9 @@ class SceneBuilder:
             prim = self.stage.GetPrimAtPath(prim_path)
             if prim:
                 xform = UsdGeom.Xformable(prim)
+                # Clear existing ops
+                xform.ClearXformOpOrder()
+                
                 translate_op = xform.AddTranslateOp()
                 rotate_op = xform.AddRotateXYZOp()
                 scale_op = xform.AddScaleOp()

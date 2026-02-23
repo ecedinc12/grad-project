@@ -77,12 +77,82 @@ def check_project_structure():
 def check_config_file():
     """Verify generation config file exists and is valid."""
     config_path = "config/generation_config.yaml"
-    if os.path.exists(config_path):
-        print(f"✓ Config file exists: {config_path}")
-        # Basic validation could be added here
-        return True
-    else:
+    if not os.path.exists(config_path):
         print(f"✗ Missing config file: {config_path}")
+        return False
+    
+    try:
+        import yaml
+        with open(config_path, 'r') as f:
+            config = yaml.safe_load(f)
+        
+        # Validate required sections
+        required_sections = ['output', 'assets', 'camera']
+        for section in required_sections:
+            if section not in config:
+                print(f"✗ Config missing required section: {section}")
+                return False
+        
+        # Validate output section
+        output = config['output']
+        if 'base_dir' not in output or 'resolution' not in output or 'format' not in output:
+            print(f"✗ Output section missing required fields")
+            return False
+        
+        # Validate assets section
+        assets = config['assets']
+        if 'nucleus_server' not in assets or 'worker_usd' not in assets or 'prop_root' not in assets:
+            print(f"✗ Assets section missing required fields")
+            return False
+        
+        # Validate camera section
+        camera = config['camera']
+        required_camera_fields = ['focal_length_range', 'orbit_radius', 'elevation_range']
+        for field in required_camera_fields:
+            if field not in camera:
+                print(f"✗ Camera section missing field: {field}")
+                return False
+        
+        print(f"✓ Config file exists and is valid: {config_path}")
+        return True
+        
+    except ImportError:
+        print("✗ PyYAML not installed. Install with: pip install PyYAML")
+        return False
+    except yaml.YAMLError as e:
+        print(f"✗ YAML parsing error: {e}")
+        return False
+    except Exception as e:
+        print(f"✗ Unexpected error reading config: {e}")
+        return False
+
+def check_nucleus_connectivity():
+    """Check connectivity to Nucleus server specified in config."""
+    try:
+        import yaml
+        with open("config/generation_config.yaml", 'r') as f:
+            config = yaml.safe_load(f)
+        
+        nucleus_server = config['assets']['nucleus_server']
+        
+        # Try to import omni.client
+        try:
+            import omni.client
+        except ImportError:
+            print("✗ Cannot check Nucleus connectivity: omni.client not available")
+            return False
+        
+        # Check if we can stat the server
+        result = omni.client.stat(nucleus_server)
+        if result == omni.client.Result.OK:
+            print(f"✓ Nucleus server accessible: {nucleus_server}")
+            return True
+        else:
+            print(f"✗ Cannot access Nucleus server {nucleus_server}: {result}")
+            return False
+            
+    except Exception as e:
+        print(f"✗ Error checking Nucleus connectivity: {e}")
         return False
 
 def main():
@@ -99,6 +169,12 @@ def main():
     results.append(("Isaac Modules", check_isaac_modules()))
     results.append(("Project Structure", check_project_structure()))
     results.append(("Config File", check_config_file()))
+    
+    # Only check Nucleus connectivity if config file is valid
+    if results[-1][1]:  # Last check was config file
+        results.append(("Nucleus Connectivity", check_nucleus_connectivity()))
+    else:
+        results.append(("Nucleus Connectivity", False))
     
     print("=" * 60)
     print("Validation Summary:")
