@@ -58,7 +58,7 @@ class SceneBuilder:
         print(f"[SceneBuilder] Up axis: {up_axis}, Units: {meters_per_unit} meters")
     
     def setup_physics(self, 
-                      gravity: Gf.Vec3f = Gf.Vec3f(0.0, 0.0, -9.81),
+                      gravity: Optional[Gf.Vec3f] = None,
                       broadphase_type: str = "MBP",
                       solver_type: str = "TGS",
                       enable_gpu_dynamics: bool = True) -> None:
@@ -66,17 +66,27 @@ class SceneBuilder:
         Configure PhysicsScene for GPU dynamics.
         
         Args:
-            gravity: Gravity vector (m/s²).
+            gravity: Gravity vector (m/s²). If None, determined by stage Up-Axis.
             broadphase_type: Broadphase algorithm ("MBP", "PCM", "ABP").
             solver_type: Solver type ("TGS" or "PGS").
             enable_gpu_dynamics: Enable GPU acceleration for physics.
         """
+        # Determine gravity based on stage up-axis if not provided
+        if gravity is None:
+            up_axis = UsdGeom.GetStageUpAxis(self.stage)
+            if up_axis == UsdGeom.Tokens.z:
+                gravity = Gf.Vec3f(0.0, 0.0, -9.81)
+            else:
+                gravity = Gf.Vec3f(0.0, -9.81, 0.0)
+
         # Create or get the physics scene prim
         if not self.stage.GetPrimAtPath(self._physics_scene_path):
             physics_scene = UsdPhysics.Scene.Define(self.stage, self._physics_scene_path)
             physics_scene.CreateGravityAttr().Set(gravity)
         else:
             physics_scene = UsdPhysics.Scene.Get(self.stage, self._physics_scene_path)
+            # Update gravity if it was passed explicitly or calculated
+            physics_scene.GetGravityAttr().Set(gravity)
         
         # Configure PhysX-specific settings
         prim = self.stage.GetPrimAtPath(self._physics_scene_path)
@@ -208,6 +218,7 @@ class SceneBuilder:
                         prim_path=prim_path,
                         instanceable=True
                     )
+                    self._asset_instances[full_url].append(prim_path)
                 else:
                     stage_utils.add_reference_to_stage(
                         usd_path=full_url,
@@ -267,14 +278,12 @@ class SceneBuilder:
         """
         # For Nucleus paths, use the new robust method
         if usd_path.startswith("omniverse://") or usd_path.startswith("/NVIDIA/"):
+            import omni.client
             # Extract path suffix
             if usd_path.startswith("omniverse://"):
-                # Find the path after the server address
-                parts = usd_path.split("/", 3)
-                if len(parts) >= 4:
-                    path_suffix = "/" + parts[3]
-                else:
-                    path_suffix = usd_path
+                # Use robust URL parsing
+                result, _, _, path = omni.client.break_url(usd_path)
+                path_suffix = path
             else:
                 path_suffix = usd_path
             
@@ -296,6 +305,7 @@ class SceneBuilder:
                     prim_path=prim_path,
                     instanceable=True
                 )
+                self._asset_instances[usd_path].append(prim_path)
             else:
                 # First instance - load normally
                 stage_utils.add_reference_to_stage(

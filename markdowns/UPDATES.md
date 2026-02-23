@@ -37,3 +37,15 @@
 - [x] **Transform Race Condition:** `_set_position` and `_set_rotation_z` independently query and set transforms.
     - *Impact:* Potential jitter or overriding of updates if called sequentially in the same frame.
     - *Fix:* Merged into single `_set_transform` call in update loop.
+
+## 4. Scene Builder (`scripts/scene_builder.py`)
+
+- [x] **Instance Tracking Logic:** `add_asset_from_nucleus` fails to append new instance paths to `self._asset_instances` after the first instance is created.
+    - *Impact:* Incomplete registry of assets, making it impossible to randomize or manage instances later in the pipeline.
+    - *Fix:* Add `self._asset_instances[full_url].append(prim_path)` in the instance creation block.
+- [x] **Gravity vs Up-Axis Mismatch:** `setup_physics` defaults to Z-up gravity `(0,0,-9.81)` even if the stage is configured as Y-up.
+    - *Impact:* Physics will pull objects "sideways" if the coordinate system doesn't match the default.
+    - *Fix:* Dynamically check `UsdGeom.GetStageUpAxis` or enforce consistency.
+- [x] **Fragile URL Parsing:** `split("/", 3)` on `omniverse://` URIs is unreliable for extracting path suffixes.
+    - *Impact:* Asset loading failures if the Nucleus URL format varies slightly (e.g. localhost vs IP).
+    - *Fix:* Use `omni.client.break_url` for safe parsing.
