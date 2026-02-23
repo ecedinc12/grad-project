@@ -114,7 +114,7 @@ class DomainRandomizer:
                 }
             )
             
-            # Add physics (Kinematic)
+            # Add physics (Dynamic Rigid Body)
             prim = self.stage.GetPrimAtPath(prim_path)
             if prim:
                 # Transform ops
@@ -126,8 +126,13 @@ class DomainRandomizer:
 
                 # Physics
                 rigid_body_api = UsdPhysics.RigidBodyAPI.Apply(prim)
-                rigid_body_api.CreateKinematicEnabledAttr().Set(True)
                 rigid_body_api.CreateRigidBodyEnabledAttr().Set(True)
+                # We want them to move with physics, so Kinematic=False
+                rigid_body_api.CreateKinematicEnabledAttr().Set(False)
+                
+                # Add Mass API to ensure they have mass properties
+                UsdPhysics.MassAPI.Apply(prim)
+                
                 UsdPhysics.CollisionAPI.Apply(prim)
             
             self.distractor_paths.append(prim_path)
@@ -186,14 +191,16 @@ class DomainRandomizer:
             # Apply random velocity
             if prim.HasAPI(UsdPhysics.RigidBodyAPI):
                 rb = UsdPhysics.RigidBodyAPI(prim)
-                # Random velocity vector (small drift)
+                
+                # Random linear velocity (drift)
                 vel = Gf.Vec3f(
-                    random.uniform(-1.0, 1.0), 
-                    random.uniform(-1.0, 1.0), 
-                    random.uniform(-0.5, 0.5)
+                    random.uniform(-2.0, 2.0), 
+                    random.uniform(-2.0, 2.0), 
+                    random.uniform(-1.0, 1.0)
                 )
                 rb.GetVelocityAttr().Set(vel)
-                # Add some random angular velocity
+                
+                # Random angular velocity (spin)
                 ang_vel = Gf.Vec3f(
                     random.uniform(-90, 90),
                     random.uniform(-90, 90),
@@ -216,6 +223,12 @@ class DomainRandomizer:
             prim = self.stage.GetPrimAtPath(path)
             if prim:
                 UsdGeom.Imageable(prim).MakeInvisible()
+                
+                # Reset physics state to prevent them from "exploding" when re-appearing
+                if prim.HasAPI(UsdPhysics.RigidBodyAPI):
+                    rb = UsdPhysics.RigidBodyAPI(prim)
+                    rb.GetVelocityAttr().Set(Gf.Vec3f(0,0,0))
+                    rb.GetAngularVelocityAttr().Set(Gf.Vec3f(0,0,0))
         
         print("[DomainRandomizer] Reset distractor pool")
     
@@ -230,12 +243,14 @@ class DomainRandomizer:
             color_temp_range=(3500, 5500)
         )
         
-        # Randomly spawn or clear distractors (30% chance to change)
+        # Randomly spawn or clear distractors (30% chance to change configuration)
         if random.random() < 0.3:
-            if self.distractor_paths:
-                self.clear_distractors()
+            if random.random() < 0.5:
+                # Spawn new set
+                self.spawn_distractors(n=random.randint(2, 6))
             else:
-                self.spawn_distractors(n=random.randint(2, 5))
+                # Clear existing
+                self.clear_distractors()
         
         print("[DomainRandomizer] Applied frame randomization")
 
