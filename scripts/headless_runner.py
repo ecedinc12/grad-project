@@ -15,21 +15,17 @@ import yaml
 # CRITICAL: SimulationApp must be imported before any other Omniverse imports
 from omni.isaac.kit import SimulationApp
 
-# Configure headless mode
-config = {"headless": True, "width": 1920, "height": 1080}
-simulation_app = SimulationApp(config)
+# Global simulation app placeholder
+simulation_app = None
 
-# Now import other Omniverse modules
-from omni.isaac.core import World
-from omni.isaac.core.utils.stage import create_new_stage
-import omni.replicator.core as rep
-
-# Import project modules
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from scene_builder import SceneBuilder
-from scenario_runner import ScenarioRunner
-from domain_randomizer import DomainRandomizer
-from data_writer import SafetyDatasetWriter
+# Delayed imports
+World = None
+create_new_stage = None
+rep = None
+SceneBuilder = None
+ScenarioRunner = None
+DomainRandomizer = None
+SafetyDatasetWriter = None
 
 
 class HeadlessRunner:
@@ -48,11 +44,11 @@ class HeadlessRunner:
         self.config = self._load_config()
         
         # Core components
-        self.world: Optional[World] = None
-        self.scene_builder: Optional[SceneBuilder] = None
-        self.scenario_runner: Optional[ScenarioRunner] = None
-        self.domain_randomizer: Optional[DomainRandomizer] = None
-        self.data_writer: Optional[SafetyDatasetWriter] = None
+        self.world = None
+        self.scene_builder = None
+        self.scenario_runner = None
+        self.domain_randomizer = None
+        self.data_writer = None
         
         # State
         self.frame_count = 0
@@ -125,15 +121,50 @@ class HeadlessRunner:
                 annotation_format="kitti"
             )
             
-            # Attach writer to Replicator
-            rep.WriterRegistry.register(self.data_writer)
+            # Setup Replicator Camera and Attachment
+            self._setup_replicator()
             
             print("[HeadlessRunner] All components initialized successfully")
             return True
             
         except Exception as e:
             print(f"[HeadlessRunner] Initialization failed: {e}")
+            import traceback
+            traceback.print_exc()
             return False
+
+    def _setup_replicator(self):
+        """Configure Replicator render products and attach writer."""
+        # Create a render product from the default viewport or a custom camera
+        # For headless, we usually create a camera
+        from omni.isaac.core.utils.prims import create_prim
+        
+        camera_path = "/World/Camera"
+        create_prim(camera_path, "Camera", attributes={
+            "focusDistance": 400, 
+            "focalLength": 24
+        })
+        
+        # Position camera
+        from pxr import Gf, UsdGeom
+        camera_prim = self.world.stage.GetPrimAtPath(camera_path)
+        xform = UsdGeom.Xformable(camera_prim)
+        # Position camera to look at origin (simple default)
+        transform = Gf.Matrix4d().SetTranslate(Gf.Vec3d(0, -10, 5)) * \
+                   Gf.Matrix4d().SetRotate(Gf.Rotation(Gf.Vec3d(1, 0, 0), 60))
+        # Note: Proper look-at logic should be implemented here or in ScenarioRunner
+        
+        # Create Render Product
+        render_product = rep.create.render_product(camera_path, (1920, 1080))
+        
+        # Attach the writer to the render product
+        # Note: SafetyDatasetWriter is an instance, but Replicator usually works with registered classes.
+        # However, since we have the instance and it inherits from Writer, we can use rep.WriterRegistry 
+        # but the standard way is to use writer.attach(render_product)
+        
+        # Using the writer instance directly
+        self.data_writer.attach([render_product])
+        print(f"[HeadlessRunner] Writer attached to render product: {render_product}")
     
     def _setup_test_workers(self) -> None:
         """Setup test workers for demonstration."""
@@ -180,11 +211,16 @@ class HeadlessRunner:
         
         try:
             for frame_idx in range(self.total_frames):
-                # 1. Physics Step
+                # 1. Physics & Logic Update
                 self.scenario_runner.update(self.dt)
-                self.world.step(render=False)
+                
+                # Note: We rely on rep.orchestrator.step() to advance physics if configured, 
+                # but to ensure our custom logic runs correctly, we sync with world step.
+                # However, calling world.step(render=False) AND rep.orchestrator.step() causes double stepping.
+                # For data generation, Replicator controls the timeline.
                 
                 # 2. Logic Step (Hazard triggers)
+                # Check hazards based on current state (before render)
                 hazards = self.scenario_runner.check_hazards()
                 if hazards and frame_idx % 100 == 0:
                     print(f"[HeadlessRunner] Frame {frame_idx}: {len(hazards)} hazards detected")
@@ -192,9 +228,11 @@ class HeadlessRunner:
                 # 3. Randomization Step
                 self.domain_randomizer.randomize_frame()
                 
-                # 4. Render & Write
-                # Trigger Replicator to capture and write data
+                # 4. Render & Write & Step Physics
+                # This steps the simulation and triggers the writer
                 rep.orchestrator.step()
+                
+                self.frame_count += 1
                 
                 # 5. Periodic cleanup
                 if frame_idx % 100 == 0:
@@ -261,6 +299,25 @@ def main():
                        help="Override total number of frames to generate")
     
     args = parser.parse_args()
+
+    # Initialize SimulationApp here
+    global simulation_app
+    config = {"headless": True, "width": 1920, "height": 1080}
+    simulation_app = SimulationApp(config)
+    
+    # Delayed imports to ensure they happen after SimulationApp start
+    global World, create_new_stage, rep, SceneBuilder, ScenarioRunner, DomainRandomizer, SafetyDatasetWriter
+    
+    from omni.isaac.core import World
+    from omni.isaac.core.utils.stage import create_new_stage
+    import omni.replicator.core as rep
+    
+    # Import project modules
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from scene_builder import SceneBuilder
+    from scenario_runner import ScenarioRunner
+    from domain_randomizer import DomainRandomizer
+    from data_writer import SafetyDatasetWriter
     
     # Initialize and run
     runner = HeadlessRunner(config_path=args.config)
