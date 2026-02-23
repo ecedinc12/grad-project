@@ -11,6 +11,7 @@ import tempfile
 import shutil
 from typing import Dict, List, Any, Optional
 from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 from PIL import Image
@@ -55,6 +56,9 @@ class SafetyDatasetWriter(Writer):
         # Frame counter
         self.frame_count = 0
         
+        # Thread pool for async writing
+        self.executor = ThreadPoolExecutor(max_workers=4)
+        
         # Initialize annotators
         self._init_annotators()
         
@@ -89,20 +93,56 @@ class SafetyDatasetWriter(Writer):
         """
         try:
             # Extract data
+            # Note: Replicator usually returns data on CPU if not specified otherwise,
+            # but we force copy to avoid reference issues in async threads.
+            # Ideally, we should check backend type here.
+            
+            rgb_data = data.get("rgb")
+            bbox_data = data.get("bounding_box_2d_tight")
+            
+            if not rgb_data:
+                return
+
+            # Submit to thread pool
+            self.executor.submit(self._process_and_write_frame, data, self.frame_count)
+            
+            self.frame_count += 1
+            if self.frame_count % 100 == 0:
+                print(f"[SafetyDatasetWriter] Queued {self.frame_count} frames")
+            
+        except Exception as e:
+            print(f"[SafetyDatasetWriter] Error scheduling frame write: {e}")
+
+    def _process_and_write_frame(self, data: Dict[str, Any], frame_number: int) -> None:
+        """
+        Internal method to process and write frame data (runs in thread).
+        """
+        try:
             rgb_data = data.get("rgb", {})
             bbox_data = data.get("bounding_box_2d_tight", {})
-            seg_data = data.get("semantic_segmentation", {})
             
-            # Generate unique frame ID
+            # Generate unique frame ID based on count
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-            frame_id = f"frame_{self.frame_count:06d}_{timestamp}"
+            frame_id = f"frame_{frame_number:06d}_{timestamp}"
             
+            # Get actual resolution from RGB data for clamping
+            img_width = 1920
+            img_height = 1080
+            
+            if "data" in rgb_data and hasattr(rgb_data["data"], "shape"):
+                shape = rgb_data["data"].shape
+                if len(shape) >= 2:
+                    img_height, img_width = shape[:2]
+
+            # Pass resolution explicitly to annotation writer
+            resolution = (img_width, img_height)
+
             # Write RGB image
             rgb_success = self._write_rgb(rgb_data, frame_id)
             
             # Write annotations
             if self.annotation_format == "kitti":
-                anno_success = self._write_kitti_annotations(bbox_data, frame_id)
+                anno_success = self._write_kitti_annotations(bbox_data, frame_id, resolution)
             elif self.annotation_format == "coco":
                 anno_success = self._write_coco_annotations(bbox_data, frame_id)
             else:
@@ -110,15 +150,10 @@ class SafetyDatasetWriter(Writer):
                 anno_success = False
             
             # Write metadata
-            meta_success = self._write_metadata(data, frame_id)
-            
-            if rgb_success and anno_success and meta_success:
-                self.frame_count += 1
-                if self.frame_count % 100 == 0:
-                    print(f"[SafetyDatasetWriter] Written {self.frame_count} frames")
-            
+            self._write_metadata(data, frame_id, frame_number)
+
         except Exception as e:
-            print(f"[SafetyDatasetWriter] Error writing frame: {e}")
+            print(f"[SafetyDatasetWriter] Error writing frame {frame_number}: {e}")
     
     def _write_rgb(self, rgb_data: Dict[str, Any], frame_id: str) -> bool:
         """
@@ -168,64 +203,64 @@ class SafetyDatasetWriter(Writer):
             print(f"[SafetyDatasetWriter] Error writing RGB image: {e}")
             return False
     
-    def _write_kitti_annotations(self, bbox_data: Dict[str, Any], frame_id: str) -> bool:
+    def _write_kitti_annotations(self, bbox_data: Dict[str, Any], frame_id: str, resolution: tuple = (1920, 1080)) -> bool:
         """
         Write annotations in KITTI format.
         
         Args:
             bbox_data: Bounding box annotator data.
             frame_id: Unique frame identifier.
+            resolution: (width, height) of the image.
             
         Returns:
             True if successful, False otherwise.
         """
         try:
             if "data" not in bbox_data:
-                print("[SafetyDatasetWriter] No bounding box data in frame")
                 # This is acceptable for negative samples
-                return True
-            
-            bboxes = bbox_data["data"]
-            class_names = bbox_data.get("info", {}).get("classNames", [])
-            
-            # Prepare KITTI lines
-            lines = []
-            
-            for i, bbox in enumerate(bboxes):
-                if len(bbox) < 4:
-                    continue
+                # Ensure we create an empty file
+                lines = []
+            else:
+                bboxes = bbox_data["data"]
+                class_names = bbox_data.get("info", {}).get("classNames", [])
                 
-                # Extract coordinates
-                x1, y1, x2, y2 = bbox[:4]
+                # Prepare KITTI lines
+                lines = []
                 
-                # Clamp to image bounds (safety check)
-                width = bbox_data.get("width", 1920)
-                height = bbox_data.get("height", 1080)
+                img_width, img_height = resolution
                 
-                x1 = max(0, min(x1, width - 1))
-                y1 = max(0, min(y1, height - 1))
-                x2 = max(0, min(x2, width - 1))
-                y2 = max(0, min(y2, height - 1))
-                
-                # Check for microscopic boxes
-                if (x2 - x1) < 5 or (y2 - y1) < 5:
-                    continue
-                
-                # Get class name and ID
-                class_name = class_names[i] if i < len(class_names) else "unknown"
-                class_id = self.class_mapping.get(class_name, -1)
-                
-                if class_id == -1:
-                    continue
-                
-                # KITTI format: class_name, truncation, occlusion, alpha, 
-                # bbox_left, bbox_top, bbox_right, bbox_bottom, 
-                # dimensions, location, rotation_y, score
-                # We'll fill with placeholders for unused fields
-                line = (f"{class_name} 0.00 0 0.0 "
-                       f"{x1:.2f} {y1:.2f} {x2:.2f} {y2:.2f} "
-                       f"0 0 0 0 0 0 0 0.00")
-                lines.append(line)
+                for i, bbox in enumerate(bboxes):
+                    if len(bbox) < 4:
+                        continue
+                    
+                    # Extract coordinates
+                    x1, y1, x2, y2 = bbox[:4]
+                    
+                    # Clamp to image bounds (safety check)
+                    x1 = max(0, min(x1, img_width - 1))
+                    y1 = max(0, min(y1, img_height - 1))
+                    x2 = max(0, min(x2, img_width - 1))
+                    y2 = max(0, min(y2, img_height - 1))
+                    
+                    # Check for microscopic boxes
+                    if (x2 - x1) < 5 or (y2 - y1) < 5:
+                        continue
+                    
+                    # Get class name and ID
+                    class_name = class_names[i] if i < len(class_names) else "unknown"
+                    class_id = self.class_mapping.get(class_name, -1)
+                    
+                    if class_id == -1:
+                        continue
+                    
+                    # KITTI format: class_name, truncation, occlusion, alpha, 
+                    # bbox_left, bbox_top, bbox_right, bbox_bottom, 
+                    # dimensions, location, rotation_y, score
+                    # We'll fill with placeholders for unused fields
+                    line = (f"{class_name} 0.00 0 0.0 "
+                           f"{x1:.2f} {y1:.2f} {x2:.2f} {y2:.2f} "
+                           f"0 0 0 0 0 0 0 0.00")
+                    lines.append(line)
             
             # Write to file
             filename = f"{frame_id}.txt"
@@ -263,13 +298,14 @@ class SafetyDatasetWriter(Writer):
         print("[SafetyDatasetWriter] COCO format not yet implemented, using KITTI")
         return self._write_kitti_annotations(bbox_data, frame_id)
     
-    def _write_metadata(self, data: Dict[str, Any], frame_id: str) -> bool:
+    def _write_metadata(self, data: Dict[str, Any], frame_id: str, frame_number: int) -> bool:
         """
         Write metadata JSON for the frame.
         
         Args:
             data: Complete frame data.
             frame_id: Unique frame identifier.
+            frame_number: The sequential frame number.
             
         Returns:
             True if successful, False otherwise.
@@ -278,7 +314,7 @@ class SafetyDatasetWriter(Writer):
             metadata = {
                 "frame_id": frame_id,
                 "timestamp": datetime.now().isoformat(),
-                "frame_number": self.frame_count,
+                "frame_number": frame_number,
                 "is_negative_sample": data.get("is_negative_sample", False),
                 "camera_pose": data.get("camera_pose", {}),
                 "time_of_day": data.get("time_of_day", "unknown"),
@@ -308,7 +344,9 @@ class SafetyDatasetWriter(Writer):
         """
         Cleanup on writer shutdown.
         """
-        print(f"[SafetyDatasetWriter] Shutting down. Total frames written: {self.frame_count}")
+        print(f"[SafetyDatasetWriter] Shutting down. Waiting for pending writes...")
+        self.executor.shutdown(wait=True)
+        print(f"[SafetyDatasetWriter] Shutdown complete. Total frames processed: {self.frame_count}")
         
         # Write summary file
         summary = {
