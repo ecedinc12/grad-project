@@ -83,6 +83,34 @@ class SafetyDatasetWriter(Writer):
         except Exception as e:
             print(f"[SafetyDatasetWriter] Error initializing annotators: {e}")
             raise
+
+    def _ensure_safe_data(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Deep copy data and ensure it is on CPU (numpy) to avoid
+        threading race conditions with the simulation backend.
+        """
+        safe_data = {}
+        import copy
+        
+        for key, value in data.items():
+            if isinstance(value, dict) and "data" in value:
+                # Handle annotator data block
+                safe_block = copy.copy(value)
+                
+                # Check for numpy array
+                if hasattr(value["data"], "copy"):
+                     # Force copy to detach from shared memory/backend buffer
+                    safe_block["data"] = value["data"].copy()
+                # Check for torch tensor (if backend returns tensor)
+                elif hasattr(value["data"], "cpu"):
+                    safe_block["data"] = value["data"].cpu().numpy()
+                
+                safe_data[key] = safe_block
+            else:
+                # Metadata or simple types
+                safe_data[key] = value
+                
+        return safe_data
     
     def write(self, data: Dict[str, Any]) -> None:
         """
@@ -93,18 +121,17 @@ class SafetyDatasetWriter(Writer):
         """
         try:
             # Extract data
-            # Note: Replicator usually returns data on CPU if not specified otherwise,
-            # but we force copy to avoid reference issues in async threads.
-            # Ideally, we should check backend type here.
-            
             rgb_data = data.get("rgb")
-            bbox_data = data.get("bounding_box_2d_tight")
             
             if not rgb_data:
                 return
 
+            # CRITICAL: Ensure data is deep copied and on CPU before passing to thread
+            # Replicator backend data might be volatile or on GPU
+            safe_data = self._ensure_safe_data(data)
+
             # Submit to thread pool
-            self.executor.submit(self._process_and_write_frame, data, self.frame_count)
+            self.executor.submit(self._process_and_write_frame, safe_data, self.frame_count)
             
             self.frame_count += 1
             if self.frame_count % 100 == 0:

@@ -33,13 +33,15 @@ class HeadlessRunner:
     Main orchestrator for headless data generation.
     """
     
-    def __init__(self, config_path: str = "config/generation_config.yaml"):
+    def __init__(self, config_path: str = "config/generation_config.yaml", sim_app=None):
         """
         Initialize the runner with configuration.
         
         Args:
             config_path: Path to generation configuration YAML.
+            sim_app: The SimulationApp instance.
         """
+        self.sim_app = sim_app
         self.config_path = config_path
         self.config = self._load_config()
         
@@ -243,7 +245,7 @@ class HeadlessRunner:
                     self.scenario_runner.randomize_scenario(floor_height=0.0)
                 
                 # 6. Check for shutdown
-                if not simulation_app.is_running():
+                if self.sim_app and not self.sim_app.is_running():
                     print("[HeadlessRunner] SimulationApp stopped, exiting early")
                     break
                 
@@ -279,7 +281,8 @@ class HeadlessRunner:
             self.domain_randomizer.clear_distractors()
         
         # Close simulation app
-        simulation_app.close()
+        if self.sim_app:
+            self.sim_app.close()
         
         print("[HeadlessRunner] Shutdown complete")
 
@@ -320,7 +323,7 @@ def main():
     from data_writer import SafetyDatasetWriter
     
     # Initialize and run
-    runner = HeadlessRunner(config_path=args.config)
+    runner = HeadlessRunner(config_path=args.config, sim_app=simulation_app)
     
     if args.frames is not None:
         runner.total_frames = args.frames

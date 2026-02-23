@@ -27,6 +27,8 @@ class DomainRandomizer:
         """
         self.stage = stage
         self.distractor_paths: List[str] = []
+        self._distractor_pool_size = 20
+        self._pool_created = False
         
     def randomize_lights(self, 
                         intensity_range: Tuple[float, float] = (0.5, 2.0),
@@ -99,91 +101,115 @@ class DomainRandomizer:
         except Exception as e:
             print(f"[DomainRandomizer] Error randomizing materials: {e}")
     
-    def spawn_distractors(self, n: int = 5) -> List[str]:
-        """
-        Spawn floating distractor primitives to test occlusion.
-        
-        Args:
-            n: Number of distractors to spawn.
-            
-        Returns:
-            List of paths to created distractor prims.
-        """
-        self.clear_distractors()  # Clear any existing distractors
-        
+    def _create_distractor_pool(self):
+        """Initialize a pool of invisible distractors."""
+        if self._pool_created:
+            return
+
         primitive_types = ["Cube", "Sphere", "Cone"]
+        parent_path = "/World/Distractors"
         
-        for i in range(n):
+        for i in range(self._distractor_pool_size):
             prim_type = random.choice(primitive_types)
-            prim_path = f"/World/Distractors/Distractor_{i}"
+            prim_path = f"{parent_path}/Distractor_{i}"
             
             # Create the primitive
             create_prim(
                 prim_path=prim_path,
                 prim_type=prim_type,
                 attributes={
-                    "size": random.uniform(0.2, 1.0),
-                    "purpose": "render"
+                    "size": 1.0, # Scale will be randomized later
+                    "purpose": "render",
+                    "visibility": "invisible"
                 }
             )
             
-            # Set random position (above floor, within bounds)
+            # Add physics (Kinematic)
+            prim = self.stage.GetPrimAtPath(prim_path)
+            if prim:
+                # Transform ops
+                xform = UsdGeom.Xformable(prim)
+                xform.ClearXformOpOrder()
+                xform.AddTranslateOp()
+                xform.AddRotateXYZOp()
+                xform.AddScaleOp()
+
+                # Physics
+                rigid_body_api = UsdPhysics.RigidBodyAPI.Apply(prim)
+                rigid_body_api.CreateKinematicEnabledAttr().Set(True)
+                rigid_body_api.CreateRigidBodyEnabledAttr().Set(True)
+                UsdPhysics.CollisionAPI.Apply(prim)
+            
+            self.distractor_paths.append(prim_path)
+        
+        self._pool_created = True
+        print(f"[DomainRandomizer] Created pool of {self._distractor_pool_size} distractors")
+
+    def spawn_distractors(self, n: int = 5) -> List[str]:
+        """
+        Activate N distractors from the pool with random transforms.
+        
+        Args:
+            n: Number of distractors to activate.
+            
+        Returns:
+            List of paths to active distractor prims.
+        """
+        if not self._pool_created:
+            self._create_distractor_pool()
+            
+        # Hide all first
+        self.clear_distractors()
+        
+        # Pick N random indices
+        indices = random.sample(range(self._distractor_pool_size), min(n, self._distractor_pool_size))
+        active_paths = []
+        
+        for idx in indices:
+            path = self.distractor_paths[idx]
+            prim = self.stage.GetPrimAtPath(path)
+            if not prim:
+                continue
+                
+            # Randomize Transform
             position = Gf.Vec3f(
                 random.uniform(-8, 8),
                 random.uniform(-8, 8),
-                random.uniform(2, 6)  # Above floor
+                random.uniform(2, 6)
             )
-            
-            # Set random rotation
             rotation = Gf.Vec3f(
                 random.uniform(0, 360),
                 random.uniform(0, 360),
                 random.uniform(0, 360)
             )
+            scale = random.uniform(0.2, 1.0)
             
-            # Set transform
-            prim = self.stage.GetPrimAtPath(prim_path)
-            if prim:
-                xform = UsdGeom.Xformable(prim)
-                xform.ClearXformOpOrder()
-                
-                translate_op = xform.AddTranslateOp()
-                rotate_op = xform.AddRotateXYZOp()
-                
-                translate_op.Set(position)
-                rotate_op.Set(Gf.Vec3f(
-                    np.radians(rotation[0]),
-                    np.radians(rotation[1]),
-                    np.radians(rotation[2])
-                ))
+            xform = UsdGeom.Xformable(prim)
+            # We know the op order because we set it in create
+            # 0: translate, 1: rotate, 2: scale
+            ops = xform.GetOrderedXformOps()
+            if len(ops) >= 3:
+                ops[0].Set(position)
+                ops[1].Set(Gf.Vec3f(np.radians(rotation[0]), np.radians(rotation[1]), np.radians(rotation[2])))
+                ops[2].Set(Gf.Vec3f(scale, scale, scale))
             
-            # Make it kinematic (floating, not affected by gravity)
-            if prim:
-                # Enable rigid body but make it kinematic
-                rigid_body_api = UsdPhysics.RigidBodyAPI.Apply(prim)
-                rigid_body_api.CreateKinematicEnabledAttr().Set(True)
-                rigid_body_api.CreateRigidBodyEnabledAttr().Set(True)
-                
-                # Add collision
-                UsdPhysics.CollisionAPI.Apply(prim)
+            # Make visible
+            UsdGeom.Imageable(prim).MakeVisible()
+            active_paths.append(path)
             
-            self.distractor_paths.append(prim_path)
-        
-        print(f"[DomainRandomizer] Spawned {n} distractor primitives")
-        return self.distractor_paths
+        print(f"[DomainRandomizer] Activated {len(active_paths)} distractors")
+        return active_paths
     
     def clear_distractors(self) -> None:
         """
-        Remove all distractor prims to prevent VRAM accumulation.
+        Hide all distractor prims (return to pool).
         """
         for path in self.distractor_paths:
-            try:
-                delete_prim(path)
-            except Exception as e:
-                print(f"[DomainRandomizer] Error deleting distractor {path}: {e}")
+            prim = self.stage.GetPrimAtPath(path)
+            if prim:
+                UsdGeom.Imageable(prim).MakeInvisible()
         
-        self.distractor_paths.clear()
-        print("[DomainRandomizer] Cleared all distractor prims")
+        print("[DomainRandomizer] Reset distractor pool")
     
     def randomize_frame(self) -> None:
         """
