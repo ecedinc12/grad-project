@@ -216,10 +216,9 @@ class HeadlessRunner:
                 # 1. Physics & Logic Update
                 self.scenario_runner.update(self.dt)
                 
-                # Note: We rely on rep.orchestrator.step() to advance physics if configured, 
-                # but to ensure our custom logic runs correctly, we sync with world step.
-                # However, calling world.step(render=False) AND rep.orchestrator.step() causes double stepping.
-                # For data generation, Replicator controls the timeline.
+                # Note: We rely on rep.orchestrator.step() to advance the simulation timeline and physics.
+                # We do NOT call self.world.step() here to avoid double-stepping the physics engine,
+                # which would cause synchronization issues between the rendered frame and the logic state.
                 
                 # 2. Logic Step (Hazard triggers)
                 # Check hazards based on current state (before render)

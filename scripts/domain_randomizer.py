@@ -62,41 +62,31 @@ class DomainRandomizer:
     
     def randomize_materials(self, prim_paths: List[str]) -> None:
         """
-        Randomize materials on specified prims using Replicator's material randomizer.
+        Randomize display color on specified prims (Direct USD version to avoid Graph bloat).
         
         Args:
-            prim_paths: List of prim paths to randomize materials on.
+            prim_paths: List of prim paths to randomize.
         """
         try:
-            # Get the material randomizer
-            material_randomizer = rep.randomizer.materials()
-            
-            # Collect mesh prims from the specified paths
-            mesh_prims = []
+            count = 0
             for prim_path in prim_paths:
                 prim = self.stage.GetPrimAtPath(prim_path)
                 if not prim:
                     continue
                     
-                # Recursively find all mesh prims under this path
-                for child_prim in prim.GetAllChildren():
-                    if child_prim.IsA(UsdGeom.Mesh):
-                        mesh_prims.append(child_prim.GetPath().pathString)
+                # Generate a random color
+                color = Gf.Vec3f(random.random(), random.random(), random.random())
+                
+                # Apply to the prim itself if it's a mesh, or search children
+                # Simplification: Apply to all meshes in the subtree
+                for child in Usd.PrimRange(prim):
+                    if child.IsA(UsdGeom.Mesh):
+                        mesh = UsdGeom.Mesh(child)
+                        # Set display color (diffuse)
+                        mesh.GetDisplayColorAttr().Set([color])
+                        count += 1
             
-            if not mesh_prims:
-                print("[DomainRandomizer] No mesh prims found for material randomization")
-                return
-            
-            # Create a replicator scope for the randomizer
-            with rep.randomizer.materials():
-                for mesh_path in mesh_prims:
-                    # Apply random material
-                    rep.randomizer.materials().apply(
-                        prim_paths=[mesh_path],
-                        materials=rep.randomizer.materials().get_materials()
-                    )
-            
-            print(f"[DomainRandomizer] Randomized materials on {len(mesh_prims)} meshes")
+            # print(f"[DomainRandomizer] Randomized colors on {count} meshes")
             
         except Exception as e:
             print(f"[DomainRandomizer] Error randomizing materials: {e}")
@@ -193,6 +183,24 @@ class DomainRandomizer:
                 ops[1].Set(Gf.Vec3f(np.radians(rotation[0]), np.radians(rotation[1]), np.radians(rotation[2])))
                 ops[2].Set(Gf.Vec3f(scale, scale, scale))
             
+            # Apply random velocity
+            if prim.HasAPI(UsdPhysics.RigidBodyAPI):
+                rb = UsdPhysics.RigidBodyAPI(prim)
+                # Random velocity vector (small drift)
+                vel = Gf.Vec3f(
+                    random.uniform(-1.0, 1.0), 
+                    random.uniform(-1.0, 1.0), 
+                    random.uniform(-0.5, 0.5)
+                )
+                rb.GetVelocityAttr().Set(vel)
+                # Add some random angular velocity
+                ang_vel = Gf.Vec3f(
+                    random.uniform(-90, 90),
+                    random.uniform(-90, 90),
+                    random.uniform(-90, 90)
+                )
+                rb.GetAngularVelocityAttr().Set(ang_vel)
+
             # Make visible
             UsdGeom.Imageable(prim).MakeVisible()
             active_paths.append(path)
