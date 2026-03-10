@@ -31,18 +31,8 @@ class SafetyDatasetWriter(Writer):
     """
     
     def __init__(self):
-        """Bare-bones constructor required by WriterRegistry.get()."""
+        """Bare-bones constructor — WriterRegistry may bypass this entirely."""
         super().__init__()
-        # Attributes are populated later in initialize()
-        self.output_dir = None
-        self.class_mapping = {}
-        self.image_format = "png"
-        self.annotation_format = "kitti"
-        self.rgb_dir = ""
-        self.annotations_dir = ""
-        self.metadata_dir = ""
-        self.frame_count = 0
-        self.executor = ThreadPoolExecutor(max_workers=4)
     
     def initialize(self,
                    output_dir: str = "output/dataset_v1",
@@ -52,6 +42,9 @@ class SafetyDatasetWriter(Writer):
                    **kwargs) -> None:
         """
         Called by Replicator after construction to pass user parameters.
+        
+        ALL instance attributes must be created here — WriterRegistry.get()
+        may bypass __init__, so nothing set there is guaranteed to exist.
         
         Args:
             output_dir: Base output directory.
@@ -72,8 +65,11 @@ class SafetyDatasetWriter(Writer):
         for directory in [self.rgb_dir, self.annotations_dir, self.metadata_dir]:
             os.makedirs(directory, exist_ok=True)
         
-        # Reset frame counter
+        # Frame counter
         self.frame_count = 0
+        
+        # Thread pool for async writing — MUST be created here, not in __init__
+        self.executor = ThreadPoolExecutor(max_workers=4)
         
         # Tell Replicator which annotators this writer needs.
         # These keys will appear in the `data` dict passed to write().
@@ -392,9 +388,12 @@ class SafetyDatasetWriter(Writer):
         """
         Cleanup on writer shutdown.
         """
+        frame_count = getattr(self, "frame_count", 0)
         print(f"[SafetyDatasetWriter] Shutting down. Waiting for pending writes...")
-        self.executor.shutdown(wait=True)
-        print(f"[SafetyDatasetWriter] Shutdown complete. Total frames processed: {self.frame_count}")
+        executor = getattr(self, "executor", None)
+        if executor is not None:
+            executor.shutdown(wait=True)
+        print(f"[SafetyDatasetWriter] Shutdown complete. Total frames processed: {frame_count}")
         
         # Write summary file
         summary = {
@@ -428,8 +427,9 @@ if __name__ == "__main__":
         "no_helmet": 3
     }
     
-    # Initialize writer
-    writer = SafetyDatasetWriter(
+    # Initialize writer (mirrors WriterRegistry lifecycle)
+    writer = SafetyDatasetWriter()
+    writer.initialize(
         output_dir=test_output_dir,
         class_mapping=class_mapping,
         annotation_format="kitti"
