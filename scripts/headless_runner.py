@@ -108,23 +108,8 @@ class HeadlessRunner:
             # Initialize DomainRandomizer
             self.domain_randomizer = DomainRandomizer(self.world.stage)
             
-            # Initialize DataWriter
-            class_mapping = {
-                "worker": 0,
-                "forklift": 1,
-                "helmet": 2,
-                "no_helmet": 3
-            }
-            
-            output_dir = self.config["output"]["base_dir"]
-            self.data_writer = SafetyDatasetWriter(
-                output_dir=output_dir,
-                class_mapping=class_mapping,
-                annotation_format="kitti"
-            )
-            
-            # Setup Replicator Camera and Attachment
-            self._setup_replicator(rep)
+            # Setup Replicator Camera, Writer, and Attachment
+            self._setup_replicator(rep, SafetyDatasetWriter)
             
             print("[HeadlessRunner] All components initialized successfully")
             return True
@@ -135,9 +120,8 @@ class HeadlessRunner:
             traceback.print_exc()
             return False
 
-    def _setup_replicator(self, rep):
+    def _setup_replicator(self, rep, WriterClass):
         """Configure Replicator render products and attach writer."""
-        # Create a camera prim
         from omni.isaac.core.utils.prims import create_prim
         from pxr import Gf, UsdGeom
         
@@ -147,22 +131,41 @@ class HeadlessRunner:
             "focalLength": 24
         })
         
-        # Position camera looking down-ish
+        # Position camera: x=0, y=-10, z=5 looking toward origin (pitch ~60°)
         camera_prim = self.world.stage.GetPrimAtPath(camera_path)
         xform = UsdGeom.Xformable(camera_prim)
-        # Position: x=0, y=-10, z=5; Look at Origin
-        # Simple transform for now
-        transform = Gf.Matrix4d().SetTranslate(Gf.Vec3d(0, -10, 5)) * \
-                   Gf.Matrix4d().SetRotate(Gf.Rotation(Gf.Vec3d(1, 0, 0), 60))
-        # Note: In a real run, ScenarioRunner or CameraRig should manage this
+        # Clear any auto-generated ops and set explicit translate + orient
+        xform.ClearXformOpOrder()
+        xform.AddTranslateOp(UsdGeom.XformOp.PrecisionDouble).Set(Gf.Vec3d(0, -10, 5))
+        # Rotate 60° around the local X axis so the camera looks downward toward the scene
+        rot = Gf.Rotation(Gf.Vec3d(1, 0, 0), 60)
+        q = rot.GetQuat()
+        xform.AddOrientOp(UsdGeom.XformOp.PrecisionDouble).Set(
+            Gf.Quatd(q.GetReal(), Gf.Vec3d(*q.GetImaginary()))
+        )
         
         # Create Render Product
         render_product = rep.create.render_product(camera_path, (1920, 1080))
         
-        # Attach the writer to the render product
-        # SafetyDatasetWriter is a custom writer instance
+        # ---- Register & instantiate writer via Replicator's WriterRegistry ----
+        # register() expects the *class* so Replicator can manage its lifecycle.
+        rep.WriterRegistry.register(WriterClass)
+        
+        class_mapping = self.config.get("annotation", {}).get("class_mapping", {
+            "worker": 0, "forklift": 1, "helmet": 2, "no_helmet": 3
+        })
+        output_dir = self.config["output"]["base_dir"]
+        annotation_format = self.config.get("annotation", {}).get("format", "kitti")
+        
+        # get() returns a fresh instance; initialize() passes kwargs to __init__
+        self.data_writer = rep.WriterRegistry.get("SafetyDatasetWriter")
+        self.data_writer.initialize(
+            output_dir=output_dir,
+            class_mapping=class_mapping,
+            annotation_format=annotation_format,
+        )
         self.data_writer.attach([render_product])
-        print(f"[HeadlessRunner] Writer attached to render product: {render_product}")
+        print(f"[HeadlessRunner] Writer registered & attached to render product")
     
     def _setup_test_workers(self) -> None:
         """Setup test workers for demonstration."""

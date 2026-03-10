@@ -22,15 +22,36 @@ from omni.replicator.core import Writer, BackendDispatch
 class SafetyDatasetWriter(Writer):
     """
     Custom Writer for safety dataset annotations.
+    
+    Lifecycle managed by omni.replicator.core.WriterRegistry:
+        1. WriterRegistry.register(SafetyDatasetWriter)
+        2. writer = WriterRegistry.get("SafetyDatasetWriter")   # calls __init__()
+        3. writer.initialize(output_dir=..., class_mapping=...) # real setup
+        4. writer.attach([render_product])                      # binds annotators
     """
     
-    def __init__(self, 
-                 output_dir: str,
-                 class_mapping: Dict[str, int],
-                 image_format: str = "png",
-                 annotation_format: str = "kitti"):
+    def __init__(self):
+        """Bare-bones constructor required by WriterRegistry.get()."""
+        super().__init__()
+        # Attributes are populated later in initialize()
+        self.output_dir = None
+        self.class_mapping = {}
+        self.image_format = "png"
+        self.annotation_format = "kitti"
+        self.rgb_dir = ""
+        self.annotations_dir = ""
+        self.metadata_dir = ""
+        self.frame_count = 0
+        self.executor = ThreadPoolExecutor(max_workers=4)
+    
+    def initialize(self,
+                   output_dir: str = "output/dataset_v1",
+                   class_mapping: Dict[str, int] = None,
+                   image_format: str = "png",
+                   annotation_format: str = "kitti",
+                   **kwargs) -> None:
         """
-        Initialize the writer.
+        Called by Replicator after construction to pass user parameters.
         
         Args:
             output_dir: Base output directory.
@@ -38,10 +59,8 @@ class SafetyDatasetWriter(Writer):
             image_format: Image file format (png, jpg).
             annotation_format: Annotation format (kitti, coco).
         """
-        super().__init__()
-        
         self.output_dir = output_dir
-        self.class_mapping = class_mapping
+        self.class_mapping = class_mapping or {"worker": 0, "forklift": 1, "helmet": 2, "no_helmet": 3}
         self.image_format = image_format.lower()
         self.annotation_format = annotation_format.lower()
         
@@ -53,36 +72,20 @@ class SafetyDatasetWriter(Writer):
         for directory in [self.rgb_dir, self.annotations_dir, self.metadata_dir]:
             os.makedirs(directory, exist_ok=True)
         
-        # Frame counter
+        # Reset frame counter
         self.frame_count = 0
         
-        # Thread pool for async writing
-        self.executor = ThreadPoolExecutor(max_workers=4)
-        
-        # Initialize annotators
-        self._init_annotators()
+        # Tell Replicator which annotators this writer needs.
+        # These keys will appear in the `data` dict passed to write().
+        self.annotators = [
+            rep.AnnotatorRegistry.get_annotator("rgb"),
+            rep.AnnotatorRegistry.get_annotator("bounding_box_2d_tight"),
+            rep.AnnotatorRegistry.get_annotator("semantic_segmentation"),
+        ]
         
         print(f"[SafetyDatasetWriter] Initialized with output directory: {output_dir}")
-        print(f"[SafetyDatasetWriter] Class mapping: {class_mapping}")
+        print(f"[SafetyDatasetWriter] Class mapping: {self.class_mapping}")
         print(f"[SafetyDatasetWriter] Annotation format: {annotation_format}")
-    
-    def _init_annotators(self) -> None:
-        """Initialize Replicator annotators."""
-        try:
-            # RGB annotator
-            self.rgb_annotator = rep.AnnotatorRegistry.get_annotator("rgb")
-            
-            # 2D bounding box annotator (tight)
-            self.bbox_annotator = rep.AnnotatorRegistry.get_annotator("bounding_box_2d_tight")
-            
-            # Semantic segmentation annotator
-            self.seg_annotator = rep.AnnotatorRegistry.get_annotator("semantic_segmentation")
-            
-            print("[SafetyDatasetWriter] Annotators initialized successfully")
-            
-        except Exception as e:
-            print(f"[SafetyDatasetWriter] Error initializing annotators: {e}")
-            raise
 
     def _ensure_safe_data(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -116,19 +119,31 @@ class SafetyDatasetWriter(Writer):
         """
         Write frame data to disk.
         
+        Called automatically by Replicator on each orchestrator.step().
+        
         Args:
             data: Dictionary containing frame data from annotators.
         """
         try:
-            # Extract data
-            rgb_data = data.get("rgb")
-            
-            if not rgb_data:
+            # Replicator may pass annotator outputs directly as numpy arrays
+            # or as dicts with a "data" key. Normalise into {"data": ...} form.
+            normalised: Dict[str, Any] = {}
+            for key, value in data.items():
+                if isinstance(value, dict) and "data" in value:
+                    normalised[key] = value
+                elif hasattr(value, "shape"):  # numpy array
+                    normalised[key] = {"data": value}
+                elif isinstance(value, dict):
+                    normalised[key] = value
+                else:
+                    normalised[key] = {"data": value}
+
+            rgb_data = normalised.get("rgb")
+            if rgb_data is None or ("data" in rgb_data and rgb_data["data"] is None):
                 return
 
             # CRITICAL: Ensure data is deep copied and on CPU before passing to thread
-            # Replicator backend data might be volatile or on GPU
-            safe_data = self._ensure_safe_data(data)
+            safe_data = self._ensure_safe_data(normalised)
 
             # Submit to thread pool
             self.executor.submit(self._process_and_write_frame, safe_data, self.frame_count)
@@ -139,6 +154,8 @@ class SafetyDatasetWriter(Writer):
             
         except Exception as e:
             print(f"[SafetyDatasetWriter] Error scheduling frame write: {e}")
+            import traceback
+            traceback.print_exc()
 
     def _process_and_write_frame(self, data: Dict[str, Any], frame_number: int) -> None:
         """
@@ -200,10 +217,14 @@ class SafetyDatasetWriter(Writer):
             
             # Convert to PIL Image
             image_array = rgb_data["data"]
-            if len(image_array.shape) == 3 and image_array.shape[2] == 3:
-                # Convert from BGR to RGB if needed
-                if rgb_data.get("channel", "rgb") == "bgr":
-                    image_array = image_array[:, :, ::-1]
+            if len(image_array.shape) == 3:
+                # Replicator's rgb annotator returns RGBA (4 channels) — drop alpha
+                if image_array.shape[2] == 4:
+                    image_array = image_array[:, :, :3]
+                
+                if image_array.shape[2] != 3:
+                    print(f"[SafetyDatasetWriter] Unexpected channel count: {image_array.shape[2]}")
+                    return False
                 
                 image = Image.fromarray(image_array)
             else:

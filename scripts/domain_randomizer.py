@@ -29,6 +29,8 @@ class DomainRandomizer:
         self.distractor_paths: List[str] = []
         self._distractor_pool_size = 20
         self._pool_created = False
+        # Cache original light intensities so randomization doesn't compound
+        self._base_light_intensities: Dict[str, float] = {}
         
     def randomize_lights(self, 
                         intensity_range: Tuple[float, float] = (0.5, 2.0),
@@ -44,21 +46,25 @@ class DomainRandomizer:
         for prim in self.stage.Traverse():
             if UsdLux.LightAPI(prim):
                 light = UsdLux.LightAPI(prim)
+                path_str = str(prim.GetPath())
                 
-                # Randomize intensity
-                if light.GetIntensityAttr():
-                    base_intensity = light.GetIntensityAttr().Get()
-                    if base_intensity is not None:
-                        multiplier = random.uniform(*intensity_range)
-                        new_intensity = max(0.0, base_intensity * multiplier)
-                        light.GetIntensityAttr().Set(new_intensity)
+                # Cache the original intensity the first time we see this light
+                if path_str not in self._base_light_intensities:
+                    base = light.GetIntensityAttr().Get()
+                    if base is not None:
+                        self._base_light_intensities[path_str] = float(base)
+                
+                # Randomize intensity relative to the *original* base value
+                base_intensity = self._base_light_intensities.get(path_str)
+                if base_intensity is not None:
+                    multiplier = random.uniform(*intensity_range)
+                    new_intensity = max(0.0, base_intensity * multiplier)
+                    light.GetIntensityAttr().Set(new_intensity)
                 
                 # Randomize color temperature if supported
                 if prim.HasAttribute("inputs:colorTemperature"):
                     temp = random.uniform(*color_temp_range)
                     prim.GetAttribute("inputs:colorTemperature").Set(temp)
-                
-                print(f"[DomainRandomizer] Randomized light: {prim.GetPath()}")
     
     def randomize_materials(self, prim_paths: List[str]) -> None:
         """
@@ -232,8 +238,6 @@ class DomainRandomizer:
                     rb = UsdPhysics.RigidBodyAPI(prim)
                     rb.GetVelocityAttr().Set(Gf.Vec3f(0,0,0))
                     rb.GetAngularVelocityAttr().Set(Gf.Vec3f(0,0,0))
-        
-        print("[DomainRandomizer] Reset distractor pool")
     
     def randomize_frame(self) -> None:
         """
@@ -254,8 +258,6 @@ class DomainRandomizer:
             else:
                 # Clear existing
                 self.clear_distractors()
-        
-        print("[DomainRandomizer] Applied frame randomization")
 
 
 if __name__ == "__main__":
