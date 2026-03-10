@@ -12,7 +12,6 @@ import numpy as np
 
 from pxr import Usd, UsdGeom, Gf, UsdPhysics
 import omni.isaac.core.utils.prims as prim_utils
-import omni.isaac.core.utils.xforms as xform_utils
 from omni.isaac.core.utils.rotations import euler_angles_to_quat
 
 
@@ -134,13 +133,27 @@ class WorkerController:
         Handles physics bodies correctly by resetting velocities if present,
         though for a proper character controller, velocity inputs should be used instead.
         """
+        xform = UsdGeom.Xformable(self.prim)
+        ops = {op.GetOpName(): op for op in xform.GetOrderedXformOps()}
+
+        # Set translation
+        if "xformOp:translate" in ops:
+            ops["xformOp:translate"].Set(Gf.Vec3d(pos[0], pos[1], pos[2]))
+        else:
+            xform.AddTranslateOp(UsdGeom.XformOp.PrecisionDouble).Set(Gf.Vec3d(pos[0], pos[1], pos[2]))
+
         # Create a quaternion rotation around Z axis
         # euler_angles_to_quat expects (roll, pitch, yaw) in radians
-        quat = euler_angles_to_quat([0.0, 0.0, rotation_z_rad])
-        
-        # Set world pose
-        xform_utils.set_world_pose(self.prim, position=pos, orientation=quat)
-        
+        quat_wxyz = euler_angles_to_quat([0.0, 0.0, rotation_z_rad])
+        # euler_angles_to_quat returns [w, x, y, z]; Gf.Quatf takes (real, imaginary)
+        gf_quat = Gf.Quatf(float(quat_wxyz[0]), Gf.Vec3f(float(quat_wxyz[1]), float(quat_wxyz[2]), float(quat_wxyz[3])))
+
+        # Set rotation via orient op
+        if "xformOp:orient" in ops:
+            ops["xformOp:orient"].Set(gf_quat)
+        else:
+            xform.AddOrientOp(UsdGeom.XformOp.PrecisionFloat).Set(gf_quat)
+
         # If this is a rigid body, we must zero out velocities to prevent physics explosions
         # from the teleportation, or ideally, we would drive it via velocity.
         if self.prim.HasAPI(UsdPhysics.RigidBodyAPI):
