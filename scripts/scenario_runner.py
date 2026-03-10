@@ -145,14 +145,14 @@ class WorkerController:
         # Create a quaternion rotation around Z axis
         # euler_angles_to_quat expects (roll, pitch, yaw) in radians
         quat_wxyz = euler_angles_to_quat([0.0, 0.0, rotation_z_rad])
-        # euler_angles_to_quat returns [w, x, y, z]; Gf.Quatf takes (real, imaginary)
-        gf_quat = Gf.Quatf(float(quat_wxyz[0]), Gf.Vec3f(float(quat_wxyz[1]), float(quat_wxyz[2]), float(quat_wxyz[3])))
+        # euler_angles_to_quat returns [w, x, y, z]; use GfQuatd (double) to match USD stage expectation
+        gf_quat = Gf.Quatd(float(quat_wxyz[0]), Gf.Vec3d(float(quat_wxyz[1]), float(quat_wxyz[2]), float(quat_wxyz[3])))
 
         # Set rotation via orient op
         if "xformOp:orient" in ops:
             ops["xformOp:orient"].Set(gf_quat)
         else:
-            xform.AddOrientOp(UsdGeom.XformOp.PrecisionFloat).Set(gf_quat)
+            xform.AddOrientOp(UsdGeom.XformOp.PrecisionDouble).Set(gf_quat)
 
         # If this is a rigid body, we must zero out velocities to prevent physics explosions
         # from the teleportation, or ideally, we would drive it via velocity.
