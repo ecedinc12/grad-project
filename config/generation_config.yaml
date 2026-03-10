@@ -1,0 +1,25 @@
+total_frames: 1000
+output:
+  base_dir: output/dataset_v1
+scene:
+  floor_size: 20.0
+  wall_height: 4.0
+workers:
+  count: 2
+  ppe_compliance_rate: 0.7
+domain_randomization:
+  lighting: true
+  textures: true
+  camera_noise: true
+camera:
+  resolution: [1920, 1080]
+  fps: 30
+  fov: 60
+  focal_length_range: [18, 85]
+annotation:
+  format: kitti
+  classes:
+    worker: 0
+    forklift: 1
+    helmet: 2
+    no_helmet: 3

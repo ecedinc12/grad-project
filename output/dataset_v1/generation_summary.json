@@ -1,0 +1,11 @@
+{
+  "total_frames": 0,
+  "output_directory": "output/dataset_v1",
+  "class_mapping": {
+    "worker": 0,
+    "forklift": 1,
+    "helmet": 2,
+    "no_helmet": 3
+  },
+  "completion_time": "2026-03-10T19:37:29.886923"
+}

@@ -175,7 +175,18 @@ class HeadlessRunner:
             
             # Sub-prims for PPE logic
             create_prim(f"{worker_path}/Helmet", "Sphere", attributes={"radius": 0.2})
-            create_prim(f"{worker_path}/Vest", "Cube", attributes={"size": (0.4, 0.5, 0.1)})
+            create_prim(f"{worker_path}/Vest", "Cube")
+            # Scale vest after creation
+            from pxr import UsdGeom, Gf
+            import omni.usd
+            _stage = omni.usd.get_context().get_stage()
+            vest_prim = _stage.GetPrimAtPath(f"{worker_path}/Vest")
+            vest_xform = UsdGeom.Xformable(vest_prim)
+            ops = {op.GetOpName(): op for op in vest_xform.GetOrderedXformOps()}
+            if "xformOp:scale" in ops:
+                ops["xformOp:scale"].Set(Gf.Vec3f(0.4, 0.5, 0.1))
+            else:
+                vest_xform.AddScaleOp().Set(Gf.Vec3f(0.4, 0.5, 0.1))
             
             self.scenario_runner.register_worker(worker_path)
         

@@ -6,12 +6,6 @@
 .vscode/
 .idea/
 
-# Project Output (Dataset Generation)
-output/
-
-# Large Assets (USD files, textures, models)
-assets/
-
 # Python/Environment
 __pycache__/
 *.pyc
@@ -31,9 +25,6 @@ build/
 # Simulation Logs
 *.log
 *.usd.log
-
-# Local Configuration (if sensitive)
-config/generation_config.yaml
 
 # Isaac Sim cache and temporary files
 *.omniverse
@@ -56,9 +47,6 @@ htmlcov/
 # Simulation Logs
 *.log
 *.usd.log
-
-# Local Configuration (if sensitive)
-config/generation_config.yaml
 
 # Isaac Sim cache and temporary files
 *.omniverse

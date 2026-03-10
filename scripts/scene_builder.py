@@ -82,11 +82,12 @@ class SceneBuilder:
         # Create or get the physics scene prim
         if not self.stage.GetPrimAtPath(self._physics_scene_path):
             physics_scene = UsdPhysics.Scene.Define(self.stage, self._physics_scene_path)
-            physics_scene.CreateGravityAttr().Set(gravity)
+            physics_scene.CreateGravityDirectionAttr().Set(Gf.Vec3f(0.0, 0.0, -1.0))
+            physics_scene.CreateGravityMagnitudeAttr().Set(9.81)
         else:
             physics_scene = UsdPhysics.Scene.Get(self.stage, self._physics_scene_path)
-            # Update gravity if it was passed explicitly or calculated
-            physics_scene.GetGravityAttr().Set(gravity)
+            physics_scene.CreateGravityDirectionAttr().Set(Gf.Vec3f(0.0, 0.0, -1.0))
+            physics_scene.CreateGravityMagnitudeAttr().Set(9.81)
         
         # Configure PhysX-specific settings
         prim = self.stage.GetPrimAtPath(self._physics_scene_path)
@@ -364,16 +365,24 @@ class SceneBuilder:
             prim_path=floor_path,
             prim_type="Cube",
             attributes={
-                "size": (size, size, height),
+                "size": 1.0,
                 "purpose": "default"
             }
         )
         
-        # Position at origin
+        # Position and scale at origin
         prim = self.stage.GetPrimAtPath(floor_path)
         xform = UsdGeom.Xformable(prim)
-        translate_op = xform.AddTranslateOp()
-        translate_op.Set(Gf.Vec3f(0, 0, -height/2))
+        # create_prim already adds translate/orient/scale ops, get existing ones
+        ops = {op.GetOpName(): op for op in xform.GetOrderedXformOps()}
+        if "xformOp:translate" in ops:
+            ops["xformOp:translate"].Set(Gf.Vec3d(0, 0, -height/2))
+        else:
+            xform.AddTranslateOp().Set(Gf.Vec3d(0, 0, -height/2))
+        if "xformOp:scale" in ops:
+            ops["xformOp:scale"].Set(Gf.Vec3f(size, size, height))
+        else:
+            xform.AddScaleOp().Set(Gf.Vec3f(size, size, height))
         
         # Apply material if provided
         if material_path:

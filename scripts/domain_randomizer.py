@@ -42,8 +42,8 @@ class DomainRandomizer:
         """
         # Iterate through all prims to find lights
         for prim in self.stage.Traverse():
-            if prim.IsA(UsdLux.Light):
-                light = UsdLux.Light(prim)
+            if UsdLux.LightAPI(prim):
+                light = UsdLux.LightAPI(prim)
                 
                 # Randomize intensity
                 if light.GetIntensityAttr():
@@ -108,7 +108,6 @@ class DomainRandomizer:
                 prim_path=prim_path,
                 prim_type=prim_type,
                 attributes={
-                    "size": 1.0, # Scale will be randomized later
                     "purpose": "render",
                     "visibility": "invisible"
                 }
@@ -120,9 +119,9 @@ class DomainRandomizer:
                 # Transform ops
                 xform = UsdGeom.Xformable(prim)
                 xform.ClearXformOpOrder()
-                xform.AddTranslateOp()
-                xform.AddRotateXYZOp()
-                xform.AddScaleOp()
+                xform.AddTranslateOp(UsdGeom.XformOp.PrecisionDouble)
+                xform.AddOrientOp(UsdGeom.XformOp.PrecisionDouble)
+                xform.AddScaleOp(UsdGeom.XformOp.PrecisionDouble)
 
                 # Physics
                 rigid_body_api = UsdPhysics.RigidBodyAPI.Apply(prim)
@@ -184,9 +183,13 @@ class DomainRandomizer:
             # 0: translate, 1: rotate, 2: scale
             ops = xform.GetOrderedXformOps()
             if len(ops) >= 3:
-                ops[0].Set(position)
-                ops[1].Set(Gf.Vec3f(np.radians(rotation[0]), np.radians(rotation[1]), np.radians(rotation[2])))
-                ops[2].Set(Gf.Vec3f(scale, scale, scale))
+                ops[0].Set(Gf.Vec3d(position[0], position[1], position[2]))
+                rx = Gf.Rotation(Gf.Vec3d(1,0,0), rotation[0])
+                ry = Gf.Rotation(Gf.Vec3d(0,1,0), rotation[1])
+                rz = Gf.Rotation(Gf.Vec3d(0,0,1), rotation[2])
+                q = (rz * ry * rx).GetQuat()
+                ops[1].Set(Gf.Quatd(q.GetReal(), Gf.Vec3d(*q.GetImaginary())))
+                ops[2].Set(Gf.Vec3d(scale, scale, scale))
             
             # Apply random velocity
             if prim.HasAPI(UsdPhysics.RigidBodyAPI):

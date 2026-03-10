@@ -125,7 +125,7 @@ class WorkerController:
     def _get_position(self) -> Gf.Vec3f:
         # Get world position
         # Compute the world transform at the current time
-        world_transform = UsdGeom.Xformable(self.prim).ComputeLocalToWorldTransform(self.stage.GetTime())
+        world_transform = UsdGeom.Xformable(self.prim).ComputeLocalToWorldTransform(Usd.TimeCode.Default())
         return world_transform.ExtractTranslation()
 
     def _set_transform(self, pos: Gf.Vec3f, rotation_z_rad: float):
@@ -149,10 +149,13 @@ class WorkerController:
             rb_api.GetAngularVelocityAttr().Set(Gf.Vec3f(0,0,0))
 
     def _set_position(self, pos: Gf.Vec3f):
-        # Get current orientation to preserve it
-        world_transform = UsdGeom.Xformable(self.prim).ComputeLocalToWorldTransform(self.stage.GetTime())
-        rotation = world_transform.ExtractRotationQuat()
-        xform_utils.set_world_pose(self.prim, position=pos, orientation=rotation)
+        # Set position via existing translate xform op
+        xform = UsdGeom.Xformable(self.prim)
+        ops = {op.GetOpName(): op for op in xform.GetOrderedXformOps()}
+        if "xformOp:translate" in ops:
+            ops["xformOp:translate"].Set(Gf.Vec3d(pos[0], pos[1], pos[2]))
+        else:
+            xform.AddTranslateOp(UsdGeom.XformOp.PrecisionDouble).Set(Gf.Vec3d(pos[0], pos[1], pos[2]))
     
     def _set_rotation_z(self, angle_deg: float):
         # Wrapper for standalone rotation setting
