@@ -12,7 +12,6 @@ import numpy as np
 
 from pxr import Usd, UsdGeom, Gf, UsdPhysics
 import omni.isaac.core.utils.prims as prim_utils
-import omni.isaac.core.utils.xforms as xform_utils
 from omni.isaac.core.utils.rotations import euler_angles_to_quat
 
 
@@ -125,7 +124,7 @@ class WorkerController:
     def _get_position(self) -> Gf.Vec3f:
         # Get world position
         # Compute the world transform at the current time
-        world_transform = UsdGeom.Xformable(self.prim).ComputeLocalToWorldTransform(self.stage.GetTime())
+        world_transform = UsdGeom.Xformable(self.prim).ComputeLocalToWorldTransform(Usd.TimeCode.Default())
         return world_transform.ExtractTranslation()
 
     def _set_transform(self, pos: Gf.Vec3f, rotation_z_rad: float):
@@ -134,13 +133,27 @@ class WorkerController:
         Handles physics bodies correctly by resetting velocities if present,
         though for a proper character controller, velocity inputs should be used instead.
         """
+        xform = UsdGeom.Xformable(self.prim)
+        ops = {op.GetOpName(): op for op in xform.GetOrderedXformOps()}
+
+        # Set translation
+        if "xformOp:translate" in ops:
+            ops["xformOp:translate"].Set(Gf.Vec3d(pos[0], pos[1], pos[2]))
+        else:
+            xform.AddTranslateOp(UsdGeom.XformOp.PrecisionDouble).Set(Gf.Vec3d(pos[0], pos[1], pos[2]))
+
         # Create a quaternion rotation around Z axis
         # euler_angles_to_quat expects (roll, pitch, yaw) in radians
-        quat = euler_angles_to_quat([0.0, 0.0, rotation_z_rad])
-        
-        # Set world pose
-        xform_utils.set_world_pose(self.prim, position=pos, orientation=quat)
-        
+        quat_wxyz = euler_angles_to_quat([0.0, 0.0, rotation_z_rad])
+        # euler_angles_to_quat returns [w, x, y, z]; use GfQuatd (double) to match USD stage expectation
+        gf_quat = Gf.Quatd(float(quat_wxyz[0]), Gf.Vec3d(float(quat_wxyz[1]), float(quat_wxyz[2]), float(quat_wxyz[3])))
+
+        # Set rotation via orient op
+        if "xformOp:orient" in ops:
+            ops["xformOp:orient"].Set(gf_quat)
+        else:
+            xform.AddOrientOp(UsdGeom.XformOp.PrecisionDouble).Set(gf_quat)
+
         # If this is a rigid body, we must zero out velocities to prevent physics explosions
         # from the teleportation, or ideally, we would drive it via velocity.
         if self.prim.HasAPI(UsdPhysics.RigidBodyAPI):
@@ -149,10 +162,13 @@ class WorkerController:
             rb_api.GetAngularVelocityAttr().Set(Gf.Vec3f(0,0,0))
 
     def _set_position(self, pos: Gf.Vec3f):
-        # Get current orientation to preserve it
-        world_transform = UsdGeom.Xformable(self.prim).ComputeLocalToWorldTransform(self.stage.GetTime())
-        rotation = world_transform.ExtractRotationQuat()
-        xform_utils.set_world_pose(self.prim, position=pos, orientation=rotation)
+        # Set position via existing translate xform op
+        xform = UsdGeom.Xformable(self.prim)
+        ops = {op.GetOpName(): op for op in xform.GetOrderedXformOps()}
+        if "xformOp:translate" in ops:
+            ops["xformOp:translate"].Set(Gf.Vec3d(pos[0], pos[1], pos[2]))
+        else:
+            xform.AddTranslateOp(UsdGeom.XformOp.PrecisionDouble).Set(Gf.Vec3d(pos[0], pos[1], pos[2]))
     
     def _set_rotation_z(self, angle_deg: float):
         # Wrapper for standalone rotation setting

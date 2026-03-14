@@ -29,6 +29,8 @@ class DomainRandomizer:
         self.distractor_paths: List[str] = []
         self._distractor_pool_size = 20
         self._pool_created = False
+        # Cache original light intensities so randomization doesn't compound
+        self._base_light_intensities: Dict[str, float] = {}
         
     def randomize_lights(self, 
                         intensity_range: Tuple[float, float] = (0.5, 2.0),
@@ -42,23 +44,27 @@ class DomainRandomizer:
         """
         # Iterate through all prims to find lights
         for prim in self.stage.Traverse():
-            if prim.IsA(UsdLux.Light):
-                light = UsdLux.Light(prim)
+            if UsdLux.LightAPI(prim):
+                light = UsdLux.LightAPI(prim)
+                path_str = str(prim.GetPath())
                 
-                # Randomize intensity
-                if light.GetIntensityAttr():
-                    base_intensity = light.GetIntensityAttr().Get()
-                    if base_intensity is not None:
-                        multiplier = random.uniform(*intensity_range)
-                        new_intensity = max(0.0, base_intensity * multiplier)
-                        light.GetIntensityAttr().Set(new_intensity)
+                # Cache the original intensity the first time we see this light
+                if path_str not in self._base_light_intensities:
+                    base = light.GetIntensityAttr().Get()
+                    if base is not None:
+                        self._base_light_intensities[path_str] = float(base)
+                
+                # Randomize intensity relative to the *original* base value
+                base_intensity = self._base_light_intensities.get(path_str)
+                if base_intensity is not None:
+                    multiplier = random.uniform(*intensity_range)
+                    new_intensity = max(0.0, base_intensity * multiplier)
+                    light.GetIntensityAttr().Set(new_intensity)
                 
                 # Randomize color temperature if supported
                 if prim.HasAttribute("inputs:colorTemperature"):
                     temp = random.uniform(*color_temp_range)
                     prim.GetAttribute("inputs:colorTemperature").Set(temp)
-                
-                print(f"[DomainRandomizer] Randomized light: {prim.GetPath()}")
     
     def randomize_materials(self, prim_paths: List[str]) -> None:
         """
@@ -108,7 +114,6 @@ class DomainRandomizer:
                 prim_path=prim_path,
                 prim_type=prim_type,
                 attributes={
-                    "size": 1.0, # Scale will be randomized later
                     "purpose": "render",
                     "visibility": "invisible"
                 }
@@ -120,9 +125,9 @@ class DomainRandomizer:
                 # Transform ops
                 xform = UsdGeom.Xformable(prim)
                 xform.ClearXformOpOrder()
-                xform.AddTranslateOp()
-                xform.AddRotateXYZOp()
-                xform.AddScaleOp()
+                xform.AddTranslateOp(UsdGeom.XformOp.PrecisionDouble)
+                xform.AddOrientOp(UsdGeom.XformOp.PrecisionDouble)
+                xform.AddScaleOp(UsdGeom.XformOp.PrecisionDouble)
 
                 # Physics
                 rigid_body_api = UsdPhysics.RigidBodyAPI.Apply(prim)
@@ -184,9 +189,13 @@ class DomainRandomizer:
             # 0: translate, 1: rotate, 2: scale
             ops = xform.GetOrderedXformOps()
             if len(ops) >= 3:
-                ops[0].Set(position)
-                ops[1].Set(Gf.Vec3f(np.radians(rotation[0]), np.radians(rotation[1]), np.radians(rotation[2])))
-                ops[2].Set(Gf.Vec3f(scale, scale, scale))
+                ops[0].Set(Gf.Vec3d(position[0], position[1], position[2]))
+                rx = Gf.Rotation(Gf.Vec3d(1,0,0), rotation[0])
+                ry = Gf.Rotation(Gf.Vec3d(0,1,0), rotation[1])
+                rz = Gf.Rotation(Gf.Vec3d(0,0,1), rotation[2])
+                q = (rz * ry * rx).GetQuat()
+                ops[1].Set(Gf.Quatd(q.GetReal(), Gf.Vec3d(*q.GetImaginary())))
+                ops[2].Set(Gf.Vec3d(scale, scale, scale))
             
             # Apply random velocity
             if prim.HasAPI(UsdPhysics.RigidBodyAPI):
@@ -229,8 +238,6 @@ class DomainRandomizer:
                     rb = UsdPhysics.RigidBodyAPI(prim)
                     rb.GetVelocityAttr().Set(Gf.Vec3f(0,0,0))
                     rb.GetAngularVelocityAttr().Set(Gf.Vec3f(0,0,0))
-        
-        print("[DomainRandomizer] Reset distractor pool")
     
     def randomize_frame(self) -> None:
         """
@@ -251,8 +258,6 @@ class DomainRandomizer:
             else:
                 # Clear existing
                 self.clear_distractors()
-        
-        print("[DomainRandomizer] Applied frame randomization")
 
 
 if __name__ == "__main__":
