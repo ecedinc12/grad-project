@@ -9,9 +9,14 @@ from schemas import SceneConfig, Entity, PPEState
 
 def generate_scene_config(prompt: str, output_path: str):
     # Retrieve the API key from environment variable
-    # This allows flexibility to use Groq, OpenAI, or other providers via OpenAI compatible endpoint
-    api_key = os.environ.get("OPENAI_API_KEY", "dummy-key")
-    base_url = os.environ.get("OPENAI_BASE_URL") # e.g., "https://api.groq.com/openai/v1"
+    # Use Gemini's OpenAI compatible endpoint
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        print("Error: GEMINI_API_KEY environment variable is not set.", file=sys.stderr)
+        print("Please export your key: export GEMINI_API_KEY='your_api_key_here'", file=sys.stderr)
+        sys.exit(1)
+
+    base_url = os.environ.get("GEMINI_BASE_URL", "https://generativelanguage.googleapis.com/v1beta/openai/")
 
     # Patch the OpenAI client with Instructor
     client = instructor.from_openai(OpenAI(
@@ -19,7 +24,7 @@ def generate_scene_config(prompt: str, output_path: str):
         base_url=base_url
     ))
     
-    model = os.environ.get("LLM_MODEL", "gpt-3.5-turbo") # Can be overridden (e.g., "mixtral-8x7b-32768" for Groq)
+    model = os.environ.get("LLM_MODEL", "gemini-2.5-flash") # Or "gemini-2.5-flash-lite" if that is the exact model name
     
     system_prompt = """
     You are an expert industrial safety simulation configurator.
