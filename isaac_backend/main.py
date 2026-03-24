@@ -2,6 +2,7 @@ import os
 import sys
 import json
 import random
+import argparse
 
 # CRITICAL: Start SimulationApp BEFORE any omni/pxr imports
 from isaacsim import SimulationApp
@@ -14,7 +15,7 @@ import omni.usd
 import omni.physx
 
 # --- TASK 3.2: Config Ingestion ---
-def load_config(config_path="/workspace/configs/current_scene.json", library_path="/workspace/assets/library.json"):
+def load_config(config_path="configs/current_scene.json", library_path="assets/library.json"):
     try:
         with open(config_path, "r") as f:
             scene_config = json.load(f)
@@ -22,7 +23,8 @@ def load_config(config_path="/workspace/configs/current_scene.json", library_pat
             asset_library = json.load(f)
         return scene_config, asset_library
     except Exception as e:
-        print(f"Failed to load configs: {e}")
+        print(f"Failed to load configs from {config_path} or {library_path}: {e}")
+        simulation_app.close() # Ensure we close the app so it doesn't hang!
         sys.exit(1)
 
 # --- TASK 4.1: Semantics Applicator ---
@@ -114,7 +116,12 @@ def setup_camera_and_lighting(config):
 
 
 def main():
-    scene_config, asset_library = load_config()
+    parser = argparse.ArgumentParser(description="Run Isaac Sim Headless Generation")
+    parser.add_argument("--config", type=str, default="configs/current_scene.json", help="Path to the SceneConfig JSON")
+    parser.add_argument("--library", type=str, default="assets/library.json", help="Path to the asset library JSON")
+    args = parser.parse_args()
+
+    scene_config, asset_library = load_config(args.config, args.library)
     
     # Setup scene elements
     camera, render_product = setup_camera_and_lighting(scene_config)
