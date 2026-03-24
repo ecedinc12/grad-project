@@ -69,7 +69,7 @@ def generate_scene_config(prompt: str, output_path: str):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate SceneConfig JSON from text prompt.")
     parser.add_argument("--prompt", type=str, required=True, help="User prompt describing the scene.")
-    parser.add_argument("--output", type=str, default="/workspace/configs/current_scene.json", help="Output path for the JSON config.")
+    parser.add_argument("--output", type=str, default="configs/current_scene.json", help="Output path for the JSON config.")
     
     args = parser.parse_args()
     generate_scene_config(args.prompt, args.output)

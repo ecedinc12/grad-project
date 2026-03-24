@@ -1,0 +1,9 @@
+{
+    "forklift": "omniverse://localhost/NVIDIA/Assets/Isaac/2023.1.1/Isaac/Props/Forklift/forklift.usd",
+    "worker": "omniverse://localhost/NVIDIA/Assets/Characters/Reallusion/Worker/Worker.usd",
+    "hardhat": "omniverse://localhost/NVIDIA/Assets/Characters/Reallusion/Worker/Props/Hardhat.usd",
+    "vest": "omniverse://localhost/NVIDIA/Assets/Characters/Reallusion/Worker/Props/SafetyVest.usd",
+    "pallet": "omniverse://localhost/NVIDIA/Assets/Isaac/2023.1.1/Isaac/Environments/Simple_Warehouse/Props/SM_PalletA_01.usd",
+    "rack": "omniverse://localhost/NVIDIA/Assets/Isaac/2023.1.1/Isaac/Environments/Simple_Warehouse/Props/SM_RackA_01.usd",
+    "zone": "omniverse://localhost/NVIDIA/Assets/Isaac/2023.1.1/Isaac/Environments/Simple_Warehouse/Warehouse.usd"
+}

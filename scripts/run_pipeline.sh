@@ -14,9 +14,11 @@ echo " Starting Generation Pipeline"
 echo " Prompt: $PROMPT"
 echo "========================================"
 
+PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+
 # Step 1: Generate config from prompt
 echo "[1/5] Running LLM Config Generator..."
-python3 /workspace/llm_pipeline/generator.py --prompt "$PROMPT"
+python3 "$PROJECT_ROOT/llm_pipeline/generator.py" --prompt "$PROMPT" --output "$PROJECT_ROOT/configs/current_scene.json"
 
 # Step 2: Clear old fast-disk data
 echo "[2/5] Cleaning up old dataset..."
@@ -24,11 +26,11 @@ rm -rf /tmp/dataset
 
 # Step 3: Run Isaac Sim Headless Replicator Generation
 echo "[3/5] Generating dataset via Isaac Sim..."
-/isaac-sim/python.sh /workspace/isaac_backend/main.py
+/isaac-sim/python.sh "$PROJECT_ROOT/isaac_backend/main.py"
 
 # Step 4: Convert COCO annotations to YOLO format
 echo "[4/5] Converting COCO to YOLO..."
-python3 /workspace/scripts/coco_to_yolo.py --dir /tmp/dataset
+python3 "$PROJECT_ROOT/scripts/coco_to_yolo.py" --dir /tmp/dataset
 
 # Step 5: Archive and move to persistent storage
 TIMESTAMP=$(date +%s)
