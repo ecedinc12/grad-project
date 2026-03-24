@@ -34,7 +34,7 @@ echo "[4/5] Converting COCO to YOLO..."
 
 # Step 5: Archive and move to persistent storage
 TIMESTAMP=$(date +%s)
-ARCHIVE_NAME="/workspace/dataset_${TIMESTAMP}.tar.gz"
+ARCHIVE_NAME="$PROJECT_ROOT/dataset_${TIMESTAMP}.tar.gz"
 
 echo "[5/5] Archiving output to $ARCHIVE_NAME..."
 tar -czf $ARCHIVE_NAME -C /tmp dataset/
