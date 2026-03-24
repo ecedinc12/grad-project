@@ -10,9 +10,10 @@ simulation_app = SimulationApp({"headless": True})
 
 # Now it is safe to import omni, pxr, replicator
 import omni.replicator.core as rep
-from pxr import UsdGeom, Gf, UsdPhysics, PhysxSchema
+from pxr import UsdGeom, Gf, UsdPhysics, PhysxSchema, Sdf
 import omni.usd
 import omni.physx
+import omni.kit.commands
 
 # --- TASK 3.2: Config Ingestion ---
 def load_config(config_path="configs/current_scene.json", library_path="assets/library.json"):
