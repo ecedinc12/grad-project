@@ -14,6 +14,7 @@ from pxr import UsdGeom, Gf, UsdPhysics, PhysxSchema, Sdf
 import omni.usd
 import omni.physx
 import omni.kit.commands
+from isaacsim.storage.native import get_assets_root_path
 
 # --- TASK 3.2: Config Ingestion ---
 def load_config(config_path="configs/current_scene.json", library_path="assets/library.json"):
@@ -22,6 +23,13 @@ def load_config(config_path="configs/current_scene.json", library_path="assets/l
             scene_config = json.load(f)
         with open(library_path, "r") as f:
             asset_library = json.load(f)
+        # Resolve omniverse://localhost/NVIDIA/Assets to the local assets root
+        assets_root = get_assets_root_path()
+        if assets_root:
+            asset_library = {
+                k: v.replace("omniverse://localhost/NVIDIA/Assets", assets_root)
+                for k, v in asset_library.items()
+            }
         return scene_config, asset_library
     except Exception as e:
         print(f"Failed to load configs from {config_path} or {library_path}: {e}")
@@ -159,7 +167,6 @@ def main():
         rgb=True,
         bounding_box_2d_tight=True,
         semantic_segmentation=True,
-        format="coco"
     )
     writer.attach([render_product])
 

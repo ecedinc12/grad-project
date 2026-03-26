@@ -1,60 +1,59 @@
 import os
-import json
+import glob
 import argparse
+import numpy as np
+from PIL import Image
 
-def convert_coco_to_yolo(coco_dir="/tmp/dataset"):
-    # Output from BasicWriter usually has a JSON file like bounding_box_2d_tight.json or instances_default.json
-    # BasicWriter with format="coco" outputs annotations in instances_default.json usually
-    coco_json_path = os.path.join(coco_dir, "instances_default.json")
-    
-    if not os.path.exists(coco_json_path):
-        print(f"Warning: COCO JSON not found at {coco_json_path}. Ensure BasicWriter has output the COCO format.")
+
+def convert_npy_to_yolo(dataset_dir="/tmp/dataset"):
+    bbox_dir = os.path.join(dataset_dir, "bounding_box_2d_tight")
+    rgb_dir = os.path.join(dataset_dir, "rgb")
+
+    npy_files = sorted(glob.glob(os.path.join(bbox_dir, "*.npy")))
+
+    if not npy_files:
+        print(f"Warning: No .npy files found in {bbox_dir}. Ensure BasicWriter has written output.")
         return
 
-    with open(coco_json_path, "r") as f:
-        coco_data = json.load(f)
+    converted = 0
+    for npy_path in npy_files:
+        basename = os.path.splitext(os.path.basename(npy_path))[0]
+        # e.g. bounding_box_2d_tight_0000 -> 0000
+        frame_str = basename.split("_")[-1]
 
-    # Dictionary to map image_id to its dict for easy access
-    images_info = {img["id"]: img for img in coco_data["images"]}
-    
-    # Process annotations
-    for ann in coco_data["annotations"]:
-        image_id = ann["image_id"]
-        category_id = ann["category_id"]
-        
-        # COCO BBox format is [x_min, y_min, width, height]
-        # YOLO BBox format is [x_center, y_center, width, height] normalized by image width and height
-        bbox = ann["bbox"]
-        x_min, y_min, width, height = bbox
-        
-        img_info = images_info[image_id]
-        img_width = img_info["width"]
-        img_height = img_info["height"]
-        
-        x_center = x_min + (width / 2.0)
-        y_center = y_min + (height / 2.0)
-        
-        norm_x_center = x_center / img_width
-        norm_y_center = y_center / img_height
-        norm_width = width / img_width
-        norm_height = height / img_height
-        
-        yolo_line = f"{category_id} {norm_x_center:.6f} {norm_y_center:.6f} {norm_width:.6f} {norm_height:.6f}\n"
-        
-        # Usually file_name is something like 'rgb_0000.png'
-        # We need to write to the same base name with .txt extension
-        img_filename = img_info["file_name"]
-        txt_filename = os.path.splitext(img_filename)[0] + ".txt"
-        txt_filepath = os.path.join(coco_dir, txt_filename)
-        
-        with open(txt_filepath, "a") as txt_f:
-            txt_f.write(yolo_line)
-            
-    print(f"Successfully converted COCO annotations to YOLO format in {coco_dir}")
+        rgb_path = os.path.join(rgb_dir, f"rgb_{frame_str}.png")
+        if not os.path.exists(rgb_path):
+            print(f"Warning: RGB image not found for frame {frame_str}, skipping.")
+            continue
+
+        with Image.open(rgb_path) as img:
+            img_width, img_height = img.size
+
+        bboxes = np.load(npy_path, allow_pickle=True)
+
+        txt_path = os.path.join(rgb_dir, f"rgb_{frame_str}.txt")
+        with open(txt_path, "w") as txt_f:
+            for row in bboxes:
+                x_min = float(row["x_min"])
+                y_min = float(row["y_min"])
+                x_max = float(row["x_max"])
+                y_max = float(row["y_max"])
+                class_id = int(row["semanticId"])
+
+                x_center = (x_min + x_max) / 2.0 / img_width
+                y_center = (y_min + y_max) / 2.0 / img_height
+                width = (x_max - x_min) / img_width
+                height = (y_max - y_min) / img_height
+
+                txt_f.write(f"{class_id} {x_center:.6f} {y_center:.6f} {width:.6f} {height:.6f}\n")
+
+        converted += 1
+
+    print(f"Successfully converted {converted} frames to YOLO format in {rgb_dir}")
+
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Convert COCO JSON to YOLO format.")
-    parser.add_argument("--dir", type=str, default="/tmp/dataset", help="Directory containing the COCO JSON and images.")
-    
+    parser = argparse.ArgumentParser(description="Convert BasicWriter numpy bbox output to YOLO format.")
+    parser.add_argument("--dir", type=str, default="/tmp/dataset", help="Directory containing BasicWriter output.")
     args = parser.parse_args()
-    convert_coco_to_yolo(args.dir)
+    convert_npy_to_yolo(args.dir)
