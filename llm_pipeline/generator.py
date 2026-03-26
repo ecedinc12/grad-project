@@ -18,11 +18,11 @@ def generate_scene_config(prompt: str, output_path: str):
 
     base_url = os.environ.get("GEMINI_BASE_URL", "https://generativelanguage.googleapis.com/v1beta/openai/")
 
-    # Patch the OpenAI client with Instructor
-    client = instructor.from_openai(OpenAI(
-        api_key=api_key,
-        base_url=base_url
-    ))
+    # Patch the OpenAI client with Instructor using JSON mode for Gemini compatibility
+    client = instructor.from_openai(
+        OpenAI(api_key=api_key, base_url=base_url),
+        mode=instructor.Mode.JSON
+    )
     
     model = os.environ.get("LLM_MODEL", "gemini-2.5-flash") # Or "gemini-2.5-flash-lite" if that is the exact model name
     
