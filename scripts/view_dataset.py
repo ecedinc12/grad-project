@@ -130,7 +130,7 @@ def main():
     print(f"Found {len(frames)} frames in {args.dir}")
     print(f"Serving on http://localhost:{args.port}")
     print(f"  SSH tunnel: ssh -L {args.port}:localhost:{args.port} <user>@<host>")
-    HTTPServer(("127.0.0.1", args.port), make_handler(args.dir, frames)).serve_forever()
+    HTTPServer(("0.0.0.0", args.port), make_handler(args.dir, frames)).serve_forever()
 
 
 if __name__ == "__main__":
