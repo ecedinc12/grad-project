@@ -26,7 +26,8 @@ def load_config(config_path="configs/current_scene.json", library_path="assets/l
         # Resolve omniverse://localhost/NVIDIA/Assets to the local assets root
         # Fall back to NVIDIA's public CDN if no Nucleus server is available
         NVIDIA_CDN = "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets"
-        assets_root = get_assets_root_path() or NVIDIA_CDN
+        _raw = get_assets_root_path()
+        assets_root = _raw if (_raw and _raw.startswith("omniverse://")) else NVIDIA_CDN
         asset_library = {
             k: v.replace("omniverse://localhost/NVIDIA/Assets", assets_root)
             for k, v in asset_library.items()
