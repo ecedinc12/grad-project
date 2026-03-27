@@ -183,11 +183,7 @@ def main():
 
     print("Running Replicator generation...")
     rep.orchestrator.run()
-    
-    # Wait until completed
-    while rep.orchestrator.get_is_started():
-        simulation_app.update()
-
+    rep.orchestrator.wait_until_complete()
     simulation_app.close()
     print("Generation complete. Data saved to /tmp/dataset.")
 
