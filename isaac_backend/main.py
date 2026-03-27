@@ -5,6 +5,7 @@ import random
 import argparse
 import glob
 import time
+import subprocess
 
 # CRITICAL: Start SimulationApp BEFORE any omni/pxr imports
 from isaacsim import SimulationApp
@@ -187,17 +188,35 @@ def main():
     print("Running Replicator generation...")
     rep.orchestrator.run()
 
-    # Phase 1: wait for orchestrator to finish scheduling frames
+    # Phase 0: wait for orchestrator to START (run() is non-blocking)
+    print(f"[DEBUG] get_is_started() right after run(): {rep.orchestrator.get_is_started()}")
+    t0 = time.time()
+    while not rep.orchestrator.get_is_started():
+        simulation_app.update()
+        if time.time() - t0 > 30:
+            print("[WARNING] Orchestrator never became started after 30s — check scene setup.")
+            break
+    print(f"[DEBUG] Orchestrator started (took {time.time()-t0:.1f}s). get_is_started()={rep.orchestrator.get_is_started()}")
+
+    # Phase 1: wait for orchestrator to FINISH scheduling frames
     while rep.orchestrator.get_is_started():
         simulation_app.update()
+    print("[DEBUG] Phase 1 done — orchestrator finished.")
 
-    # Phase 2: wait for BasicWriter's async I/O thread pool to flush .npy files to disk
+    # Diagnostic: show what was actually written
+    result = subprocess.run(
+        ["find", "/tmp/dataset", "-type", "f"],
+        capture_output=True, text=True
+    )
+    print(f"[DEBUG] Files written to /tmp/dataset:\n{result.stdout[:2000] or '  (none)'}")
+
+    # Phase 2: wait for BasicWriter's async I/O to flush .npy files to disk
     bbox_dir = "/tmp/dataset/bounding_box_2d_tight"
-    deadline = time.time() + 120  # 2-minute safety timeout
+    deadline = time.time() + 60  # 1-minute safety timeout
     while len(glob.glob(os.path.join(bbox_dir, "*.npy"))) < NUM_FRAMES:
         if time.time() > deadline:
             found = len(glob.glob(os.path.join(bbox_dir, "*.npy")))
-            print(f"Warning: timed out waiting for writer flush ({found}/{NUM_FRAMES} files written).")
+            print(f"[WARNING] Timed out waiting for writer flush ({found}/{NUM_FRAMES} files written).")
             break
         simulation_app.update()
 
