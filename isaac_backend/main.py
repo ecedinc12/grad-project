@@ -211,11 +211,10 @@ def main():
     print(f"[DEBUG] Files written to /tmp/dataset:\n{result.stdout[:2000] or '  (none)'}")
 
     # Phase 2: wait for BasicWriter's async I/O to flush .npy files to disk
-    bbox_dir = "/tmp/dataset/bounding_box_2d_tight"
     deadline = time.time() + 60  # 1-minute safety timeout
-    while len(glob.glob(os.path.join(bbox_dir, "*.npy"))) < NUM_FRAMES:
+    while len(glob.glob("/tmp/dataset/bounding_box_2d_tight_*.npy")) < NUM_FRAMES:
         if time.time() > deadline:
-            found = len(glob.glob(os.path.join(bbox_dir, "*.npy")))
+            found = len(glob.glob("/tmp/dataset/bounding_box_2d_tight_*.npy"))
             print(f"[WARNING] Timed out waiting for writer flush ({found}/{NUM_FRAMES} files written).")
             break
         simulation_app.update()

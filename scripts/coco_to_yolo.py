@@ -6,13 +6,10 @@ from PIL import Image
 
 
 def convert_npy_to_yolo(dataset_dir="/tmp/dataset"):
-    bbox_dir = os.path.join(dataset_dir, "bounding_box_2d_tight")
-    rgb_dir = os.path.join(dataset_dir, "rgb")
-
-    npy_files = sorted(glob.glob(os.path.join(bbox_dir, "*.npy")))
+    npy_files = sorted(glob.glob(os.path.join(dataset_dir, "bounding_box_2d_tight_*.npy")))
 
     if not npy_files:
-        print(f"Warning: No .npy files found in {bbox_dir}. Ensure BasicWriter has written output.")
+        print(f"Warning: No .npy files found in {dataset_dir}. Ensure BasicWriter has written output.")
         return
 
     converted = 0
@@ -21,7 +18,7 @@ def convert_npy_to_yolo(dataset_dir="/tmp/dataset"):
         # e.g. bounding_box_2d_tight_0000 -> 0000
         frame_str = basename.split("_")[-1]
 
-        rgb_path = os.path.join(rgb_dir, f"rgb_{frame_str}.png")
+        rgb_path = os.path.join(dataset_dir, f"rgb_{frame_str}.png")
         if not os.path.exists(rgb_path):
             print(f"Warning: RGB image not found for frame {frame_str}, skipping.")
             continue
@@ -31,7 +28,7 @@ def convert_npy_to_yolo(dataset_dir="/tmp/dataset"):
 
         bboxes = np.load(npy_path, allow_pickle=True)
 
-        txt_path = os.path.join(rgb_dir, f"rgb_{frame_str}.txt")
+        txt_path = os.path.join(dataset_dir, f"rgb_{frame_str}.txt")
         with open(txt_path, "w") as txt_f:
             for row in bboxes:
                 x_min = float(row["x_min"])
@@ -49,7 +46,7 @@ def convert_npy_to_yolo(dataset_dir="/tmp/dataset"):
 
         converted += 1
 
-    print(f"Successfully converted {converted} frames to YOLO format in {rgb_dir}")
+    print(f"Successfully converted {converted} frames to YOLO format in {dataset_dir}")
 
 
 if __name__ == "__main__":
