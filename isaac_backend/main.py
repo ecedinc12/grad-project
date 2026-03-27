@@ -3,6 +3,8 @@ import sys
 import json
 import random
 import argparse
+import glob
+import time
 
 # CRITICAL: Start SimulationApp BEFORE any omni/pxr imports
 from isaacsim import SimulationApp
@@ -173,7 +175,8 @@ def main():
     writer.attach([render_product])
 
     # --- TASK 5.1: The SDG Trigger ---
-    with rep.trigger.on_frame(num_frames=1000):
+    NUM_FRAMES = 1000
+    with rep.trigger.on_frame(num_frames=NUM_FRAMES):
         # Add a randomizer for camera pan
         with camera:
             rep.modify.pose(
@@ -183,7 +186,21 @@ def main():
 
     print("Running Replicator generation...")
     rep.orchestrator.run()
-    rep.orchestrator.wait_until_complete()
+
+    # Phase 1: wait for orchestrator to finish scheduling frames
+    while rep.orchestrator.get_is_started():
+        simulation_app.update()
+
+    # Phase 2: wait for BasicWriter's async I/O thread pool to flush .npy files to disk
+    bbox_dir = "/tmp/dataset/bounding_box_2d_tight"
+    deadline = time.time() + 120  # 2-minute safety timeout
+    while len(glob.glob(os.path.join(bbox_dir, "*.npy"))) < NUM_FRAMES:
+        if time.time() > deadline:
+            found = len(glob.glob(os.path.join(bbox_dir, "*.npy")))
+            print(f"Warning: timed out waiting for writer flush ({found}/{NUM_FRAMES} files written).")
+            break
+        simulation_app.update()
+
     simulation_app.close()
     print("Generation complete. Data saved to /tmp/dataset.")
 
