@@ -66,15 +66,6 @@ def load_config(config_path="configs/current_scene.json", library_path="assets/l
             scene_config = json.load(f)
         with open(library_path, "r") as f:
             asset_library = json.load(f)
-        # Resolve omniverse://localhost/NVIDIA/Assets to the local assets root
-        # Fall back to NVIDIA's public CDN if no Nucleus server is available
-        NVIDIA_CDN = "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets"
-        _raw = get_assets_root_path()
-        assets_root = _raw if (_raw and _raw.startswith("omniverse://")) else NVIDIA_CDN
-        asset_library = {
-            k: v.replace("omniverse://localhost/NVIDIA/Assets", assets_root)
-            for k, v in asset_library.items()
-        }
         return scene_config, asset_library
     except Exception as e:
         print(f"Failed to load configs from {config_path} or {library_path}: {e}")
@@ -177,36 +168,12 @@ def settle_physics(steps=120):
     print("[INFO] Physics settled.")
 
 
-# --- PPE USD Child Prim Spawner ---
-def spawn_ppe_for_worker(worker_prim_path, ppe_state, asset_library):
-    """Spawn PPE as USD child prims of the worker so they follow its transforms."""
-    if ppe_state.get("hardhat", False):
-        hardhat_path = asset_library.get("hardhat", "")
-        if hardhat_path:
-            child_path = f"{worker_prim_path}/Hardhat"
-            omni.kit.commands.execute(
-                "CreateReferenceCommand",
-                usd_context=omni.usd.get_context(),
-                path_to=child_path,
-                asset_path=hardhat_path,
-                instanceable=False,
-            )
-            apply_semantics(child_path, "Hardhat")
-            print(f"[INFO] Attached hardhat → {child_path}")
-
-    if ppe_state.get("vest", False):
-        vest_path = asset_library.get("vest", "")
-        if vest_path:
-            child_path = f"{worker_prim_path}/Vest"
-            omni.kit.commands.execute(
-                "CreateReferenceCommand",
-                usd_context=omni.usd.get_context(),
-                path_to=child_path,
-                asset_path=vest_path,
-                instanceable=False,
-            )
-            apply_semantics(child_path, "Vest")
-            print(f"[INFO] Attached vest → {child_path}")
+# --- Worker USD selector based on PPE state ---
+def _select_worker_usd(ppe_state, asset_library):
+    """Return the worker USD path based on whether PPE is worn."""
+    if ppe_state.get("hardhat", False) or ppe_state.get("vest", False):
+        return asset_library["worker_with_ppe"]
+    return asset_library["worker_no_ppe"]
 
 def setup_camera_and_lighting(config):
     condition = config.get("lighting_conditions", "daylight")
@@ -243,30 +210,38 @@ def main():
         asset_id = entity.get("asset_id", "")
         if asset_id == "zone":          # already loaded above
             continue
-        usd_path = asset_library.get(asset_id)
-        if usd_path is None:
-            print(f"[WARNING] Unknown asset_id '{asset_id}' at index {idx}. Skipping.")
-            continue
-        
-        # Default bounds
-        b_min, b_max = (-5, -5), (5, 5)
-        
-        spawner = get_geofenced_spawner(usd_path, num_instances=1, bounds_min=b_min, bounds_max=b_max)
-        
-        # Actually trigger the spawner to register it in Replicator
-        prims = spawner()
-        
-        # Apply semantics
-        semantic_class = "Person" if asset_type == "worker" else "Vehicle" if asset_type == "vehicle" else "Zone"
-        # In Replicator, the semantics need to be applied to the prims created
-        with prims:
-            rep.modify.semantics([("class", semantic_class)])
 
         if asset_type == "worker":
             ppe_state = entity.get("ppe_state") or {}
-            worker_prim_path = prims.get_output_prims()["prims"][0].GetPath().pathString
-            spawn_ppe_for_worker(worker_prim_path, ppe_state, asset_library)
+            usd_path = _select_worker_usd(ppe_state, asset_library)
+        else:
+            usd_path = asset_library.get(asset_id)
+            if usd_path is None:
+                print(f"[WARNING] Unknown asset_id '{asset_id}' at index {idx}. Skipping.")
+                continue
+
+        # Default bounds
+        b_min, b_max = (-5, -5), (5, 5)
+
+        spawner = get_geofenced_spawner(usd_path, num_instances=1, bounds_min=b_min, bounds_max=b_max)
+
+        # Actually trigger the spawner to register it in Replicator
+        prims = spawner()
+
+        # Apply semantics
+        if asset_type == "worker":
+            semantics = [("class", "Person")]
+            if ppe_state.get("hardhat", False):
+                semantics.append(("class", "Hardhat"))
+            if ppe_state.get("vest", False):
+                semantics.append(("class", "Vest"))
+            with prims:
+                rep.modify.semantics(semantics)
             print(f"[INFO] Worker {idx} ppe_state={ppe_state}")
+        else:
+            semantic_class = "Vehicle" if asset_type == "vehicle" else "Zone"
+            with prims:
+                rep.modify.semantics([("class", semantic_class)])
 
     # --- TASK 3.3: Replicator Writer ---
     # Initialize BasicWriter for COCO format

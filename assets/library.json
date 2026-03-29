@@ -1,12 +1,11 @@
 {
-    "forklift": "omniverse://localhost/NVIDIA/Assets/Isaac/2023.1.1/Isaac/Props/Forklift/forklift.usd",
-    "worker": "omniverse://localhost/NVIDIA/Assets/Characters/Reallusion/Worker/Worker.usd",
-    "hardhat": "omniverse://localhost/NVIDIA/Assets/Characters/Reallusion/Worker/Props/Hardhat.usd",
-    "vest": "omniverse://localhost/NVIDIA/Assets/Characters/Reallusion/Worker/Props/SafetyVest.usd",
-    "pallet": "omniverse://localhost/NVIDIA/Assets/Isaac/2023.1.1/Isaac/Environments/Simple_Warehouse/Props/SM_PalletA_01.usd",
-    "rack": "omniverse://localhost/NVIDIA/Assets/Isaac/2023.1.1/Isaac/Environments/Simple_Warehouse/Props/SM_RackA_01.usd",
-    "zone": "omniverse://localhost/NVIDIA/Assets/Isaac/2023.1.1/Isaac/Environments/Simple_Warehouse/warehouse.usd",
-    "box":    "omniverse://localhost/NVIDIA/Assets/Isaac/2023.1.1/Isaac/Environments/Simple_Warehouse/Props/SM_CardBoxA_01.usd",
-    "barrel": "omniverse://localhost/NVIDIA/Assets/Isaac/2023.1.1/Isaac/Environments/Simple_Warehouse/Props/SM_BarelPlastic_A_01.usd",
-    "cone":   "omniverse://localhost/NVIDIA/Assets/Isaac/2023.1.1/Isaac/Environments/Simple_Warehouse/Props/S_TrafficCone.usd"
+    "worker_with_ppe": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/People/Characters/male_adult_construction_01_new/male_adult_construction_01_new.usd",
+    "worker_no_ppe":   "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/People/Characters/M_Medical_01/M_Medical_01.usd",
+    "forklift": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Props/Forklift/forklift.usd",
+    "pallet":   "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Environments/Simple_Warehouse/Props/SM_PalletA_01.usd",
+    "rack":     "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Environments/Simple_Warehouse/Props/SM_RackA_01.usd",
+    "zone":     "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Environments/Simple_Warehouse/warehouse.usd",
+    "box":      "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Environments/Simple_Warehouse/Props/SM_CardBoxA_01.usd",
+    "barrel":   "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Environments/Simple_Warehouse/Props/SM_BarelPlastic_A_01.usd",
+    "cone":     "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Environments/Simple_Warehouse/Props/S_TrafficCone.usd"
 }
