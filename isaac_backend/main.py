@@ -264,7 +264,7 @@ def main():
 
         if asset_type == "worker":
             ppe_state = entity.get("ppe_state") or {}
-            worker_prim_path = prims.get_output_prims()["prims"][0]
+            worker_prim_path = prims.get_output_prims()["prims"][0].GetPath().pathString
             spawn_ppe_for_worker(worker_prim_path, ppe_state, asset_library)
             print(f"[INFO] Worker {idx} ppe_state={ppe_state}")
 
