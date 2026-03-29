@@ -14,7 +14,7 @@ simulation_app = SimulationApp({"headless": True})
 
 # Now it is safe to import omni, pxr, replicator
 import omni.replicator.core as rep
-from pxr import UsdGeom, Gf, UsdPhysics
+from pxr import UsdGeom, Gf
 import omni.usd
 import omni.kit.commands
 from isaacsim.storage.native import get_assets_root_path
@@ -106,66 +106,41 @@ def get_geofenced_spawner(asset_path, num_instances=1, bounds_min=(-10, -10), bo
     rep.randomizer.register(spawn_in_bounds)
     return spawn_in_bounds
 
-# --- Physics Clutter Spawner ---
+# --- Static Clutter Spawner ---
 CLUTTER_ASSET_IDS = ["box", "barrel", "cone"]
 
-def spawn_physics_clutter(asset_library, count=15):
-    """Spawn clutter objects with rigid-body physics so they fall and settle on the floor."""
+def spawn_clutter(asset_library, count=15):
+    """Scatter clutter objects on the floor at random positions."""
     stage = omni.usd.get_context().get_stage()
-
-    # Ensure a physics scene exists so gravity is active
-    physics_scene_path = "/World/PhysicsScene"
-    if not stage.GetPrimAtPath(physics_scene_path).IsValid():
-        UsdPhysics.Scene.Define(stage, physics_scene_path)
-
     available = [aid for aid in CLUTTER_ASSET_IDS if asset_library.get(aid)]
     if not available:
-        print("[WARNING] No clutter assets in library — skipping physics clutter.")
+        print("[WARNING] No clutter assets in library — skipping clutter.")
         return
 
     spawned = 0
     for i in range(count):
         asset_id = random.choice(available)
-        usd_path = asset_library[asset_id]
         prim_path = f"/World/Clutter/{asset_id}_{i}"
-
         omni.kit.commands.execute(
             "CreateReferenceCommand",
             usd_context=omni.usd.get_context(),
             path_to=prim_path,
-            asset_path=usd_path,
+            asset_path=asset_library[asset_id],
             instanceable=False,
         )
-
         prim = stage.GetPrimAtPath(prim_path)
         if not prim.IsValid():
             continue
-
-        # Random position elevated above the floor so objects fall naturally
-        x = random.uniform(-6, 6)
-        z = random.uniform(-6, 6)
-        y = random.uniform(1.5, 4.0)
         xform = UsdGeom.XformCommonAPI(prim)
-        xform.SetTranslate(Gf.Vec3d(x, y, z))
+        xform.SetTranslate(Gf.Vec3d(random.uniform(-6, 6), 0, random.uniform(-6, 6)))
         xform.SetRotate(
-            Gf.Vec3f(random.uniform(0, 360), random.uniform(0, 360), random.uniform(0, 360)),
+            Gf.Vec3f(0, random.uniform(0, 360), 0),
             UsdGeom.XformCommonAPI.RotationOrderXYZ,
         )
-
-        UsdPhysics.RigidBodyAPI.Apply(prim)
-        UsdPhysics.CollisionAPI.Apply(prim)
         apply_semantics(prim_path, "Clutter")
         spawned += 1
 
-    print(f"[INFO] Spawned {spawned} physics clutter objects.")
-
-
-def settle_physics(steps=120):
-    """Step the simulation so clutter falls and settles before Replicator captures frames."""
-    print(f"[INFO] Settling physics for {steps} steps...")
-    for _ in range(steps):
-        simulation_app.update()
-    print("[INFO] Physics settled.")
+    print(f"[INFO] Spawned {spawned} clutter objects.")
 
 
 # --- Worker USD selector based on PPE state ---
@@ -197,9 +172,8 @@ def main():
     # Always load the warehouse shell — provides floor, walls, ceiling, lighting
     rep.create.from_usd(asset_library["zone"])
 
-    # Scatter physics clutter and let it settle before capture begins
-    spawn_physics_clutter(asset_library)
-    settle_physics(steps=120)
+    # Scatter static clutter on the floor
+    spawn_clutter(asset_library)
 
     # Setup scene elements
     camera, render_product = setup_camera_and_lighting(scene_config)
