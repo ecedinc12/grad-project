@@ -2,6 +2,8 @@ import os
 import io
 import glob
 import argparse
+import tarfile
+import tempfile
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import numpy as np
@@ -15,6 +17,15 @@ PALETTE = [
     (200, 0, 255),
     (0, 220, 220),
 ]
+
+
+def extract_tar_to_tmp(tar_path):
+    """Extract a dataset tar.gz to a temp directory and return the path."""
+    tmp = tempfile.mkdtemp(prefix="ds_view_")
+    with tarfile.open(tar_path, "r:gz") as tf:
+        tf.extractall(tmp)
+    candidate = os.path.join(tmp, "dataset")
+    return candidate if os.path.isdir(candidate) else tmp
 
 
 def find_frames(dataset_dir):
@@ -119,18 +130,26 @@ def make_handler(dataset_dir, frames):
 def main():
     parser = argparse.ArgumentParser(description="Headless dataset gallery viewer.")
     parser.add_argument("--dir", default="/tmp/dataset", help="Dataset directory")
+    parser.add_argument("--tar", default=None, help="Path to dataset_*.tar.gz to serve directly")
     parser.add_argument("--port", type=int, default=8080, help="HTTP port")
     args = parser.parse_args()
 
-    frames = find_frames(args.dir)
+    if args.tar:
+        print(f"Extracting {args.tar} ...")
+        dataset_dir = extract_tar_to_tmp(args.tar)
+    else:
+        dataset_dir = args.dir
+
+    frames = find_frames(dataset_dir)
     if not frames:
-        print(f"No frames found in {args.dir}")
+        print(f"No frames found in {dataset_dir}")
         return
 
-    print(f"Found {len(frames)} frames in {args.dir}")
-    print(f"Serving on http://localhost:{args.port}")
-    print(f"  SSH tunnel: ssh -L {args.port}:localhost:{args.port} <user>@<host>")
-    HTTPServer(("0.0.0.0", args.port), make_handler(args.dir, frames)).serve_forever()
+    print(f"Found {len(frames)} frames in {dataset_dir}")
+    print(f"Serving on http://0.0.0.0:{args.port}")
+    print(f"  SSH tunnel : ssh -L {args.port}:localhost:{args.port} <user>@<host>")
+    print(f"  RunPod URL : https://<pod-id>-{args.port}.proxy.runpod.net  (requires port exposed in pod settings)")
+    HTTPServer(("0.0.0.0", args.port), make_handler(dataset_dir, frames)).serve_forever()
 
 
 if __name__ == "__main__":
