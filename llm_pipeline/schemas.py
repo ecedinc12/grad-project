@@ -13,5 +13,11 @@ class Entity(BaseModel):
 
 class SceneConfig(BaseModel):
     entities: List[Entity] = Field(default_factory=list, description="List of entities in the scene")
-    camera_angles: List[str] = Field(default_factory=list, description="List of camera angles/positions for rendering")
-    lighting_conditions: str = Field(default="daylight", description="Lighting conditions for the scene, e.g., daylight, overcast, night")
+    camera_angles: List[Literal["overhead", "high_angle", "eye_level", "low_angle"]] = Field(
+        default_factory=list,
+        description="Camera elevation hints. Each value must be one of: overhead, high_angle, eye_level, low_angle"
+    )
+    lighting_conditions: Literal["daylight", "overcast", "dusk", "night"] = Field(
+        default="daylight",
+        description="Lighting condition. Must be one of: daylight, overcast, dusk, night"
+    )

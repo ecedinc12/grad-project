@@ -33,9 +33,10 @@ def generate_scene_config(prompt: str, output_path: str):
     RULES:
     - Default PPEState: Workers default to hardhat=True and vest=True UNLESS the user explicitly states they are missing.
     - Entities types: 'worker', 'vehicle', 'zone'.
-    - Use common asset_id names like 'forklift', 'worker', 'pallet', 'rack', etc.
+    - The asset_id field MUST be exactly one of: 'worker', 'forklift', 'pallet', 'rack', 'box', 'barrel', 'cone'. Never invent an asset_id. If an entity does not match, omit it.
     - Set logical anchor_zones if mentioned (e.g., 'loading dock', 'aisle 3').
-    - If camera angles or lighting are not specified, make reasonable default choices.
+    - camera_angles values MUST each be exactly one of: 'overhead', 'high_angle', 'eye_level', 'low_angle'. Choose based on the user's description; default to ['eye_level'] if unspecified.
+    - lighting_conditions MUST be exactly one of: 'daylight', 'overcast', 'dusk', 'night'. Choose based on the user's description; default to 'daylight' if unspecified.
     """
 
     print(f"Generating configuration for prompt: '{prompt}'...")

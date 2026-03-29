@@ -1,8 +1,11 @@
+import json
 import os
 import glob
 import argparse
 import numpy as np
 from PIL import Image
+
+CLASS_MAP = {"Person": 0, "Vehicle": 1, "Hardhat": 2, "Vest": 3, "Clutter": 4}
 
 
 def convert_npy_to_yolo(dataset_dir="/tmp/dataset"):
@@ -11,6 +14,17 @@ def convert_npy_to_yolo(dataset_dir="/tmp/dataset"):
     if not npy_files:
         print(f"Warning: No .npy files found in {dataset_dir}. Ensure BasicWriter has written output.")
         return
+
+    label_file = os.path.join(dataset_dir, "semantic_id_to_labels.json")
+    id_to_label = {}
+    if os.path.exists(label_file):
+        raw = json.load(open(label_file))
+        # format: {"4": {"class": "Person"}, ...}  or {"4": "Person", ...}
+        for k, v in raw.items():
+            label = v["class"] if isinstance(v, dict) else v
+            id_to_label[int(k)] = label
+    else:
+        print(f"Warning: {label_file} not found; class IDs will not be remapped.")
 
     converted = 0
     for npy_path in npy_files:
@@ -35,7 +49,11 @@ def convert_npy_to_yolo(dataset_dir="/tmp/dataset"):
                 y_min = float(row["y_min"])
                 x_max = float(row["x_max"])
                 y_max = float(row["y_max"])
-                class_id = int(row["semanticId"])
+
+                label = id_to_label.get(int(row["semanticId"]), "")
+                class_id = CLASS_MAP.get(label, -1)
+                if class_id == -1:
+                    continue  # skip unlabelled / background prims
 
                 x_center = (x_min + x_max) / 2.0 / img_width
                 y_center = (y_min + y_max) / 2.0 / img_height
