@@ -7,16 +7,20 @@ import argparse
 import glob
 import time
 import subprocess
+import importlib
 
 # CRITICAL: Start SimulationApp BEFORE any omni/pxr imports
 from isaacsim import SimulationApp
 simulation_app = SimulationApp({"headless": True})
 
 # Now it is safe to import omni, pxr, replicator
+import carb
 import omni.replicator.core as rep
 from pxr import UsdGeom, Gf
 import omni.usd
 import omni.kit.commands
+import omni.kit.app
+from omni.isaac.core import World
 
 def _build_orbit_positions(n=30, radius_min=3, radius_max=6,
                             azimuth_deg=(0, 360), elevation_deg=(20, 70)):
@@ -198,6 +202,99 @@ def _select_worker_usd(ppe_state, asset_library):
         return asset_library["worker_with_ppe"]
     return asset_library["worker_no_ppe"]
 
+# ---------------------------------------------------------------------------
+# omni.anim.people integration helpers
+# ---------------------------------------------------------------------------
+
+def enable_extensions():
+    """Enable omni.anim.people and omni.anim.navigation extensions."""
+    manager = omni.kit.app.get_app().get_extension_manager()
+    for ext in ["omni.anim.people", "omni.anim.navigation"]:
+        if not manager.is_extension_enabled(ext):
+            print(f"[INFO] Enabling extension: {ext}")
+            manager.set_extension_enabled_immediate(ext, True)
+        else:
+            print(f"[INFO] Extension already active: {ext}")
+
+
+def setup_navmesh():
+    """Create a NavMeshVolume covering the warehouse floor (±8m, height 6m) and bake."""
+    stage = omni.usd.get_context().get_stage()
+
+    vol_path = "/World/NavMeshVolume"
+    vol_prim = stage.DefinePrim(vol_path, "Cube")
+    vol_prim.GetAttribute("size").Set(1.0)
+
+    xf = UsdGeom.Xformable(vol_prim)
+    xf.ClearXformOpOrder()
+    xf.AddTranslateOp().Set(Gf.Vec3d(0.0, 0.0, 1.0))
+    xf.AddScaleOp().Set(Gf.Vec3f(8.0, 8.0, 3.0))
+
+    vol_prim.SetCustomDataByKey("omni:navmesh:volume", True)
+
+    try:
+        omni.kit.commands.execute("RebuildNavMesh")
+        print("[INFO] NavMesh baked.")
+    except Exception as e:
+        print(f"[INFO] NavMesh bake failed ({e}), falling back to direct navigation.")
+        carb.settings.get_settings().set(
+            "/persistent/omni/anim/people/navmeshBasedNavigation", False
+        )
+
+
+def setup_people_simulation(command_file: str):
+    """Point omni.anim.people at the command file and call setup_characters()."""
+    carb.settings.get_settings().set(
+        "/persistent/omni/anim/people/commandFilePath", command_file
+    )
+    print(f"[INFO] People command file: {command_file}")
+
+    for module_name, fn_name in [
+        ("omni.anim.people", "setup_characters"),
+        ("omni.anim.people.scripts.global_agent_manager", "GlobalAgentManager"),
+    ]:
+        try:
+            mod = importlib.import_module(module_name)
+            fn = getattr(mod, fn_name)
+            if fn_name == "GlobalAgentManager":
+                fn().setup_characters()
+            else:
+                fn()
+            print(f"[INFO] setup_characters OK ({module_name})")
+            return
+        except Exception as e:
+            print(f"[INFO] {module_name}.{fn_name} failed: {e}")
+
+    print("[WARNING] setup_characters could not be called automatically.")
+    print("[WARNING]   → In UI: Window > People Simulation > Setup Characters")
+
+
+def write_command_file(worker_behaviors: list, path: str):
+    """
+    Serialise worker_behaviors (list of WorkerBehavior dicts) to people_commands.txt format:
+        worker_01 GoTo 3.0 -2.0 0.0 90
+        worker_01 Idle 2
+        worker_01 LookAround 3
+    """
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    lines = []
+    for wb in worker_behaviors:
+        worker_id = wb.get("worker_id", "worker_01")
+        for cmd in wb.get("commands", []):
+            command = cmd.get("command")
+            if command == "GoTo":
+                x = cmd.get("x", 0.0)
+                y = cmd.get("y", 0.0)
+                rot = cmd.get("rotation", 0.0)
+                lines.append(f"{worker_id} GoTo {x} {y} 0.0 {rot}")
+            elif command in ("Idle", "LookAround"):
+                dur = cmd.get("duration", 2.0)
+                lines.append(f"{worker_id} {command} {dur}")
+    with open(path, "w") as f:
+        f.write("\n".join(lines) + "\n")
+    print(f"[INFO] Wrote {len(lines)} command lines to {path}")
+
+
 # Ceiling lamp grid positions (x, y) — warehouse interior approx ±6m
 _CEILING_LAMP_XY = [(-4, -4), (0, -4), (4, -4), (-4, 0), (0, 0), (4, 0), (-4, 4), (0, 4), (4, 4)]
 _CEILING_Z = 5.5  # approximate ceiling lamp height in metres
@@ -228,9 +325,13 @@ def main():
     parser = argparse.ArgumentParser(description="Run Isaac Sim Headless Generation")
     parser.add_argument("--config", type=str, default="configs/current_scene.json", help="Path to the SceneConfig JSON")
     parser.add_argument("--library", type=str, default="assets/library.json", help="Path to the asset library JSON")
+    parser.add_argument("--commands", type=str, default="/tmp/people_commands.txt", help="Output path for generated people_commands.txt")
     args = parser.parse_args()
 
     scene_config, asset_library = load_config(args.config, args.library)
+
+    # Enable omni.anim.people + omni.anim.navigation before building the scene
+    enable_extensions()
 
     # Always load the warehouse shell — provides floor, walls, ceiling, lighting
     rep.create.from_usd(asset_library["zone"])
@@ -238,52 +339,92 @@ def main():
     # Build organised warehouse interior layout
     spawn_warehouse_layout(asset_library)
 
-    # Setup scene elements
+    # NavMesh must be set up after the floor/walls are in the stage
+    setup_navmesh()
+
+    # Setup camera and lighting
     camera, render_product = setup_camera_and_lighting(scene_config)
 
-    # Spawn Entities based on Config
-    for idx, entity in enumerate(scene_config.get("entities", [])):
-        asset_type = entity.get("type", "worker")
+    stage = omni.usd.get_context().get_stage()
+
+    # Separate workers from other entities
+    workers = [e for e in scene_config.get("entities", []) if e.get("type") == "worker"]
+    others  = [e for e in scene_config.get("entities", []) if e.get("type") != "worker"]
+
+    # --- Spawn non-worker entities via Replicator geofenced spawner (unchanged) ---
+    for idx, entity in enumerate(others):
         asset_id = entity.get("asset_id", "")
-        if asset_id == "zone":          # already loaded above
+        if asset_id == "zone":
+            continue
+        usd_path = asset_library.get(asset_id)
+        if usd_path is None:
+            print(f"[WARNING] Unknown asset_id '{asset_id}'. Skipping.")
             continue
 
-        if asset_type == "worker":
-            ppe_state = entity.get("ppe_state") or {}
-            usd_path = _select_worker_usd(ppe_state, asset_library)
-        else:
-            usd_path = asset_library.get(asset_id)
-            if usd_path is None:
-                print(f"[WARNING] Unknown asset_id '{asset_id}' at index {idx}. Skipping.")
-                continue
-
-        # Spawn entities in the center aisle / entry zone — clear of rack rows
         b_min, b_max = (-5, -2), (5, 2)
-
         spawner = get_geofenced_spawner(usd_path, num_instances=1, bounds_min=b_min, bounds_max=b_max)
-
-        # Actually trigger the spawner to register it in Replicator
         prims = spawner()
+        asset_type = entity.get("type", "")
+        semantic_class = "Vehicle" if asset_type == "vehicle" else "Zone"
+        with prims:
+            rep.modify.semantics([("class", semantic_class)])
 
-        # Apply semantics
-        if asset_type == "worker":
-            semantics = [("class", "Person")]
-            if ppe_state.get("hardhat", False):
-                semantics.append(("class", "Hardhat"))
-            if ppe_state.get("vest", False):
-                semantics.append(("class", "Vest"))
-            with prims:
-                rep.modify.semantics(semantics)
-            print(f"[INFO] Worker {idx} ppe_state={ppe_state}")
-        else:
-            semantic_class = "Vehicle" if asset_type == "vehicle" else "Zone"
-            with prims:
-                rep.modify.semantics([("class", semantic_class)])
+    # --- Spawn workers directly on the USD stage (required by omni.anim.people) ---
+    worker_behaviors = scene_config.get("worker_behaviors", [])
 
-    # Hide baked-in driver meshes in vehicle assets
+    # Build a quick lookup: worker_id → first GoTo position for initial placement
+    def _initial_pos(worker_id):
+        for wb in worker_behaviors:
+            if wb.get("worker_id") == worker_id:
+                for cmd in wb.get("commands", []):
+                    if cmd.get("command") == "GoTo":
+                        return cmd.get("x", 0.0), cmd.get("y", 0.0)
+        # Fallback: spread workers along the aisle
+        return random.uniform(-5.0, 5.0), random.uniform(-1.5, 1.5)
+
+    if workers:
+        stage.DefinePrim("/World/Characters", "Xform")
+
+    worker_idx = 0
+    for entity in workers:
+        worker_idx += 1
+        name = f"worker_{worker_idx:02d}"
+        prim_path = f"/World/Characters/{name}"
+
+        ppe_state = entity.get("ppe_state") or {}
+        usd_path = _select_worker_usd(ppe_state, asset_library)
+
+        prim = stage.DefinePrim(prim_path, "Xform")
+        prim.GetReferences().AddReference(usd_path)
+
+        spawn_x, spawn_y = _initial_pos(name)
+        xf = UsdGeom.Xformable(prim)
+        xf.ClearXformOpOrder()
+        xf.AddTranslateOp().Set(Gf.Vec3d(spawn_x, spawn_y, 0.0))
+
+        # Semantics
+        semantics = [("class", "Person")]
+        if ppe_state.get("hardhat", False):
+            semantics.append(("class", "Hardhat"))
+        if ppe_state.get("vest", False):
+            semantics.append(("class", "Vest"))
+        apply_semantics(prim_path, "Person")
+        # Apply additional PPE semantics via Replicator
+        with rep.get.prims(path_pattern=prim_path):
+            rep.modify.semantics(semantics)
+
+        print(f"[INFO] Spawned {name} @ ({spawn_x:.2f}, {spawn_y:.2f}, 0) ppe={ppe_state}")
+
+    # --- Generate people_commands.txt from LLM worker_behaviors ---
+    if worker_behaviors:
+        write_command_file(worker_behaviors, args.commands)
+    else:
+        print("[INFO] No worker_behaviors in config — people_commands.txt not written.")
+
+    # --- Hide baked-in driver meshes in vehicle assets ---
     hide_driver_prims()
 
-    # Initialize BasicWriter for COCO format
+    # --- Initialize BasicWriter ---
     writer = rep.WriterRegistry.get("BasicWriter")
     writer.initialize(
         output_dir="/tmp/dataset",
@@ -294,7 +435,6 @@ def main():
     writer.attach([render_product])
 
     NUM_FRAMES = 1000
-    # Build camera positions from LLM-provided angle hints
     angle_hints = scene_config.get("camera_angles", [])
     scene_positions = _positions_for_angles(angle_hints)
     print(f"[INFO] camera_angles={angle_hints}  →  {len(scene_positions)} orbit positions")
@@ -303,42 +443,43 @@ def main():
         with camera:
             rep.modify.pose(
                 position=rep.distribution.choice(scene_positions),
-                look_at=(0, 0, 1.2)   # human torso height (Z-up) — keeps workers centered
+                look_at=(0, 0, 1.2)
             )
 
-    print("Running Replicator generation...")
-    rep.orchestrator.run()
+    # --- Set up omni.anim.people (must happen after workers are in stage) ---
+    if workers and worker_behaviors:
+        setup_people_simulation(args.commands)
 
-    # Phase 0: wait for orchestrator to START (run() is non-blocking)
-    print(f"[DEBUG] get_is_started() right after run(): {rep.orchestrator.get_is_started()}")
-    t0 = time.time()
-    while not rep.orchestrator.get_is_started():
+    # --- World-based simulation loop (replaces rep.orchestrator.run()) ---
+    world = World(stage_units_in_meters=1.0)
+    world.initialize_simulation_context()
+
+    # Warm-up: let extensions process the USD stage
+    for _ in range(5):
         simulation_app.update()
-        if time.time() - t0 > 30:
-            print("[WARNING] Orchestrator never became started after 30s — check scene setup.")
-            break
-    print(f"[DEBUG] Orchestrator started (took {time.time()-t0:.1f}s). get_is_started()={rep.orchestrator.get_is_started()}")
 
-    # Phase 1: wait for orchestrator to FINISH scheduling frames
-    while rep.orchestrator.get_is_started():
-        simulation_app.update()
-    print("[DEBUG] Phase 1 done — orchestrator finished.")
+    world.reset()
 
-    # Diagnostic: show what was actually written
-    result = subprocess.run(
-        ["find", "/tmp/dataset", "-type", "f"],
-        capture_output=True, text=True
-    )
-    print(f"[DEBUG] Files written to /tmp/dataset:\n{result.stdout[:2000] or '  (none)'}")
+    print(f"[INFO] Running simulation loop: {NUM_FRAMES} frames...")
+    for step in range(NUM_FRAMES):
+        world.step(render=True)
+        rep.orchestrator.step(rt_subframes=1)
 
-    # Phase 2: wait for BasicWriter's async I/O to flush .npy files to disk
-    deadline = time.time() + 60  # 1-minute safety timeout
+    # Wait for BasicWriter async I/O to flush
+    deadline = time.time() + 60
     while len(glob.glob("/tmp/dataset/bounding_box_2d_tight_*.npy")) < NUM_FRAMES:
         if time.time() > deadline:
             found = len(glob.glob("/tmp/dataset/bounding_box_2d_tight_*.npy"))
             print(f"[WARNING] Timed out waiting for writer flush ({found}/{NUM_FRAMES} files written).")
             break
         simulation_app.update()
+
+    # Diagnostic
+    result = subprocess.run(
+        ["find", "/tmp/dataset", "-type", "f"],
+        capture_output=True, text=True
+    )
+    print(f"[DEBUG] Files written to /tmp/dataset:\n{result.stdout[:2000] or '  (none)'}")
 
     simulation_app.close()
     print("Generation complete. Data saved to /tmp/dataset.")

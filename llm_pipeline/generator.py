@@ -5,7 +5,7 @@ import argparse
 import instructor
 from openai import OpenAI
 from pydantic import ValidationError
-from schemas import SceneConfig, Entity, PPEState
+from schemas import SceneConfig, Entity, PPEState, WorkerBehavior, BehaviorCommand
 
 def generate_scene_config(prompt: str, output_path: str):
     # Retrieve the API key from environment variable
@@ -28,8 +28,8 @@ def generate_scene_config(prompt: str, output_path: str):
     
     system_prompt = """
     You are an expert industrial safety simulation configurator.
-    Your job is to extract entities, PPE states, and scene configuration from user prompts.
-    
+    Your job is to extract entities, PPE states, scene configuration, and worker behavior sequences from user prompts.
+
     RULES:
     - ONLY include entities the user explicitly mentions. Do NOT add background props, vehicles, or workers that were not requested.
     - Default PPEState: Workers default to hardhat=True and vest=True UNLESS the user explicitly states they are missing.
@@ -38,6 +38,18 @@ def generate_scene_config(prompt: str, output_path: str):
     - Set logical anchor_zones if mentioned (e.g., 'loading dock', 'aisle 3').
     - camera_angles values MUST each be exactly one of: 'overhead', 'high_angle', 'eye_level', 'low_angle'. Choose based on the user's description; default to ['eye_level'] if unspecified.
     - lighting_conditions MUST be exactly one of: 'daylight', 'overcast', 'dusk', 'night'. Choose based on the user's description; default to 'daylight' if unspecified.
+
+    WORKER BEHAVIOR RULES:
+    - Generate one WorkerBehavior entry per worker entity in the scene, in the same order they appear in entities.
+    - Assign worker_id sequentially: "worker_01", "worker_02", etc.
+    - Each WorkerBehavior must have at least 3 commands.
+    - GoTo commands: x and y MUST be within [-6, 6] (warehouse bounds). Set rotation to a sensible facing direction (degrees, 0–360). z is always 0.0 (set x and y only; the field named z in the command file is always 0.0).
+    - Idle/LookAround commands: set duration in seconds (1–5 s). Do NOT set x, y, or rotation for these.
+    - Tailor behavior to the scenario:
+      * "danger zone" or "forklift" → worker GoTo path crosses the forklift aisle (y near 0, x sweeping across)
+      * "patrol" → 4+ GoTo waypoints forming a loop around the warehouse perimeter
+      * "inspection" → alternating short GoTo hops (1–2 m apart) and LookAround pauses
+      * Default (no scenario) → mix of GoTo waypoints and Idle breaks covering different quadrants
     """
 
     print(f"Generating configuration for prompt: '{prompt}'...")
