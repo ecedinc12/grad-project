@@ -17,7 +17,6 @@ import omni.replicator.core as rep
 from pxr import UsdGeom, Gf
 import omni.usd
 import omni.kit.commands
-from isaacsim.storage.native import get_assets_root_path
 
 def _build_orbit_positions(n=30, radius_min=10, radius_max=14,
                             azimuth_deg=(0, 360), elevation_deg=(20, 70)):
@@ -28,8 +27,8 @@ def _build_orbit_positions(n=30, radius_min=10, radius_max=14,
         el = math.radians(elevation_deg[0] + (elevation_deg[1] - elevation_deg[0]) * (i % 5) / 4)
         r  = radius_min + (radius_max - radius_min) * (i % 3) / 2
         x  = r * math.cos(el) * math.cos(az)
-        z  = r * math.cos(el) * math.sin(az)
-        y  = r * math.sin(el)   # Y-up; if stage is Z-up, swap y and z
+        y  = r * math.cos(el) * math.sin(az)
+        z  = r * math.sin(el)   # Isaac Sim is Z-up
         positions.append((x, y, z))
     return positions
 
@@ -59,7 +58,6 @@ LIGHTING_MAP = {
     "night":    {"intensity":   50, "color": (0.20, 0.25, 0.40)},
 }
 
-# --- TASK 3.2: Config Ingestion ---
 def load_config(config_path="configs/current_scene.json", library_path="assets/library.json"):
     try:
         with open(config_path, "r") as f:
@@ -72,7 +70,6 @@ def load_config(config_path="configs/current_scene.json", library_path="assets/l
         simulation_app.close() # Ensure we close the app so it doesn't hang!
         sys.exit(1)
 
-# --- TASK 4.1: Semantics Applicator ---
 def apply_semantics(prim_path, class_name):
     """
     Applies semantic class to a given prim path using Replicator.
@@ -80,26 +77,17 @@ def apply_semantics(prim_path, class_name):
     with rep.get.prims(path_pattern=prim_path):
         rep.modify.semantics([("class", class_name)])
 
-# --- TASK 4.2: Geofence Bounds ---
 def get_geofenced_spawner(asset_path, num_instances=1, bounds_min=(-10, -10), bounds_max=(10, 10)):
-    """
-    Spawns entities strictly within bounded areas (Hazard Zones).
-    Uses rep.randomizer.scatter_2d.
-    """
+    """Spawn an entity at a random XY position on the floor within the given bounds."""
     def spawn_in_bounds():
         prims = rep.create.from_usd(asset_path, count=num_instances)
         with prims:
-            rep.randomizer.scatter_2d(
-                surface_prims=None, # Usually requires a plane/surface, using default bounds
-                seed=random.randint(0, 10000)
-            )
-            # Alternatively use randomizer for translation directly:
             rep.modify.pose(
                 position=rep.distribution.uniform(
-                    (bounds_min[0], 0, bounds_min[1]), 
-                    (bounds_max[0], 0, bounds_max[1])
+                    (bounds_min[0], bounds_min[1], 0),
+                    (bounds_max[0], bounds_max[1], 0)
                 ),
-                rotation=rep.distribution.uniform((0, 0, 0), (0, 360, 0))
+                rotation=rep.distribution.uniform((0, 0, 0), (0, 0, 360))
             )
         return prims
     
@@ -132,7 +120,7 @@ def spawn_clutter(asset_library, count=15):
         if not prim.IsValid():
             continue
         xform = UsdGeom.XformCommonAPI(prim)
-        xform.SetTranslate(Gf.Vec3d(random.uniform(-6, 6), 0, random.uniform(-6, 6)))
+        xform.SetTranslate(Gf.Vec3d(random.uniform(-6, 6), random.uniform(-6, 6), 0))
         xform.SetRotate(
             Gf.Vec3f(0, random.uniform(0, 360), 0),
             UsdGeom.XformCommonAPI.RotationOrderXYZ,
@@ -141,6 +129,19 @@ def spawn_clutter(asset_library, count=15):
         spawned += 1
 
     print(f"[INFO] Spawned {spawned} clutter objects.")
+
+
+def hide_driver_prims():
+    """Hide baked-in driver/operator meshes inside vehicle assets."""
+    stage = omni.usd.get_context().get_stage()
+    hidden = 0
+    for prim in stage.Traverse():
+        if "driver" in prim.GetName().lower():
+            UsdGeom.Imageable(prim).MakeInvisible()
+            print(f"[INFO] Hid driver prim: {prim.GetPath()}")
+            hidden += 1
+    if hidden == 0:
+        print("[INFO] No driver prims found (forklift not in scene, or prim name differs).")
 
 
 # --- Worker USD selector based on PPE state ---
@@ -217,7 +218,9 @@ def main():
             with prims:
                 rep.modify.semantics([("class", semantic_class)])
 
-    # --- TASK 3.3: Replicator Writer ---
+    # Hide baked-in driver meshes in vehicle assets
+    hide_driver_prims()
+
     # Initialize BasicWriter for COCO format
     writer = rep.WriterRegistry.get("BasicWriter")
     writer.initialize(
@@ -228,7 +231,6 @@ def main():
     )
     writer.attach([render_product])
 
-    # --- TASK 5.1: The SDG Trigger ---
     NUM_FRAMES = 1000
     # Build camera positions from LLM-provided angle hints
     angle_hints = scene_config.get("camera_angles", [])
@@ -239,7 +241,7 @@ def main():
         with camera:
             rep.modify.pose(
                 position=rep.distribution.choice(scene_positions),
-                look_at=(0, 1.2, 0)   # human torso height — keeps workers centered
+                look_at=(0, 0, 1.2)   # human torso height (Z-up) — keeps workers centered
             )
 
     print("Running Replicator generation...")

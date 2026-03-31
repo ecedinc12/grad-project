@@ -31,6 +31,7 @@ def generate_scene_config(prompt: str, output_path: str):
     Your job is to extract entities, PPE states, and scene configuration from user prompts.
     
     RULES:
+    - ONLY include entities the user explicitly mentions. Do NOT add background props, vehicles, or workers that were not requested.
     - Default PPEState: Workers default to hardhat=True and vest=True UNLESS the user explicitly states they are missing.
     - Entities types: 'worker', 'vehicle', 'zone'.
     - The asset_id field MUST be exactly one of: 'worker', 'forklift', 'pallet', 'rack', 'box', 'barrel', 'cone'. Never invent an asset_id. If an entity does not match, omit it.
