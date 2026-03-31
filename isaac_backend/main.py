@@ -18,7 +18,7 @@ from pxr import UsdGeom, Gf
 import omni.usd
 import omni.kit.commands
 
-def _build_orbit_positions(n=30, radius_min=10, radius_max=14,
+def _build_orbit_positions(n=30, radius_min=3, radius_max=6,
                             azimuth_deg=(0, 360), elevation_deg=(20, 70)):
     """Pre-compute n camera positions on a hemisphere — all at safe distance from origin."""
     positions = []
@@ -94,41 +94,88 @@ def get_geofenced_spawner(asset_path, num_instances=1, bounds_min=(-10, -10), bo
     rep.randomizer.register(spawn_in_bounds)
     return spawn_in_bounds
 
-# --- Static Clutter Spawner ---
-CLUTTER_ASSET_IDS = ["box", "barrel", "cone"]
+# --- Warehouse Layout Spawner ---
+#
+# Top-down layout (Z-up, Y = depth into warehouse):
+#
+#  Y= 7  ██ rack ██ rack ██ rack ██ rack ██ rack ██   ← back wall row
+#  Y= 7  ░░pallet░░ pallet ░░ pallet ░░ pallet ░░
+#
+#  Y= 3  ██ rack ██ rack ██ rack ██ rack ██ rack ██   ← row A
+#         ─────────── aisle (Y = 0) ───────────────
+#  Y=-3  ██ rack ██ rack ██ rack ██ rack ██ rack ██   ← row B (mirrored)
+#  Y=-3  ░░pallet░░ pallet ░░ pallet ░░ pallet ░░
+#
+#  Y=-6  [ boxes / barrels / cones scattered ]        ← staging / entry area
+#
+#  X positions: -6  -3   0   3   6
 
-def spawn_clutter(asset_library, count=15):
-    """Scatter clutter objects on the floor at random positions."""
+def spawn_warehouse_layout(asset_library):
+    """Build an organised warehouse interior: rack rows, pallet staging, aisle clutter."""
     stage = omni.usd.get_context().get_stage()
-    available = [aid for aid in CLUTTER_ASSET_IDS if asset_library.get(aid)]
-    if not available:
-        print("[WARNING] No clutter assets in library — skipping clutter.")
-        return
-
+    _idx = [0]
     spawned = 0
-    for i in range(count):
-        asset_id = random.choice(available)
-        prim_path = f"/World/Clutter/{asset_id}_{i}"
+
+    def place(asset_id, x, y, z=0, rot_z=0):
+        nonlocal spawned
+        usd = asset_library.get(asset_id)
+        if not usd:
+            return
+        path = f"/World/Layout/{asset_id}_{_idx[0]}"
+        _idx[0] += 1
         omni.kit.commands.execute(
             "CreateReferenceCommand",
             usd_context=omni.usd.get_context(),
-            path_to=prim_path,
-            asset_path=asset_library[asset_id],
+            path_to=path,
+            asset_path=usd,
             instanceable=False,
         )
-        prim = stage.GetPrimAtPath(prim_path)
+        prim = stage.GetPrimAtPath(path)
         if not prim.IsValid():
-            continue
-        xform = UsdGeom.XformCommonAPI(prim)
-        xform.SetTranslate(Gf.Vec3d(random.uniform(-6, 6), random.uniform(-6, 6), 0))
-        xform.SetRotate(
-            Gf.Vec3f(0, random.uniform(0, 360), 0),
-            UsdGeom.XformCommonAPI.RotationOrderXYZ,
-        )
-        apply_semantics(prim_path, "Clutter")
+            return
+        xf = UsdGeom.XformCommonAPI(prim)
+        xf.SetTranslate(Gf.Vec3d(x, y, z))
+        xf.SetRotate(Gf.Vec3f(0, 0, rot_z), UsdGeom.XformCommonAPI.RotationOrderXYZ)
+        apply_semantics(path, "Clutter")
         spawned += 1
 
-    print(f"[INFO] Spawned {spawned} clutter objects.")
+    rack_xs = [-6, -3, 0, 3, 6]
+
+    # Back wall rack row + pallets in front of each bay
+    for x in rack_xs:
+        place("rack",   x,    7.0, rot_z=90)
+        place("pallet", x,    5.8, rot_z=random.uniform(-20, 20))
+
+    # Interior row A — faces inward (toward aisle)
+    for x in rack_xs:
+        place("rack", x, 3.0, rot_z=90)
+
+    # Interior row B — mirrored across the center aisle
+    for x in rack_xs:
+        place("rack",   x,   -3.0, rot_z=270)
+        place("pallet", x,   -1.8, rot_z=random.uniform(-20, 20))
+
+    # Pallet staging cluster in the center aisle (Y ≈ 0)
+    for dx, dy in [(-1.0, 0.0), (0.5, 0.2), (2.0, -0.3), (-2.5, 0.1)]:
+        place("pallet", dx, dy, rot_z=random.uniform(0, 90))
+
+    # Small clutter scattered through the center aisle and entry area
+    small = ["box"] * 6 + ["barrel"] * 4 + ["cone"] * 4
+    random.shuffle(small)
+    # Center aisle band (Y = -1.5 → 1.5, full X width)
+    for prop in small[:8]:
+        place(prop,
+              random.uniform(-5.5, 5.5),
+              random.uniform(-1.5, 1.5),
+              rot_z=random.uniform(0, 360))
+    # Entry / staging area (Y = -4 → -6)
+    for prop in small[8:]:
+        place(prop,
+              random.uniform(-5.0, 5.0),
+              random.uniform(-6.0, -4.2),
+              rot_z=random.uniform(0, 360))
+
+    print(f"[INFO] Spawned {spawned} layout props.")
 
 
 def hide_driver_prims():
@@ -151,11 +198,26 @@ def _select_worker_usd(ppe_state, asset_library):
         return asset_library["worker_with_ppe"]
     return asset_library["worker_no_ppe"]
 
+# Ceiling lamp grid positions (x, y) — warehouse interior approx ±6m
+_CEILING_LAMP_XY = [(-4, -4), (0, -4), (4, -4), (-4, 0), (0, 0), (4, 0), (-4, 4), (0, 4), (4, 4)]
+_CEILING_Z = 5.5  # approximate ceiling lamp height in metres
+
 def setup_camera_and_lighting(config):
     condition = config.get("lighting_conditions", "daylight")
     params = LIGHTING_MAP.get(condition, LIGHTING_MAP["daylight"])
     print(f"[INFO] lighting_conditions={condition!r}  →  intensity={params['intensity']}, color={params['color']}")
     rep.create.light(light_type="Dome", intensity=params["intensity"], color=params["color"])
+
+    if condition == "night":
+        # Night = dark sky dome + artificial ceiling fixtures (warm white LED look)
+        for x, y in _CEILING_LAMP_XY:
+            rep.create.light(
+                light_type="Sphere",
+                intensity=600,
+                color=(1.0, 0.97, 0.88),
+                position=(x, y, _CEILING_Z),
+                scale=0.15,
+            )
 
     camera = rep.create.camera(position=(0, 5, 10), look_at=(0, 0, 0))
     render_product = rep.create.render_product(camera, (1024, 1024))
@@ -173,8 +235,8 @@ def main():
     # Always load the warehouse shell — provides floor, walls, ceiling, lighting
     rep.create.from_usd(asset_library["zone"])
 
-    # Scatter static clutter on the floor
-    spawn_clutter(asset_library)
+    # Build organised warehouse interior layout
+    spawn_warehouse_layout(asset_library)
 
     # Setup scene elements
     camera, render_product = setup_camera_and_lighting(scene_config)
@@ -195,8 +257,8 @@ def main():
                 print(f"[WARNING] Unknown asset_id '{asset_id}' at index {idx}. Skipping.")
                 continue
 
-        # Default bounds
-        b_min, b_max = (-5, -5), (5, 5)
+        # Spawn entities in the center aisle / entry zone — clear of rack rows
+        b_min, b_max = (-5, -2), (5, 2)
 
         spawner = get_geofenced_spawner(usd_path, num_instances=1, bounds_min=b_min, bounds_max=b_max)
 
