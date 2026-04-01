@@ -481,6 +481,35 @@ def main():
     )
     print(f"[DEBUG] Files written to /tmp/dataset:\n{result.stdout[:2000] or '  (none)'}")
 
+    # Explicitly tear down Replicator and World before closing to avoid
+    # OmniGraph use-after-free crash during Python's atexit phase.
+    try:
+        rep.orchestrator.stop()
+    except Exception:
+        pass
+
+    # Drain any in-flight OmniGraph work before touching the render product.
+    for _ in range(3):
+        simulation_app.update()
+
+    try:
+        writer.detach()
+    except Exception:
+        pass
+
+    # Destroy the render product — without this, omni.syntheticdata holds a
+    # live OmniGraph node that crashes during Python's atexit phase via
+    # shared_ptr::_M_release inside libomni.syntheticdata.plugin.so.
+    try:
+        render_product.destroy()
+    except Exception:
+        pass
+
+    try:
+        world.clear()
+    except Exception:
+        pass
+
     simulation_app.close()
     print("Generation complete. Data saved to /tmp/dataset.")
 
