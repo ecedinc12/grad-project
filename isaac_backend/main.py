@@ -207,39 +207,21 @@ def _select_worker_usd(ppe_state, asset_library):
 # ---------------------------------------------------------------------------
 
 def enable_extensions():
-    """Enable omni.anim.people and omni.anim.navigation extensions."""
+    """Enable omni.anim.people extension."""
     manager = omni.kit.app.get_app().get_extension_manager()
-    for ext in ["omni.anim.people", "omni.anim.navigation"]:
-        if not manager.is_extension_enabled(ext):
-            print(f"[INFO] Enabling extension: {ext}")
-            manager.set_extension_enabled_immediate(ext, True)
-        else:
-            print(f"[INFO] Extension already active: {ext}")
+    if not manager.is_extension_enabled("omni.anim.people"):
+        print("[INFO] Enabling extension: omni.anim.people")
+        manager.set_extension_enabled_immediate("omni.anim.people", True)
+    else:
+        print("[INFO] Extension already active: omni.anim.people")
 
 
 def setup_navmesh():
-    """Create a NavMeshVolume covering the warehouse floor (±8m, height 6m) and bake."""
-    stage = omni.usd.get_context().get_stage()
-
-    vol_path = "/World/NavMeshVolume"
-    vol_prim = stage.DefinePrim(vol_path, "Cube")
-    vol_prim.GetAttribute("size").Set(1.0)
-
-    xf = UsdGeom.Xformable(vol_prim)
-    xf.ClearXformOpOrder()
-    xf.AddTranslateOp().Set(Gf.Vec3d(0.0, 0.0, 1.0))
-    xf.AddScaleOp().Set(Gf.Vec3f(8.0, 8.0, 3.0))
-
-    vol_prim.SetCustomDataByKey("omni:navmesh:volume", True)
-
-    try:
-        omni.kit.commands.execute("RebuildNavMesh")
-        print("[INFO] NavMesh baked.")
-    except Exception as e:
-        print(f"[INFO] NavMesh bake failed ({e}), falling back to direct navigation.")
-        carb.settings.get_settings().set(
-            "/persistent/omni/anim/people/navmeshBasedNavigation", False
-        )
+    """Disable navmesh-based navigation (omni.anim.navigation removed in Isaac Sim 5.1)."""
+    carb.settings.get_settings().set(
+        "/persistent/omni/anim/people/navmeshBasedNavigation", False
+    )
+    print("[INFO] Direct navigation active (navmesh not available).")
 
 
 def setup_people_simulation(command_file: str):
