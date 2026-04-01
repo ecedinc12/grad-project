@@ -452,7 +452,6 @@ def main():
 
     # --- World-based simulation loop (replaces rep.orchestrator.run()) ---
     world = World(stage_units_in_meters=1.0)
-    world.initialize_simulation_context()
 
     # Warm-up: let extensions process the USD stage
     for _ in range(5):
