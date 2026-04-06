@@ -16,7 +16,8 @@ simulation_app = SimulationApp({"headless": True})
 # Now it is safe to import omni, pxr, replicator
 import carb
 import omni.replicator.core as rep
-from pxr import UsdGeom, Gf
+from pxr import UsdGeom, Gf, Sdf
+from semantics.schema.editor import remove_prim_semantics
 import omni.usd
 import omni.kit.commands
 import omni.kit.app
@@ -98,6 +99,42 @@ def get_geofenced_spawner(asset_path, num_instances=1, bounds_min=(-10, -10), bo
     rep.randomizer.register(spawn_in_bounds)
     return spawn_in_bounds
 
+
+def spawn_hazard_zones(hazard_zones):
+    """Create invisible USD volumes with 'hazard_zone' semantics for each defined zone.
+    
+    These appear in bounding box and segmentation output but not in RGB,
+    enabling the model to learn zone-based safety violations.
+    """
+    stage = omni.usd.get_context().get_stage()
+    stage.DefinePrim("/World/HazardZones", "Xform")
+    
+    for zone in hazard_zones:
+        name = zone.get("name", f"zone_{random.randint(0, 999)}")
+        bmin = zone.get("bounds_min", (-2, -2))
+        bmax = zone.get("bounds_max", (2, 2))
+        danger = zone.get("danger_level", "warning")
+        
+        cx = (bmin[0] + bmax[0]) / 2.0
+        cy = (bmin[1] + bmax[1]) / 2.0
+        sx = abs(bmax[0] - bmin[0])
+        sy = abs(bmax[1] - bmin[1])
+        
+        prim_path = f"/World/HazardZones/{name}"
+        prim = stage.DefinePrim(prim_path, "Cube")
+        
+        xf = UsdGeom.Xformable(prim)
+        xf.ClearXformOpOrder()
+        xf.AddTranslateOp().Set(Gf.Vec3d(cx, cy, 0.5))
+        xf.AddScaleOp().Set(Gf.Vec3d(sx, sy, 1.0))
+        
+        UsdGeom.Imageable(prim).MakeInvisible()
+        
+        prim.CreateAttribute("semantic:Semantics:params:semanticData", Sdf.ValueTypeNames.Token, True).Set(f"hazard_zone_{danger}")
+        prim.CreateAttribute("semantic:Semantics:params:semanticType", Sdf.ValueTypeNames.Token, True).Set("class")
+        
+        print(f"[INFO] Hazard zone '{name}' at ({cx:.1f}, {cy:.1f}) size={sx:.1f}x{sy:.1f} danger={danger}")
+
 # --- Warehouse Layout Spawner ---
 #
 # Top-down layout (Z-up, Y = depth into warehouse):
@@ -140,7 +177,7 @@ def spawn_warehouse_layout(asset_library):
         xf = UsdGeom.XformCommonAPI(prim)
         xf.SetTranslate(Gf.Vec3d(x, y, z))
         xf.SetRotate(Gf.Vec3f(0, 0, rot_z), UsdGeom.XformCommonAPI.RotationOrderXYZ)
-        apply_semantics(path, "Clutter")
+        apply_semantics(path, asset_id)
         spawned += 1
 
     rack_xs = [-6, -3, 0, 3, 6]
@@ -180,6 +217,44 @@ def spawn_warehouse_layout(asset_library):
               rot_z=random.uniform(0, 360))
 
     print(f"[INFO] Spawned {spawned} layout props.")
+
+
+# Semantic classes from the warehouse USD that should be KEPT in bounding box output
+KEEP_SEMANTICS = {
+    "rack", "pallet",
+    "pillar", "cone", "sign",
+    "fire_extinguisher", "cart",
+}
+
+def clear_unwanted_warehouse_semantics():
+    """Strip pre-existing semantics from warehouse USD structural prims,
+    keeping only rack and pallet so their bounding boxes are preserved."""
+    stage = omni.usd.get_context().get_stage()
+    warehouse_root = stage.GetPrimAtPath("/Replicator/Ref_Xform")
+    if not warehouse_root.IsValid():
+        print("[WARN] Warehouse root /Replicator/Ref_Xform not found — skipping semantic cleanup.")
+        return
+
+    cleared = 0
+    for prim in warehouse_root.GetChildren():
+        for child in prim.GetAllChildren():
+            cleared += _clear_semantics_if_needed(child)
+
+    print(f"[INFO] Cleared unwanted semantics from {cleared} warehouse prims (kept rack/pallet).")
+
+
+def _clear_semantics_if_needed(prim):
+    """Remove semantics from a prim if its label is not in KEEP_SEMANTICS. Returns 1 if cleared, 0 otherwise."""
+    semantic_data_attr = prim.GetAttribute("semantic:Semantics:params:semanticData")
+    if not semantic_data_attr or not semantic_data_attr.HasAuthoredValue():
+        return 0
+
+    label = semantic_data_attr.Get()
+    if label.lower() in KEEP_SEMANTICS:
+        return 0
+
+    remove_prim_semantics(prim)
+    return 1
 
 
 def hide_driver_prims():
@@ -318,6 +393,10 @@ def main():
     # Always load the warehouse shell — provides floor, walls, ceiling, lighting
     rep.create.from_usd(asset_library["zone"])
 
+    # Strip baked-in semantics (ceiling, floor_decal, lamp, pillar, sign, etc.)
+    # while keeping rack and pallet bounding boxes
+    clear_unwanted_warehouse_semantics()
+
     # Build organised warehouse interior layout
     spawn_warehouse_layout(asset_library)
 
@@ -328,6 +407,11 @@ def main():
     camera, render_product = setup_camera_and_lighting(scene_config)
 
     stage = omni.usd.get_context().get_stage()
+
+    # Spawn hazard zones from config
+    hazard_zones = scene_config.get("hazard_zones", [])
+    if hazard_zones:
+        spawn_hazard_zones(hazard_zones)
 
     # Separate workers from other entities
     workers = [e for e in scene_config.get("entities", []) if e.get("type") == "worker"]
@@ -347,7 +431,7 @@ def main():
         spawner = get_geofenced_spawner(usd_path, num_instances=1, bounds_min=b_min, bounds_max=b_max)
         prims = spawner()
         asset_type = entity.get("type", "")
-        semantic_class = "Vehicle" if asset_type == "vehicle" else "Zone"
+        semantic_class = "vehicle" if asset_type == "vehicle" else "zone"
         with prims:
             rep.modify.semantics([("class", semantic_class)])
 
@@ -385,12 +469,12 @@ def main():
         xf.AddTranslateOp().Set(Gf.Vec3d(spawn_x, spawn_y, 0.0))
 
         # Semantics
-        semantics = [("class", "Person")]
+        semantics = [("class", "person")]
         if ppe_state.get("hardhat", False):
-            semantics.append(("class", "Hardhat"))
+            semantics.append(("class", "hardhat"))
         if ppe_state.get("vest", False):
-            semantics.append(("class", "Vest"))
-        apply_semantics(prim_path, "Person")
+            semantics.append(("class", "vest"))
+        apply_semantics(prim_path, "person")
         # Apply additional PPE semantics via Replicator
         with rep.get.prims(path_pattern=prim_path):
             rep.modify.semantics(semantics)

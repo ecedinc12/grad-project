@@ -5,7 +5,13 @@ import argparse
 import numpy as np
 from PIL import Image
 
-CLASS_MAP = {"Person": 0, "Vehicle": 1, "Hardhat": 2, "Vest": 3, "Clutter": 4}
+CLASS_MAP = {
+    "person": 0, "vehicle": 1, "hardhat": 2, "vest": 3,
+    "rack": 4, "pallet": 5, "box": 6, "barrel": 7,
+    "cone": 8, "pillar": 9, "sign": 10, "fire_extinguisher": 11,
+    "cart": 12,
+    "hazard_zone_warning": 13, "hazard_zone_restricted": 14, "hazard_zone_critical": 15,
+}
 
 
 def convert_npy_to_yolo(dataset_dir="/tmp/dataset"):
@@ -51,7 +57,7 @@ def convert_npy_to_yolo(dataset_dir="/tmp/dataset"):
                 y_max = float(row["y_max"])
 
                 label = id_to_label.get(int(row["semanticId"]), "")
-                class_id = CLASS_MAP.get(label, -1)
+                class_id = CLASS_MAP.get(label.lower(), -1)
                 if class_id == -1:
                     continue  # skip unlabelled / background prims
 

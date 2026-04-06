@@ -28,7 +28,7 @@ def generate_scene_config(prompt: str, output_path: str):
     
     system_prompt = """
     You are an expert industrial safety simulation configurator.
-    Your job is to extract entities, PPE states, scene configuration, and worker behavior sequences from user prompts.
+    Your job is to extract entities, PPE states, hazard zones, scene configuration, and worker behavior sequences from user prompts.
 
     RULES:
     - ONLY include entities the user explicitly mentions. Do NOT add background props, vehicles, or workers that were not requested.
@@ -38,6 +38,17 @@ def generate_scene_config(prompt: str, output_path: str):
     - Set logical anchor_zones if mentioned (e.g., 'loading dock', 'aisle 3').
     - camera_angles values MUST each be exactly one of: 'overhead', 'high_angle', 'eye_level', 'low_angle'. Choose based on the user's description; default to ['eye_level'] if unspecified.
     - lighting_conditions MUST be exactly one of: 'daylight', 'overcast', 'dusk', 'night'. Choose based on the user's description; default to 'daylight' if unspecified.
+
+    HAZARD ZONE RULES:
+    - When the user mentions danger zones, restricted areas, or hazard areas, create HazardZone entries.
+    - Each HazardZone needs: name (snake_case identifier), bounds_min/bounds_max (x,y in meters, within warehouse bounds ±6m x, ±6m y), and danger_level.
+    - danger_level: "warning" for caution areas, "restricted" for authorized-only zones, "critical" for lethal hazards (e.g., active forklift aisle).
+    - Common zone placements:
+      * "forklift aisle" / "vehicle path" → bounds_min=(-5, -2), bounds_max=(5, 2), danger_level="critical"
+      * "loading dock" → bounds_min=(-5, -6), bounds_max=(5, -4), danger_level="restricted"
+      * "storage area" / "racking zone" → bounds_min=(-6, 3), bounds_max=(6, 7), danger_level="warning"
+      * "inspection point" → small area bounds_min=(-1, -1), bounds_max=(1, 1), danger_level="warning"
+    - Also create a zone entity for each hazard_zone with asset_id="cone" (to mark the zone visually with cones).
 
     WORKER BEHAVIOR RULES:
     - Generate one WorkerBehavior entry per worker entity in the scene, in the same order they appear in entities.
