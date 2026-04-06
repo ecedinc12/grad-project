@@ -306,6 +306,7 @@ def setup_people_simulation(command_file: str):
     )
     print(f"[INFO] People command file: {command_file}")
 
+    success = False
     for module_name, fn_name in [
         ("omni.anim.people", "setup_characters"),
         ("omni.anim.people.scripts.global_agent_manager", "GlobalAgentManager"),
@@ -318,12 +319,17 @@ def setup_people_simulation(command_file: str):
             else:
                 fn()
             print(f"[INFO] setup_characters OK ({module_name})")
-            return
+            success = True
+            break
         except Exception as e:
             print(f"[INFO] {module_name}.{fn_name} failed: {e}")
 
-    print("[WARNING] setup_characters could not be called automatically.")
-    print("[WARNING]   → In UI: Window > People Simulation > Setup Characters")
+    if not success:
+        raise RuntimeError(
+            "CRITICAL: setup_characters() failed to attach AnimGraph. "
+            "Characters will remain in T-pose. Check that worker USDs are fully loaded "
+            "and World.initialize_simulation_context() was called before spawning workers."
+        )
 
 
 def write_command_file(worker_behaviors: list, path: str):
@@ -413,6 +419,12 @@ def main():
     if hazard_zones:
         spawn_hazard_zones(hazard_zones)
 
+    # --- CRITICAL FIX: Initialize World BEFORE spawning workers ---
+    # omni.anim.people requires a live physics timeline to attach its AnimGraph.
+    # This must happen before setup_people_simulation() and worker spawning.
+    world = World(stage_units_in_meters=1.0)
+    world.initialize_simulation_context()
+
     # Separate workers from other entities
     workers = [e for e in scene_config.get("entities", []) if e.get("type") == "worker"]
     others  = [e for e in scene_config.get("entities", []) if e.get("type") != "worker"]
@@ -481,6 +493,15 @@ def main():
 
         print(f"[INFO] Spawned {name} @ ({spawn_x:.2f}, {spawn_y:.2f}, 0) ppe={ppe_state}")
 
+    # --- CRITICAL FIX: Allow S3 assets to fully resolve before AnimGraph attaches ---
+    # Worker USDs from S3 stream in asynchronously. We must wait for the skeleton
+    # hierarchy to exist before setup_people_simulation() scans the stage.
+    if workers:
+        print("[INFO] Waiting for S3 worker assets to fully resolve...")
+        for _ in range(15):
+            simulation_app.update()
+        print("[INFO] Asset resolution complete.")
+
     # --- Generate people_commands.txt from LLM worker_behaviors ---
     if worker_behaviors:
         write_command_file(worker_behaviors, args.commands)
@@ -489,6 +510,10 @@ def main():
 
     # --- Hide baked-in driver meshes in vehicle assets ---
     hide_driver_prims()
+
+    # --- Set up omni.anim.people (must happen after workers are in stage) ---
+    if workers and worker_behaviors:
+        setup_people_simulation(args.commands)
 
     # --- Initialize BasicWriter ---
     writer = rep.WriterRegistry.get("BasicWriter")
@@ -512,13 +537,12 @@ def main():
                 look_at=(0, 0, 1.2)
             )
 
-    # --- Set up omni.anim.people (must happen after workers are in stage) ---
-    if workers and worker_behaviors:
-        setup_people_simulation(args.commands)
+    # --- CRITICAL FIX: Start Replicator asynchronously BEFORE the physics loop ---
+    # This allows world.step() to drive the timeline naturally, which is required
+    # for omni.anim.people to advance skeletal animations.
+    rep.orchestrator.run_async()
 
-    # --- World-based simulation loop (replaces rep.orchestrator.run()) ---
-    world = World(stage_units_in_meters=1.0)
-
+    # --- World-based simulation loop ---
     # Warm-up: let extensions process the USD stage
     for _ in range(5):
         simulation_app.update()
@@ -528,7 +552,13 @@ def main():
     print(f"[INFO] Running simulation loop: {NUM_FRAMES} frames...")
     for step in range(NUM_FRAMES):
         world.step(render=True)
-        rep.orchestrator.step(rt_subframes=1)
+        # NOTE: rep.orchestrator.step() is intentionally REMOVED.
+        # It pauses the global timeline, starving omni.anim.people of delta_time
+        # and causing T-pose. The on_frame trigger + run_async handles capture.
+
+    # Wait for Replicator to finish all frames
+    while rep.orchestrator.get_status() == "running":
+        simulation_app.update()
 
     # Wait for BasicWriter async I/O to flush
     deadline = time.time() + 60
