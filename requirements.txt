@@ -1,0 +1,13 @@
+# LLM Pipeline — standard Python environment
+# Install with: pip install -r requirements.txt
+
+# Structured LLM extraction (Gemini via OpenAI-compatible API)
+instructor>=1.4.0
+openai>=1.30.0
+
+# Pydantic schemas (used by llm_pipeline/generator.py and schemas.py)
+pydantic>=2.0.0
+
+# COCO-to-YOLO post-processing (scripts/coco_to_yolo.py)
+numpy>=1.24.0
+Pillow>=10.0.0
