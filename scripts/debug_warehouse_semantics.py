@@ -3,9 +3,12 @@ from isaacsim import SimulationApp
 sim = SimulationApp({"headless": True})
 
 import json
+import os
 import omni.replicator.core as rep
 import omni.usd
 import omni.kit.commands
+
+OUTPUT_FILE = "/workspace/grad-project/debug_output/warehouse_semantics.txt"
 
 with open("assets/library.json") as f:
     library = json.load(f)
@@ -13,16 +16,22 @@ with open("assets/library.json") as f:
 rep.create.from_usd(library["zone"])
 
 stage = omni.usd.get_context().get_stage()
-print(f"Stage: {stage.GetRootLayer().identifier}")
-print(f"Default prim: {stage.GetDefaultPrim().GetPath()}")
-print()
+os.makedirs(os.path.dirname(OUTPUT_FILE), exist_ok=True)
 
-for prim in stage.Traverse():
-    path = str(prim.GetPath())
-    for attr in prim.GetAttributes():
-        attr_name = attr.GetName()
-        if "semantic" in attr_name.lower():
-            print(f"[SEM] {path:60s}  {attr_name} = {attr.Get()}")
+with open(OUTPUT_FILE, "w") as f:
+    f.write(f"Stage: {stage.GetRootLayer().identifier}\n")
+    if stage.GetDefaultPrim().IsValid():
+        f.write(f"Default prim: {stage.GetDefaultPrim().GetPath()}\n")
+    f.write("\n")
 
-print("[DONE]")
+    for prim in stage.Traverse():
+        path = str(prim.GetPath())
+        for attr in prim.GetAttributes():
+            attr_name = attr.GetName()
+            if "semantic" in attr_name.lower():
+                f.write(f"[SEM] {path:60s}  {attr_name} = {attr.Get()}\n")
+
+    f.write("\n[DONE]\n")
+
+print(f"[INFO] Output written to {OUTPUT_FILE}")
 sim.close()
