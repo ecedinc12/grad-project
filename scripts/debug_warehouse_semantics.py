@@ -1,11 +1,9 @@
-"""Diagnostic: find which warehouse prims have SemanticsSchema attached."""
-"""Diagnostic: find which warehouse prims have SemanticsSchema attached."""
+"""Diagnostic: find which warehouse prims have semantics attached."""
 from isaacsim import SimulationApp
 sim = SimulationApp({"headless": True})
 
 import json
 import omni.replicator.core as rep
-from pxr import UsdSemantics
 import omni.usd
 import omni.kit.commands
 
@@ -21,11 +19,10 @@ print()
 
 for prim in stage.Traverse():
     path = str(prim.GetPath())
-    has_sem = prim.HasAPI(UsdSemantics.SemanticsSchema)
-    if has_sem:
-        schema = UsdSemantics.SemanticsSchema(prim)
-        sem_data = dict(schema.GetSemanticsData())
-        print(f"[SEM] {path:60s}  {sem_data}")
+    for attr in prim.GetAttributes():
+        attr_name = attr.GetName()
+        if "semantic" in attr_name.lower():
+            print(f"[SEM] {path:60s}  {attr_name} = {attr.Get()}")
 
 print("[DONE]")
 sim.close()
