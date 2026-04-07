@@ -7,6 +7,7 @@ Ekip tarafından daha önce build edilip registry’ye pushlanmış hazır konte
 | Ad | Tag | Açıklama |
 |---|---|---|
 | `arda78484/isaac_sim_dev_tools` | `v-1.0` | Isaac Sim geliştirme araçları |
+| `arda78484/isaac_sim_dev_tools` | `v-1.1` | Requirements yüklendi |
 
 ## Kullanım
 
