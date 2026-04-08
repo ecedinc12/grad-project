@@ -20,13 +20,12 @@ def get_geofenced_spawner(asset_path, num_instances=1, bounds_min=(-10, -10), bo
     rep.randomizer.register(spawn_in_bounds)
     return spawn_in_bounds
 
-def spawn_hazard_zones(hazard_zones):
+def spawn_hazard_zones(hazard_zones, stage):
     """Create invisible USD volumes with 'hazard_zone' semantics for each defined zone.
     
     These appear in bounding box and segmentation output but not in RGB,
     enabling the model to learn zone-based safety violations.
     """
-    stage = omni.usd.get_context().get_stage()
     stage.DefinePrim("/World/HazardZones", "Xform")
     
     for zone in hazard_zones:

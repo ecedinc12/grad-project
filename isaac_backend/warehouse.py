@@ -4,9 +4,8 @@ import omni.usd
 import omni.kit.commands
 from isaac_backend.semantics import apply_semantics
 
-def spawn_warehouse_layout(asset_library):
+def spawn_warehouse_layout(asset_library, stage):
     """Build an organised warehouse interior: rack rows, pallet staging, aisle clutter."""
-    stage = omni.usd.get_context().get_stage()
     _idx = [0]
     spawned = 0
 
@@ -64,9 +63,8 @@ def spawn_warehouse_layout(asset_library):
 
     print(f"[INFO] Spawned {spawned} layout props.")
 
-def hide_driver_prims():
+def hide_driver_prims(stage):
     """Hide baked-in driver/operator meshes inside vehicle assets."""
-    stage = omni.usd.get_context().get_stage()
     hidden = 0
     for prim in stage.Traverse():
         if "driver" in prim.GetName().lower():

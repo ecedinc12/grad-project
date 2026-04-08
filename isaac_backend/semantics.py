@@ -12,10 +12,9 @@ def apply_semantics(prim_path, class_name):
     with rep.get.prims(path_pattern=prim_path):
         rep.modify.semantics([("class", class_name)])
 
-def clear_unwanted_warehouse_semantics():
+def clear_unwanted_warehouse_semantics(stage):
     """Strip pre-existing semantics from warehouse USD structural prims,
     keeping only rack and pallet so their bounding boxes are preserved."""
-    stage = omni.usd.get_context().get_stage()
     warehouse_root = stage.GetPrimAtPath("/Replicator/Ref_Xform")
     if not warehouse_root.IsValid():
         print("[WARN] Warehouse root /Replicator/Ref_Xform not found — skipping semantic cleanup.")

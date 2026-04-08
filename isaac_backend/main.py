@@ -67,8 +67,8 @@ def main():
         simulation_app.update()
 
     _progress("Clearing semantics and spawning warehouse layout...")
-    clear_unwanted_warehouse_semantics()
-    spawn_warehouse_layout(asset_library)
+    clear_unwanted_warehouse_semantics(stage)
+    spawn_warehouse_layout(asset_library, stage)
     for _ in range(15):
         simulation_app.update()
 
@@ -83,33 +83,7 @@ def main():
     hazard_zones = scene_config.get("hazard_zones", [])
     if hazard_zones:
         _progress("Spawning hazard zones...")
-        spawn_hazard_zones(hazard_zones)
-
-    stage = omni.usd.get_context().get_stage()
-
-    _progress("Loading warehouse zone...")
-    rep.create.from_usd(asset_library["zone"])
-    for _ in range(10):
-        simulation_app.update()
-
-    _progress("Clearing semantics and spawning warehouse layout...")
-    clear_unwanted_warehouse_semantics()
-    spawn_warehouse_layout(asset_library)
-    for _ in range(15):
-        simulation_app.update()
-
-    _progress("Setting up navmesh...")
-    setup_navmesh()
-
-    _progress("Setting up camera and lighting...")
-    camera, render_product = setup_camera_and_lighting(scene_config)
-    for _ in range(5):
-        simulation_app.update()
-
-    hazard_zones = scene_config.get("hazard_zones", [])
-    if hazard_zones:
-        _progress("Spawning hazard zones...")
-        spawn_hazard_zones(hazard_zones)
+        spawn_hazard_zones(hazard_zones, stage)
 
     workers = [e for e in scene_config.get("entities", []) if e.get("type") == "worker"]
     others  = [e for e in scene_config.get("entities", []) if e.get("type") != "worker"]
@@ -150,7 +124,7 @@ def main():
         _progress("No worker_behaviors in config.")
 
     _progress("Hiding driver prims...")
-    hide_driver_prims()
+    hide_driver_prims(stage)
 
     if workers and worker_behaviors:
         _progress("Setting up people simulation...")
@@ -211,6 +185,7 @@ def main():
             found = len(glob.glob("/tmp/dataset/bounding_box_2d_tight_*.npy"))
             print(f"[WARNING] Timed out waiting for writer flush ({found}/{NUM_FRAMES} files written).")
             break
+        time.sleep(0.1)
         simulation_app.update()
 
     result = subprocess.run(
