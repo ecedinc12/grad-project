@@ -11,10 +11,10 @@ import asyncio
 from isaacsim import SimulationApp
 simulation_app = SimulationApp({
     "headless": True,
-    "exts": {
-        "semantics.schema.editor": {"enabled": False},
-        "semantics.schema.property": {"enabled": False},
-    },
+    "argv": [
+        "--/exts/semantics.schema.editor/enabled=false",
+        "--/exts/semantics.schema.property/enabled=false",
+    ],
 })
 
 import carb
