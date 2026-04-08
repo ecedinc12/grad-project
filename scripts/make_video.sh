@@ -17,6 +17,13 @@ if [ ! -d "$DATASET_DIR" ]; then
     exit 1
 fi
 
+# Check if there are any png files first
+count=$(find "$DATASET_DIR" -maxdepth 1 -name 'rgb_*.png' | wc -l)
+if [ "$count" -eq 0 ]; then
+    echo "Warning: No rgb_*.png files found in $DATASET_DIR. Skipping video generation."
+    exit 0
+fi
+
 # Find all rgb_*.png files, sort them numerically, and cat them into ffmpeg
 # We use sort -V to ensure rgb_2.png comes before rgb_10.png
 find "$DATASET_DIR" -maxdepth 1 -name 'rgb_*.png' | \

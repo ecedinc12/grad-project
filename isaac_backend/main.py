@@ -560,8 +560,12 @@ def main():
         # It pauses the global timeline, starving omni.anim.people of delta_time
         # and causing T-pose. The on_frame trigger + run_async handles capture.
 
-    # Wait for Replicator to finish all frames
+    # Wait for Replicator to finish all frames (with timeout)
+    wait_start = time.time()
     while rep.orchestrator.get_status() == "running":
+        if time.time() - wait_start > 10:
+            print("[WARN] Timed out waiting for orchestrator to stop running.")
+            break
         simulation_app.update()
 
     # Wait for BasicWriter async I/O to flush
