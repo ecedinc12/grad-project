@@ -49,6 +49,18 @@ def main():
     _progress("Enabling extensions...")
     enable_extensions()
 
+    _progress("Creating World and initializing simulation context...")
+    world = World(stage_units_in_meters=1.0)
+    for _ in range(10):
+        simulation_app.update()
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(world.initialize_simulation_context_async())
+    loop.close()
+    _progress("Simulation context initialized.")
+
+    stage = omni.usd.get_context().get_stage()
+
     _progress("Loading warehouse zone...")
     rep.create.from_usd(asset_library["zone"])
     for _ in range(10):
@@ -67,22 +79,37 @@ def main():
     camera, render_product = setup_camera_and_lighting(scene_config)
     for _ in range(5):
         simulation_app.update()
-    stage = omni.usd.get_context().get_stage()
 
     hazard_zones = scene_config.get("hazard_zones", [])
     if hazard_zones:
         _progress("Spawning hazard zones...")
         spawn_hazard_zones(hazard_zones)
 
-    _progress("Creating World and initializing simulation context...")
-    world = World(stage_units_in_meters=1.0)
+    stage = omni.usd.get_context().get_stage()
+
+    _progress("Loading warehouse zone...")
+    rep.create.from_usd(asset_library["zone"])
     for _ in range(10):
         simulation_app.update()
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    loop.run_until_complete(world.initialize_simulation_context_async())
-    loop.close()
-    _progress("Simulation context initialized.")
+
+    _progress("Clearing semantics and spawning warehouse layout...")
+    clear_unwanted_warehouse_semantics()
+    spawn_warehouse_layout(asset_library)
+    for _ in range(15):
+        simulation_app.update()
+
+    _progress("Setting up navmesh...")
+    setup_navmesh()
+
+    _progress("Setting up camera and lighting...")
+    camera, render_product = setup_camera_and_lighting(scene_config)
+    for _ in range(5):
+        simulation_app.update()
+
+    hazard_zones = scene_config.get("hazard_zones", [])
+    if hazard_zones:
+        _progress("Spawning hazard zones...")
+        spawn_hazard_zones(hazard_zones)
 
     workers = [e for e in scene_config.get("entities", []) if e.get("type") == "worker"]
     others  = [e for e in scene_config.get("entities", []) if e.get("type") != "worker"]
