@@ -1,5 +1,4 @@
 import omni.replicator.core as rep
-from semantics.schema.editor import remove_prim_semantics
 import omni.usd
 
 KEEP_SEMANTICS = {
@@ -39,5 +38,8 @@ def _clear_semantics_if_needed(prim):
     if label.lower() in KEEP_SEMANTICS:
         return 0
 
-    remove_prim_semantics(prim)
+    semantic_data_attr.Clear()
+    semantic_type_attr = prim.GetAttribute("semantic:Semantics:params:semanticType")
+    if semantic_type_attr and semantic_type_attr.HasAuthoredValue():
+        semantic_type_attr.Clear()
     return 1
