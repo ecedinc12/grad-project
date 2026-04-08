@@ -2,7 +2,6 @@ import os
 import importlib
 import carb
 import omni.kit.app
-import omni.kit.app
 
 def enable_extensions():
     """Enable omni.anim.people extension."""

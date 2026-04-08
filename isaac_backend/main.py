@@ -49,8 +49,6 @@ def main():
 
     _progress("Creating World and initializing simulation context...")
     world = World(stage_units_in_meters=1.0)
-    for _ in range(10):
-        simulation_app.update()
 
     _init_error = []
     _init_done = threading.Event()
@@ -79,13 +77,13 @@ def main():
 
     _progress("Loading warehouse zone...")
     rep.create.from_usd(asset_library["zone"])
-    for _ in range(10):
+    for _ in range(5):
         simulation_app.update()
 
     _progress("Clearing semantics and spawning warehouse layout...")
     clear_unwanted_warehouse_semantics(stage)
     spawn_warehouse_layout(asset_library, stage)
-    for _ in range(15):
+    for _ in range(10):
         simulation_app.update()
 
     _progress("Setting up navmesh...")
@@ -129,7 +127,7 @@ def main():
         spawn_workers(workers, worker_behaviors, asset_library, stage)
 
         _progress("Waiting for S3 worker assets to resolve...")
-        for _ in range(15):
+        for _ in range(10):
             simulation_app.update()
         _progress("Asset resolution complete.")
 
@@ -176,9 +174,6 @@ def main():
     _progress("Starting orchestrator...")
     rep.orchestrator.run_async()
 
-    for _ in range(5):
-        simulation_app.update()
-
     _progress("Resetting world...")
     world.reset()
 
@@ -216,9 +211,6 @@ def main():
         rep.orchestrator.stop()
     except Exception as e:
         print(f"[WARN] teardown step failed: {e}", file=sys.stderr)
-
-    for _ in range(3):
-        simulation_app.update()
 
     try:
         writer.detach()
