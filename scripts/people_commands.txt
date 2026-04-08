@@ -1,0 +1,26 @@
+# omni.anim.people komut dosyası
+# Sözdizimi: karakter_adi Komut x y z rotasyon
+
+# Karakter 1: Fabrika zeminine spawn et, farklı noktalara yürüt
+worker_01 GoTo 2.0 0.0 0.0 0
+worker_01 Idle 2
+worker_01 GoTo 8.0 3.0 0.0 90
+worker_01 Idle 2
+worker_01 GoTo 5.0 8.0 0.0 180
+worker_01 Idle 2
+worker_01 GoTo 2.0 0.0 0.0 270
+
+# Karakter 2: Çapraz geçiş (forklift tehlike senaryosu için)
+worker_02 GoTo 10.0 0.0 0.0 270
+worker_02 Idle 1
+worker_02 GoTo 10.0 10.0 0.0 90
+worker_02 Idle 2
+worker_02 LookAround 3
+worker_02 GoTo 10.0 0.0 0.0 270
+
+# Karakter 3: Geofence ihlali senaryosu (yasak bölgeye giriş)
+worker_03 GoTo 0.0 5.0 0.0 0
+worker_03 Idle 1
+worker_03 GoTo 5.0 5.0 0.0 0
+worker_03 Idle 3
+worker_03 GoTo 0.0 5.0 0.0 180
