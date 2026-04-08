@@ -44,19 +44,31 @@ def main():
     enable_extensions()
 
     rep.create.from_usd(asset_library["zone"])
+    for _ in range(10):
+        simulation_app.update()
+
     clear_unwanted_warehouse_semantics()
     spawn_warehouse_layout(asset_library)
+    for _ in range(15):
+        simulation_app.update()
+
     setup_navmesh()
 
     camera, render_product = setup_camera_and_lighting(scene_config)
+    for _ in range(5):
+        simulation_app.update()
     stage = omni.usd.get_context().get_stage()
 
     hazard_zones = scene_config.get("hazard_zones", [])
     if hazard_zones:
         spawn_hazard_zones(hazard_zones)
 
+    print("[INFO] Creating World and initializing simulation context...")
     world = World(stage_units_in_meters=1.0)
+    for _ in range(10):
+        simulation_app.update()
     asyncio.get_event_loop().run_until_complete(world.initialize_simulation_context_async())
+    print("[INFO] Simulation context initialized.")
 
     workers = [e for e in scene_config.get("entities", []) if e.get("type") == "worker"]
     others  = [e for e in scene_config.get("entities", []) if e.get("type") != "worker"]
