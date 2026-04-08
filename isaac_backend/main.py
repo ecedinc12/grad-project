@@ -7,6 +7,7 @@ import glob
 import time
 import subprocess
 import asyncio
+import threading
 
 from isaacsim import SimulationApp
 simulation_app = SimulationApp({"headless": True})
@@ -46,17 +47,32 @@ def main():
     _progress("Loading configs...")
     scene_config, asset_library = load_config(args.config, args.library)
 
-    _progress("Enabling extensions...")
-    enable_extensions()
-
     _progress("Creating World and initializing simulation context...")
     world = World(stage_units_in_meters=1.0)
     for _ in range(10):
         simulation_app.update()
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    loop.run_until_complete(world.initialize_simulation_context_async())
-    loop.close()
+
+    _init_error = []
+    _init_done = threading.Event()
+
+    def _run_init():
+        _loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(_loop)
+        try:
+            _loop.run_until_complete(world.initialize_simulation_context_async())
+        except Exception as e:
+            _init_error.append(e)
+        finally:
+            _loop.close()
+            _init_done.set()
+
+    _t = threading.Thread(target=_run_init, daemon=True)
+    _t.start()
+    while not _init_done.is_set():
+        simulation_app.update()
+    _t.join()
+    if _init_error:
+        raise _init_error[0]
     _progress("Simulation context initialized.")
 
     stage = omni.usd.get_context().get_stage()
@@ -127,6 +143,8 @@ def main():
     hide_driver_prims(stage)
 
     if workers and worker_behaviors:
+        _progress("Enabling extensions...")
+        enable_extensions()
         _progress("Setting up people simulation...")
         setup_people_simulation(args.commands)
 
