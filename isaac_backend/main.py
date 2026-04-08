@@ -8,6 +8,7 @@ import glob
 import time
 import subprocess
 import importlib
+import asyncio
 
 # CRITICAL: Start SimulationApp BEFORE any omni/pxr imports
 from isaacsim import SimulationApp
@@ -328,7 +329,7 @@ def setup_people_simulation(command_file: str):
         raise RuntimeError(
             "CRITICAL: setup_characters() failed to attach AnimGraph. "
             "Characters will remain in T-pose. Check that worker USDs are fully loaded "
-            "and World.initialize_simulation_context() was called before spawning workers."
+            "and world.initialize_simulation_context_async() was called before spawning workers."
         )
 
 
@@ -423,7 +424,7 @@ def main():
     # omni.anim.people requires a live physics timeline to attach its AnimGraph.
     # This must happen before setup_people_simulation() and worker spawning.
     world = World(stage_units_in_meters=1.0)
-    world.initialize_simulation_context()
+    asyncio.get_event_loop().run_until_complete(world.initialize_simulation_context_async())
 
     # Separate workers from other entities
     workers = [e for e in scene_config.get("entities", []) if e.get("type") == "worker"]
@@ -528,12 +529,15 @@ def main():
     NUM_FRAMES = 1000
     angle_hints = scene_config.get("camera_angles", [])
     scene_positions = _positions_for_angles(angle_hints)
+    
+    chosen_position = random.choice(scene_positions)
     print(f"[INFO] camera_angles={angle_hints}  →  {len(scene_positions)} orbit positions")
+    print(f"[INFO] Chosen static camera position for sequence: {chosen_position}")
 
     with rep.trigger.on_frame(num_frames=NUM_FRAMES):
         with camera:
             rep.modify.pose(
-                position=rep.distribution.choice(scene_positions),
+                position=chosen_position,
                 look_at=(0, 0, 1.2)
             )
 
