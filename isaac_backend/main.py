@@ -67,6 +67,7 @@ def main():
     _t = threading.Thread(target=_run_init, daemon=True)
     _t.start()
     while not _init_done.is_set():
+        time.sleep(0.05)
         simulation_app.update()
     _t.join()
     if _init_error:
@@ -189,6 +190,7 @@ def main():
         if time.time() - wait_start > 10:
             print("[WARN] Timed out waiting for orchestrator to stop running.")
             break
+        time.sleep(0.05)
         simulation_app.update()
 
     _progress("Waiting for writer flush...")
