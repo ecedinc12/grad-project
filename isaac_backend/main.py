@@ -9,13 +9,7 @@ import subprocess
 import asyncio
 
 from isaacsim import SimulationApp
-simulation_app = SimulationApp({
-    "headless": True,
-    "argv": [
-        "--/exts/semantics.schema.editor/enabled=false",
-        "--/exts/semantics.schema.property/enabled=false",
-    ],
-})
+simulation_app = SimulationApp({"headless": True})
 
 import carb
 import omni.replicator.core as rep
