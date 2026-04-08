@@ -78,7 +78,10 @@ def main():
     world = World(stage_units_in_meters=1.0)
     for _ in range(10):
         simulation_app.update()
-    asyncio.get_event_loop().run_until_complete(world.initialize_simulation_context_async())
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(world.initialize_simulation_context_async())
+    loop.close()
     _progress("Simulation context initialized.")
 
     workers = [e for e in scene_config.get("entities", []) if e.get("type") == "worker"]
