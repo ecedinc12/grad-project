@@ -38,11 +38,15 @@ python3 "$PROJECT_ROOT/scripts/gen_dataset_yaml.py" \
     --dir /tmp/dataset \
     --output /tmp/dataset/dataset.yaml
 
-# Step 6: Archive and move to persistent storage
+# Step 6: Generate Video
+echo "[6/7] Generating video from frames..."
+"$PROJECT_ROOT/scripts/make_video.sh" /tmp/dataset /tmp/dataset/output.mp4
+
+# Step 7: Archive and move to persistent storage
 TIMESTAMP=$(date +%s)
 ARCHIVE_NAME="$PROJECT_ROOT/dataset_${TIMESTAMP}.tar.gz"
 
-echo "[6/6] Archiving output to $ARCHIVE_NAME..."
+echo "[7/7] Archiving output to $ARCHIVE_NAME..."
 tar -czf $ARCHIVE_NAME -C /tmp dataset/
 
 echo "========================================"

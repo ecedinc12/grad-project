@@ -1,10 +1,20 @@
 import os
 import argparse
+import tarfile
+import tempfile
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from socketserver import ThreadingMixIn
 
 class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
     pass
+
+def extract_tar_to_tmp(tar_path):
+    """Extract a dataset tar.gz to a temp directory and return the path."""
+    tmp = tempfile.mkdtemp(prefix="video_view_")
+    with tarfile.open(tar_path, "r:gz") as tf:
+        tf.extractall(tmp)
+    candidate = os.path.join(tmp, "dataset")
+    return candidate if os.path.isdir(candidate) else tmp
 
 def make_handler(video_path):
     class VideoHandler(BaseHTTPRequestHandler):
@@ -65,19 +75,26 @@ def make_handler(video_path):
 def main():
     parser = argparse.ArgumentParser(description="Headless video viewer.")
     parser.add_argument("--video", default="/tmp/dataset/output.mp4", help="Path to the MP4 video file")
+    parser.add_argument("--tar", default=None, help="Path to dataset_*.tar.gz to serve the video directly from it")
     parser.add_argument("--port", type=int, default=8080, help="HTTP port")
     args = parser.parse_args()
 
-    if not os.path.exists(args.video):
-        print(f"Error: Video file not found at {args.video}")
+    video_path = args.video
+    if args.tar:
+        print(f"Extracting {args.tar} ...")
+        dataset_dir = extract_tar_to_tmp(args.tar)
+        video_path = os.path.join(dataset_dir, "output.mp4")
+
+    if not os.path.exists(video_path):
+        print(f"Error: Video file not found at {video_path}")
         return
 
-    print(f"Serving video: {args.video}")
+    print(f"Serving video: {video_path}")
     print(f"Serving on http://0.0.0.0:{args.port}")
     print(f"  SSH tunnel : ssh -L {args.port}:localhost:{args.port} <user>@<host>")
     print(f"  RunPod URL : https://<pod-id>-{args.port}.proxy.runpod.net")
     
-    server = ThreadingHTTPServer(("0.0.0.0", args.port), make_handler(args.video))
+    server = ThreadingHTTPServer(("0.0.0.0", args.port), make_handler(video_path))
     server.serve_forever()
 
 if __name__ == "__main__":
