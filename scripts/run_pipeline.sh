@@ -18,7 +18,7 @@ PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 # Step 1: Generate config from prompt
 echo "[1/6] Running LLM Config Generator..."
-"$PROJECT_ROOT/.venv/bin/python" "$PROJECT_ROOT/llm_pipeline/generator.py" --prompt "$PROMPT" --output "$PROJECT_ROOT/configs/current_scene.json"
+python3 "$PROJECT_ROOT/llm_pipeline/generator.py" --prompt "$PROMPT" --output "$PROJECT_ROOT/configs/current_scene.json"
 
 # Step 2: Clear old fast-disk data
 echo "[2/6] Cleaning up old dataset..."
@@ -30,11 +30,11 @@ echo "[3/6] Generating dataset via Isaac Sim..."
 
 # Step 4: Convert COCO annotations to YOLO format
 echo "[4/6] Converting COCO to YOLO..."
-"$PROJECT_ROOT/.venv/bin/python" "$PROJECT_ROOT/scripts/coco_to_yolo.py" --dir /tmp/dataset
+python3 "$PROJECT_ROOT/scripts/coco_to_yolo.py" --dir /tmp/dataset
 
 # Step 5: Generate dataset.yaml for YOLO training
 echo "[5/6] Generating dataset.yaml..."
-"$PROJECT_ROOT/.venv/bin/python" "$PROJECT_ROOT/scripts/gen_dataset_yaml.py" \
+python3 "$PROJECT_ROOT/scripts/gen_dataset_yaml.py" \
     --dir /tmp/dataset \
     --output /tmp/dataset/dataset.yaml
 
