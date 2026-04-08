@@ -32,6 +32,10 @@ from isaac_backend.people import (
 )
 
 
+def _progress(msg):
+    print(f"[PROGRESS] [{time.strftime('%H:%M:%S')}] {msg}")
+    sys.stdout.flush()
+
 def main():
     parser = argparse.ArgumentParser(description="Run Isaac Sim Headless Generation")
     parser.add_argument("--config", type=str, default="configs/current_scene.json", help="Path to the SceneConfig JSON")
@@ -39,21 +43,27 @@ def main():
     parser.add_argument("--commands", type=str, default="/tmp/people_commands.txt", help="Output path for generated people_commands.txt")
     args = parser.parse_args()
 
+    _progress("Loading configs...")
     scene_config, asset_library = load_config(args.config, args.library)
 
+    _progress("Enabling extensions...")
     enable_extensions()
 
+    _progress("Loading warehouse zone...")
     rep.create.from_usd(asset_library["zone"])
     for _ in range(10):
         simulation_app.update()
 
+    _progress("Clearing semantics and spawning warehouse layout...")
     clear_unwanted_warehouse_semantics()
     spawn_warehouse_layout(asset_library)
     for _ in range(15):
         simulation_app.update()
 
+    _progress("Setting up navmesh...")
     setup_navmesh()
 
+    _progress("Setting up camera and lighting...")
     camera, render_product = setup_camera_and_lighting(scene_config)
     for _ in range(5):
         simulation_app.update()
@@ -61,18 +71,20 @@ def main():
 
     hazard_zones = scene_config.get("hazard_zones", [])
     if hazard_zones:
+        _progress("Spawning hazard zones...")
         spawn_hazard_zones(hazard_zones)
 
-    print("[INFO] Creating World and initializing simulation context...")
+    _progress("Creating World and initializing simulation context...")
     world = World(stage_units_in_meters=1.0)
     for _ in range(10):
         simulation_app.update()
     asyncio.get_event_loop().run_until_complete(world.initialize_simulation_context_async())
-    print("[INFO] Simulation context initialized.")
+    _progress("Simulation context initialized.")
 
     workers = [e for e in scene_config.get("entities", []) if e.get("type") == "worker"]
     others  = [e for e in scene_config.get("entities", []) if e.get("type") != "worker"]
 
+    _progress(f"Spawning {len(others)} non-worker entities...")
     for entity in others:
         asset_id = entity.get("asset_id", "")
         if asset_id == "zone":
@@ -89,26 +101,32 @@ def main():
         semantic_class = "vehicle" if asset_type == "vehicle" else "zone"
         with prims:
             rep.modify.semantics([("class", semantic_class)])
+    _progress("Non-worker entities spawned.")
 
     worker_behaviors = scene_config.get("worker_behaviors", [])
     if workers:
+        _progress(f"Spawning {len(workers)} workers...")
         spawn_workers(workers, worker_behaviors, asset_library, stage)
 
-        print("[INFO] Waiting for S3 worker assets to fully resolve...")
+        _progress("Waiting for S3 worker assets to resolve...")
         for _ in range(15):
             simulation_app.update()
-        print("[INFO] Asset resolution complete.")
+        _progress("Asset resolution complete.")
 
     if worker_behaviors:
+        _progress("Writing people command file...")
         write_command_file(worker_behaviors, args.commands)
     else:
-        print("[INFO] No worker_behaviors in config — people_commands.txt not written.")
+        _progress("No worker_behaviors in config.")
 
+    _progress("Hiding driver prims...")
     hide_driver_prims()
 
     if workers and worker_behaviors:
+        _progress("Setting up people simulation...")
         setup_people_simulation(args.commands)
 
+    _progress("Initializing BasicWriter...")
     writer = rep.WriterRegistry.get("BasicWriter")
     writer.initialize(
         output_dir="/tmp/dataset",
@@ -123,9 +141,9 @@ def main():
     scene_positions = positions_for_angles(angle_hints)
     
     chosen_position = random.choice(scene_positions)
-    print(f"[INFO] camera_angles={angle_hints}  →  {len(scene_positions)} orbit positions")
-    print(f"[INFO] Chosen static camera position for sequence: {chosen_position}")
+    _progress(f"camera_angles={angle_hints}  →  {len(scene_positions)} orbit positions, chosen: {chosen_position}")
 
+    _progress("Setting up frame trigger...")
     with rep.trigger.on_frame(num_frames=NUM_FRAMES):
         with camera:
             rep.modify.pose(
@@ -133,17 +151,22 @@ def main():
                 look_at=(0, 0, 1.2)
             )
 
+    _progress("Starting orchestrator...")
     rep.orchestrator.run_async()
 
     for _ in range(5):
         simulation_app.update()
 
+    _progress("Resetting world...")
     world.reset()
 
-    print(f"[INFO] Running simulation loop: {NUM_FRAMES} frames...")
+    _progress(f"Running simulation loop: {NUM_FRAMES} frames...")
     for step in range(NUM_FRAMES):
+        if step % 100 == 0:
+            _progress(f"Frame {step}/{NUM_FRAMES}")
         world.step(render=True)
 
+    _progress("Waiting for orchestrator to finish...")
     wait_start = time.time()
     while rep.orchestrator.get_status() == "running":
         if time.time() - wait_start > 10:
@@ -151,6 +174,7 @@ def main():
             break
         simulation_app.update()
 
+    _progress("Waiting for writer flush...")
     deadline = time.time() + 60
     while len(glob.glob("/tmp/dataset/bounding_box_2d_tight_*.npy")) < NUM_FRAMES:
         if time.time() > deadline:
@@ -163,7 +187,7 @@ def main():
         ["find", "/tmp/dataset", "-type", "f"],
         capture_output=True, text=True
     )
-    print(f"[DEBUG] Files written to /tmp/dataset:\n{result.stdout[:2000] or '  (none)'}")
+    _progress(f"Files written to /tmp/dataset: {len(result.stdout.strip().splitlines()) if result.stdout.strip() else 0}")
 
     try:
         rep.orchestrator.stop()
@@ -184,7 +208,7 @@ def main():
         print(f"[WARN] teardown step failed: {e}", file=sys.stderr)
 
     simulation_app.close()
-    print("Generation complete. Data saved to /tmp/dataset.")
+    _progress("Generation complete. Data saved to /tmp/dataset.")
     sys.stdout.flush()
     os._exit(0)
 
