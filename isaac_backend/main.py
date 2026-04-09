@@ -10,10 +10,6 @@ import asyncio
 import threading
 
 # CRITICAL: Start SimulationApp BEFORE any omni/pxr imports
-sys.argv.extend([
-    "--disable-extension", "semantics.schema.editor",
-    "--disable-extension", "semantics.schema.property"
-])
 from isaacsim import SimulationApp
 simulation_app = SimulationApp({"headless": True})
 
