@@ -16,6 +16,7 @@ import omni.replicator.core as rep
 import omni.kit.app
 import omni.usd
 from omni.isaac.core import World
+from pxr import UsdGeom
 
 from isaac_backend.config_loader import load_config
 from isaac_backend.camera import positions_for_angles
@@ -35,6 +36,52 @@ from isaac_backend.people import (
 def _progress(msg):
     print(f"[PROGRESS] [{time.strftime('%H:%M:%S')}] {msg}")
     sys.stdout.flush()
+
+def compute_scene_centroid(stage):
+    """Walk /World/Characters and /World/Layout prims to find the average XY position."""
+    xs, ys, zs = [], [], []
+    for prim in stage.Traverse():
+        path = str(prim.GetPath())
+        if not (path.startswith("/World/Characters/") or path.startswith("/World/Layout/")):
+            continue
+        xf = UsdGeom.Xformable(prim)
+        if xf:
+            mat = xf.ComputeLocalToWorldTransform(Usd.TimeCode.Default())
+            pos = mat.ExtractTranslation()
+            xs.append(pos[0])
+            ys.append(pos[1])
+            zs.append(pos[2])
+    if not xs:
+        _progress("[WARN] No entities found for centroid calculation, defaulting to (0, 0, 1.2)")
+        return (0.0, 0.0, 1.2)
+    cx = sum(xs) / len(xs)
+    cy = sum(ys) / len(ys)
+    cz = sum(zs) / len(zs)
+    _progress(f"Scene centroid computed: ({cx:.2f}, {cy:.2f}, {cz:.2f}) from {len(xs)} entities")
+    return (cx, cy, cz)
+
+def compute_scene_centroid(stage):
+    """Walk /World/Characters and /World/Layout prims to find the average XY position."""
+    xs, ys, zs = [], [], []
+    for prim in stage.Traverse():
+        path = str(prim.GetPath())
+        if not (path.startswith("/World/Characters/") or path.startswith("/World/Layout/")):
+            continue
+        xf = UsdGeom.Xformable(prim)
+        if xf:
+            mat = xf.ComputeLocalToWorldTransform(Usd.TimeCode.Default())
+            pos = mat.ExtractTranslation()
+            xs.append(pos[0])
+            ys.append(pos[1])
+            zs.append(pos[2])
+    if not xs:
+        _progress("[WARN] No entities found for centroid calculation, defaulting to (0, 0, 1.2)")
+        return (0.0, 0.0, 1.2)
+    cx = sum(xs) / len(xs)
+    cy = sum(ys) / len(ys)
+    cz = sum(zs) / len(zs)
+    _progress(f"Scene centroid computed: ({cx:.2f}, {cy:.2f}, {cz:.2f}) from {len(xs)} entities")
+    return (cx, cy, cz)
 
 
 def main():
@@ -120,6 +167,9 @@ def main():
     _progress("Hiding driver prims...")
     hide_driver_prims(stage)
 
+    _progress("Computing scene centroid for camera framing...")
+    look_at_target = compute_scene_centroid(stage)
+
     if workers and worker_behaviors:
         _progress("Enabling extensions...")
         enable_extensions()
@@ -154,13 +204,14 @@ def main():
         with camera:
             rep.modify.pose(
                 position=chosen_position,
-                look_at=(0, 0, 1.2)
+                look_at=look_at_target
             )
 
     _progress("Running simulation loop: 1000 frames...")
     for step in range(NUM_FRAMES):
         if step % 100 == 0:
             _progress(f"Frame {step}/{NUM_FRAMES}")
+        world.step(render=True)
         rep.orchestrator.step()
 
     _progress("Waiting for orchestrator to finish...")
