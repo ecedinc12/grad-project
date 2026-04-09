@@ -8,6 +8,9 @@ CLASS_NAMES = ["Person", "Vehicle", "Hardhat", "Vest", "Clutter"]
 
 def gen_yaml(dataset_dir, output_path):
     images = sorted(glob.glob(os.path.join(dataset_dir, "rgb_*.png")))
+    if not images:
+        print(f"Warning: No RGB images found in {dataset_dir}. Skipping YAML generation.")
+        return
     split = int(len(images) * 0.8)
     train_imgs = images[:split]
     val_imgs = images[split:]
