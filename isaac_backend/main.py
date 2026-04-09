@@ -55,7 +55,7 @@ def main():
 
     _progress("Creating World and initializing simulation context...")
     world = World(stage_units_in_meters=1.0)
-    world.initialize_simulation_context()
+    _progress("Simulation context initialized.")
     _progress("Simulation context initialized.")
 
     stage = omni.usd.get_context().get_stage()
