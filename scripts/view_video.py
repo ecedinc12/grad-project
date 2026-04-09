@@ -56,17 +56,62 @@ def make_handler(video_path):
 
         def serve_video(self):
             try:
-                # We do a simple 200 OK which works for basic progressive download in most browsers.
-                with open(video_path, 'rb') as f:
+                file_size = os.path.getsize(video_path)
+                range_header = self.headers.get("Range", None)
+
+                if not range_header:
+                    # No range requested — serve the whole file
                     self.send_response(200)
                     self.send_header("Content-Type", "video/mp4")
-                    
-                    fs = os.fstat(f.fileno())
-                    self.send_header("Content-Length", str(fs.st_size))
+                    self.send_header("Accept-Ranges", "bytes")
+                    self.send_header("Content-Length", str(file_size))
                     self.end_headers()
-                    
-                    # Stream the file
-                    self.wfile.write(f.read())
+                    with open(video_path, "rb") as f:
+                        while True:
+                            chunk = f.read(64 * 1024)
+                            if not chunk:
+                                break
+                            self.wfile.write(chunk)
+                    return
+
+                # Parse Range header (e.g. "bytes=0-1023")
+                unit, ranges = range_header.split("=")
+                if unit.strip() != "bytes":
+                    self.send_error(416, "Only byte ranges are supported")
+                    return
+
+                range_start_str, range_end_str = ranges.split("-")
+                range_start = int(range_start_str) if range_start_str else 0
+                range_end = int(range_end_str) if range_end_str else file_size - 1
+                range_end = min(range_end, file_size - 1)
+
+                if range_start >= file_size or range_start > range_end:
+                    self.send_error(416, "Range not satisfiable")
+                    return
+
+                content_length = range_end - range_start + 1
+
+                self.send_response(206)
+                self.send_header("Content-Type", "video/mp4")
+                self.send_header("Accept-Ranges", "bytes")
+                self.send_header("Content-Length", str(content_length))
+                self.send_header(
+                    "Content-Range",
+                    f"bytes {range_start}-{range_end}/{file_size}",
+                )
+                self.end_headers()
+
+                with open(video_path, "rb") as f:
+                    f.seek(range_start)
+                    remaining = content_length
+                    while remaining > 0:
+                        chunk_size = min(64 * 1024, remaining)
+                        chunk = f.read(chunk_size)
+                        if not chunk:
+                            break
+                        self.wfile.write(chunk)
+                        remaining -= len(chunk)
+
             except Exception as e:
                 self.send_error(500, str(e))
 
