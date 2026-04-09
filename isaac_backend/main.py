@@ -51,7 +51,9 @@ def main():
 
     _progress("Creating World and initializing simulation context...")
     world = World(stage_units_in_meters=1.0)
-    _progress("Simulation context initialized.")
+    world.initialize_simulation_context_async()
+    for _ in range(5):
+        simulation_app.update()
     _progress("Simulation context initialized.")
 
     stage = omni.usd.get_context().get_stage()
@@ -124,6 +126,8 @@ def main():
     if workers and worker_behaviors:
         _progress("Enabling extensions...")
         enable_extensions()
+        for _ in range(10):
+            simulation_app.update()
         _progress("Setting up people simulation...")
         setup_people_simulation(args.commands)
 
