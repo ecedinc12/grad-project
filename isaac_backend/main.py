@@ -157,8 +157,8 @@ def main():
                 look_at=(0, 0, 1.2)
             )
 
-    _progress("Starting orchestrator...")
-    rep.orchestrator.run_async()
+    _progress("Priming orchestrator...")
+    rep.orchestrator.step()
 
     _progress(f"Running simulation loop: {NUM_FRAMES} frames...")
     for step in range(NUM_FRAMES):
@@ -167,13 +167,7 @@ def main():
         world.step(render=True)
 
     _progress("Waiting for orchestrator to finish...")
-    wait_start = time.time()
-    while rep.orchestrator.get_status() == "running":
-        if time.time() - wait_start > 10:
-            print("[WARN] Timed out waiting for orchestrator to stop running.")
-            break
-        time.sleep(0.05)
-        simulation_app.update()
+    rep.orchestrator.wait_until_complete()
 
     _progress("Waiting for writer flush...")
     deadline = time.time() + 60
