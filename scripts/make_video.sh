@@ -24,13 +24,19 @@ if [ "$count" -eq 0 ]; then
     exit 0
 fi
 
-# Find all rgb_*.png files, sort them numerically, and cat them into ffmpeg
-# We use sort -V to ensure rgb_2.png comes before rgb_10.png
-find "$DATASET_DIR" -maxdepth 1 -name 'rgb_*.png' | \
-    sort -V | \
-    xargs cat | \
-    ffmpeg -y -framerate "$FPS" -f image2pipe -vcodec png -i - \
-    -c:v libx264 -pix_fmt yuv420p "$OUTPUT_FILE"
+# Create zero-padded symlinks for reliable ffmpeg sequence input
+FRAMES_DIR=$(mktemp -d /tmp/frames_XXXXXX)
+trap "rm -rf $FRAMES_DIR" EXIT
+
+i=0
+while read f; do
+    ln -s "$f" "$FRAMES_DIR/$(printf 'frame_%04d.png' $i)"
+    i=$((i + 1))
+done < <(find "$DATASET_DIR" -maxdepth 1 -name 'rgb_*.png' | sort -V)
+
+# Use printf-style pattern (ffmpeg's most reliable input mode)
+ffmpeg -y -framerate "$FPS" -i "$FRAMES_DIR/frame_%04d.png" \
+    -c:v libx264 -pix_fmt yuv420p -movflags +faststart "$OUTPUT_FILE"
 
 echo "========================================"
 echo " Video generation complete!"
