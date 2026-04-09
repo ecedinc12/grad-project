@@ -125,6 +125,10 @@ def main():
         enable_extensions()
         for _ in range(10):
             simulation_app.update()
+        _progress("Resetting world...")
+        world.reset()
+        for _ in range(5):
+            simulation_app.update()
         _progress("Setting up people simulation...")
         setup_people_simulation(args.commands)
 
@@ -155,9 +159,6 @@ def main():
 
     _progress("Starting orchestrator...")
     rep.orchestrator.run_async()
-
-    _progress("Resetting world...")
-    world.reset()
 
     _progress(f"Running simulation loop: {NUM_FRAMES} frames...")
     for step in range(NUM_FRAMES):

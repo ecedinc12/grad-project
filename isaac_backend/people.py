@@ -1,5 +1,4 @@
 import os
-import importlib
 import carb
 import omni.kit.app
 
@@ -20,36 +19,16 @@ def setup_navmesh():
     print("[INFO] Direct navigation active (navmesh not available).")
 
 def setup_people_simulation(command_file):
-    """Point omni.anim.people at the command file and call setup_characters()."""
+    """Point omni.anim.people at the command file.
+
+    The extension auto-reads the command file during simulation via CharacterBehavior.
+    No explicit setup_characters() call is needed — the CharacterBehavior script
+    attached to worker prims initializes automatically during on_update().
+    """
     carb.settings.get_settings().set(
         "/persistent/omni/anim/people/commandFilePath", command_file
     )
     print(f"[INFO] People command file: {command_file}")
-
-    success = False
-    for module_name, fn_name in [
-        ("omni.anim.people", "setup_characters"),
-        ("omni.anim.people.scripts.global_agent_manager", "GlobalAgentManager"),
-    ]:
-        try:
-            mod = importlib.import_module(module_name)
-            fn = getattr(mod, fn_name)
-            if fn_name == "GlobalAgentManager":
-                fn().setup_characters()
-            else:
-                fn()
-            print(f"[INFO] setup_characters OK ({module_name})")
-            success = True
-            break
-        except Exception as e:
-            print(f"[INFO] {module_name}.{fn_name} failed: {e}")
-
-    if not success:
-        raise RuntimeError(
-            "CRITICAL: setup_characters() failed to attach AnimGraph. "
-            "Characters will remain in T-pose. Check that worker USDs are fully loaded "
-            "and world.reset() was called before spawning workers."
-        )
 
 def write_command_file(worker_behaviors, path):
     """Serialise worker_behaviors (list of WorkerBehavior dicts) to people_commands.txt format."""
