@@ -34,9 +34,25 @@ while read f; do
     i=$((i + 1))
 done < <(find "$DATASET_DIR" -maxdepth 1 -name 'rgb_*.png' | sort -V)
 
-# Use printf-style pattern (ffmpeg's most reliable input mode)
+if [ "$i" -lt 2 ]; then
+    echo "Error: Need at least 2 frames to create a video, but found $i."
+    echo "  Check that Isaac Sim Replicator is generating >1 frame."
+    exit 1
+fi
+
+echo "Found $i frames. Encoding video..."
+
+# Encode with explicit output framerate, even-dimension scaling, and faststart for streaming
 ffmpeg -y -framerate "$FPS" -i "$FRAMES_DIR/frame_%04d.png" \
-    -c:v libx264 -pix_fmt yuv420p -movflags +faststart "$OUTPUT_FILE"
+    -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" \
+    -r "$FPS" \
+    -c:v libx264 -pix_fmt yuv420p -preset medium -crf 23 \
+    -movflags +faststart "$OUTPUT_FILE"
+
+if [ $? -ne 0 ]; then
+    echo "Error: ffmpeg encoding failed!"
+    exit 1
+fi
 
 echo "========================================"
 echo " Video generation complete!"

@@ -157,14 +157,11 @@ def main():
                 look_at=(0, 0, 1.2)
             )
 
-    _progress("Priming orchestrator...")
-    rep.orchestrator.step()
-
-    _progress(f"Running simulation loop: {NUM_FRAMES} frames...")
+    _progress("Running simulation loop: 1000 frames...")
     for step in range(NUM_FRAMES):
         if step % 100 == 0:
             _progress(f"Frame {step}/{NUM_FRAMES}")
-        world.step(render=True)
+        rep.orchestrator.step()
 
     _progress("Waiting for orchestrator to finish...")
     rep.orchestrator.wait_until_complete()
