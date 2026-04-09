@@ -51,7 +51,7 @@ def main():
 
     _progress("Creating World and initializing simulation context...")
     world = World(stage_units_in_meters=1.0)
-    world.initialize_simulation_context_async()
+    world.initialize_simulation_context()
     for _ in range(5):
         simulation_app.update()
     _progress("Simulation context initialized.")
