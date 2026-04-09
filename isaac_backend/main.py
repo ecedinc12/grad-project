@@ -6,8 +6,6 @@ import argparse
 import glob
 import time
 import subprocess
-import asyncio
-import threading
 
 # CRITICAL: Start SimulationApp BEFORE any omni/pxr imports
 from isaacsim import SimulationApp
@@ -49,12 +47,11 @@ def main():
     _progress("Loading configs...")
     scene_config, asset_library = load_config(args.config, args.library)
 
-    _progress("Creating World and initializing simulation context...")
+    _progress("Creating World...")
     world = World(stage_units_in_meters=1.0)
-    world.initialize_simulation_context()
     for _ in range(5):
         simulation_app.update()
-    _progress("Simulation context initialized.")
+    _progress("World created.")
 
     stage = omni.usd.get_context().get_stage()
 

@@ -48,7 +48,7 @@ def setup_people_simulation(command_file):
         raise RuntimeError(
             "CRITICAL: setup_characters() failed to attach AnimGraph. "
             "Characters will remain in T-pose. Check that worker USDs are fully loaded "
-            "and world.initialize_simulation_context_async() was called before spawning workers."
+            "and world.reset() was called before spawning workers."
         )
 
 def write_command_file(worker_behaviors, path):
