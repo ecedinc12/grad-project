@@ -1,4 +1,5 @@
 import random
+import AnimGraphSchema
 from pxr import Gf, UsdGeom, Usd, Sdf
 import omni.usd
 import omni.kit.app
@@ -23,7 +24,8 @@ def attach_character_behavior(prim_path):
         print(f"[ERROR] No SkelRoot found under {prim_path}")
         return
 
-    target_path = str(skelroot.GetPath())
+    AnimGraphSchema.AnimationGraphAPI.Apply(skelroot)
+    print(f"[INFO] Applied AnimationGraphAPI to {skelroot.GetPath()}")
 
     script_path = (
         omni.kit.app.get_app().get_extension_manager()
@@ -31,10 +33,9 @@ def attach_character_behavior(prim_path):
         + "/omni/anim/people/scripts/character_behavior.py"
     )
 
-    omni.kit.commands.execute("ApplyScriptingAPICommand", paths=[Sdf.Path(target_path)])
-    attr = skelroot.GetAttribute("omni:scripting:scripts")
-    attr.Set([script_path])
-    print(f"[INFO] Attached CharacterBehavior to SkelRoot at {target_path}")
+    omni.kit.commands.execute("ApplyScriptingAPICommand", paths=[Sdf.Path(skelroot.GetPath())])
+    skelroot.GetAttribute("omni:scripting:scripts").Set([script_path])
+    print(f"[INFO] Attached CharacterBehavior to SkelRoot at {skelroot.GetPath()}")
 
 def select_worker_usd(ppe_state, asset_library):
     """Return the worker USD path based on whether PPE is worn."""
