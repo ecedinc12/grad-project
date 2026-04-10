@@ -3,13 +3,19 @@ import carb
 import omni.kit.app
 
 def enable_extensions():
-    """Enable omni.anim.people extension."""
+    """Enable all extensions required for omni.anim.people to animate characters."""
     manager = omni.kit.app.get_app().get_extension_manager()
-    if not manager.is_extension_enabled("omni.anim.people"):
-        print("[INFO] Enabling extension: omni.anim.people")
-        manager.set_extension_enabled_immediate("omni.anim.people", True)
-    else:
-        print("[INFO] Extension already active: omni.anim.people")
+    required = [
+        "omni.anim.graph.core",
+        "omni.anim.behavior.schema",
+        "omni.anim.people",
+    ]
+    for ext in required:
+        if not manager.is_extension_enabled(ext):
+            print(f"[INFO] Enabling extension: {ext}")
+            manager.set_extension_enabled_immediate(ext, True)
+        else:
+            print(f"[INFO] Extension already active: {ext}")
 
 def setup_navmesh():
     """Disable navmesh-based navigation (omni.anim.navigation removed in Isaac Sim 5.1)."""

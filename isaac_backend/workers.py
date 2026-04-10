@@ -54,12 +54,10 @@ def spawn_workers(workers, worker_behaviors, asset_library, stage):
 
         attach_character_behavior(prim_path)
 
-        attach_character_behavior(prim_path)
-
         spawn_x, spawn_y = _initial_pos(name)
         xf = UsdGeom.Xformable(prim)
         xf.ClearXformOpOrder()
-        xf.AddTranslateOp().Set(Gf.Vec3d(spawn_x, spawn_y, 0.2))
+        xf.AddTranslateOp().Set(Gf.Vec3d(spawn_x, spawn_y, 0.0))
 
         semantics = [("class", "person")]
         if ppe_state.get("hardhat", False):
@@ -70,7 +68,7 @@ def spawn_workers(workers, worker_behaviors, asset_library, stage):
         with rep.get.prims(path_pattern=prim_path):
             rep.modify.semantics(semantics)
 
-        print(f"[INFO] Spawned {name} @ ({spawn_x:.2f}, {spawn_y:.2f}, 0.2) ppe={ppe_state}")
+        print(f"[INFO] Spawned {name} @ ({spawn_x:.2f}, {spawn_y:.2f}, 0.0) ppe={ppe_state}")
         print(f"[DEBUG] Worker {name} prim valid: {prim.IsValid()}")
         print(f"[DEBUG] Worker {name} visibility: {UsdGeom.Imageable(prim).ComputeVisibility()}")
         mat = xf.ComputeLocalToWorldTransform(Usd.TimeCode.Default())
