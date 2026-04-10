@@ -87,11 +87,11 @@ def _apply_scene_semantics(stage, spawned_asset_ids, workers):
     _progress(f"Applied USD-level semantics to {applied} prims.")
 
 def compute_scene_centroid(stage):
-    """Walk /World/Characters and /World/Layout prims to find the average XY position."""
+    """Walk /World/Characters, /World/Layout, and /Replicator prims to find the average XY position."""
     xs, ys, zs = [], [], []
     for prim in stage.Traverse():
         path = str(prim.GetPath())
-        if not (path.startswith("/World/Characters/") or path.startswith("/World/Layout/")):
+        if not (path.startswith("/World/Characters/") or path.startswith("/World/Layout/") or path.startswith("/Replicator/")):
             continue
         xf = UsdGeom.Xformable(prim)
         if xf:
@@ -259,14 +259,15 @@ def main():
     hazard_zones = scene_config.get("hazard_zones", [])
     scene_positions = positions_for_angles(angle_hints, hazard_zones=hazard_zones)
     
-    chosen_position = scene_positions[0]
-    _progress(f"camera_angles={angle_hints}  →  {len(scene_positions)} orbit positions, using index 0: {chosen_position}")
+    from isaac_backend.camera import orbit_distribution
+    camera_pos_dist = orbit_distribution(scene_positions)
+    _progress(f"camera_angles={angle_hints}  →  {len(scene_positions)} orbit positions, radius range: {min(p[0]**2+p[1]**2+p[2]**2 for p in scene_positions)**0.5:.1f}-{max(p[0]**2+p[1]**2+p[2]**2 for p in scene_positions)**0.5:.1f}m")
 
     _progress("Setting up frame trigger...")
     with rep.trigger.on_frame(num_frames=NUM_FRAMES):
         with camera:
             rep.modify.pose(
-                position=chosen_position,
+                position=camera_pos_dist,
                 look_at=look_at_target
             )
 

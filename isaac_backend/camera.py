@@ -76,3 +76,37 @@ def positions_for_angles(angle_hints, hazard_zones=None, entity_positions=None):
         ),
         key=lambda p: p[2], reverse=True,
     )
+
+def orbit_distribution(scene_positions):
+    """Return a rep.distribution.uniform that samples across all orbit positions.
+
+    Each frame gets a random camera position from the pre-computed list,
+    providing varied angles of the full scene.
+    """
+    import omni.replicator.core as rep
+
+    xs = [p[0] for p in scene_positions]
+    ys = [p[1] for p in scene_positions]
+    zs = [p[2] for p in scene_positions]
+
+    return rep.distribution.uniform(
+        (min(xs), min(ys), min(zs)),
+        (max(xs), max(ys), max(zs))
+    )
+
+def orbit_distribution(scene_positions):
+    """Return a rep.distribution.uniform that samples across all orbit positions.
+
+    Each frame gets a random camera position from the pre-computed list,
+    providing varied angles of the full scene.
+    """
+    import omni.replicator.core as rep
+
+    xs = [p[0] for p in scene_positions]
+    ys = [p[1] for p in scene_positions]
+    zs = [p[2] for p in scene_positions]
+
+    return rep.distribution.uniform(
+        (min(xs), min(ys), min(zs)),
+        (max(xs), max(ys), max(zs))
+    )
