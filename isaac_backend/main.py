@@ -16,7 +16,7 @@ import omni.replicator.core as rep
 import omni.kit.app
 import omni.usd
 from omni.isaac.core import World
-from pxr import UsdGeom
+from pxr import Usd, UsdGeom
 
 from isaac_backend.config_loader import load_config
 from isaac_backend.camera import positions_for_angles
@@ -36,29 +36,6 @@ from isaac_backend.people import (
 def _progress(msg):
     print(f"[PROGRESS] [{time.strftime('%H:%M:%S')}] {msg}")
     sys.stdout.flush()
-
-def compute_scene_centroid(stage):
-    """Walk /World/Characters and /World/Layout prims to find the average XY position."""
-    xs, ys, zs = [], [], []
-    for prim in stage.Traverse():
-        path = str(prim.GetPath())
-        if not (path.startswith("/World/Characters/") or path.startswith("/World/Layout/")):
-            continue
-        xf = UsdGeom.Xformable(prim)
-        if xf:
-            mat = xf.ComputeLocalToWorldTransform(Usd.TimeCode.Default())
-            pos = mat.ExtractTranslation()
-            xs.append(pos[0])
-            ys.append(pos[1])
-            zs.append(pos[2])
-    if not xs:
-        _progress("[WARN] No entities found for centroid calculation, defaulting to (0, 0, 1.2)")
-        return (0.0, 0.0, 1.2)
-    cx = sum(xs) / len(xs)
-    cy = sum(ys) / len(ys)
-    cz = sum(zs) / len(zs)
-    _progress(f"Scene centroid computed: ({cx:.2f}, {cy:.2f}, {cz:.2f}) from {len(xs)} entities")
-    return (cx, cy, cz)
 
 def compute_scene_centroid(stage):
     """Walk /World/Characters and /World/Layout prims to find the average XY position."""
@@ -189,6 +166,8 @@ def main():
         rgb=True,
         bounding_box_2d_tight=True,
         semantic_segmentation=True,
+        distance_to_camera=True,
+        instance_segmentation=True,
     )
     writer.attach([render_product])
 

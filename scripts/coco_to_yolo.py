@@ -13,6 +13,35 @@ CLASS_MAP = {
     "hazard_zone_warning": 13, "hazard_zone_restricted": 14, "hazard_zone_critical": 15,
 }
 
+REVERSE_CLASS_MAP = {v: k for k, v in CLASS_MAP.items()}
+
+
+def _load_id_to_label(dataset_dir):
+    label_file = os.path.join(dataset_dir, "semantic_id_to_labels.json")
+    id_to_label = {}
+    if os.path.exists(label_file):
+        raw = json.load(open(label_file))
+        for k, v in raw.items():
+            label = v["class"] if isinstance(v, dict) else v
+            id_to_label[int(k)] = label
+    else:
+        print(f"Warning: {label_file} not found; class IDs will not be remapped.")
+    return id_to_label
+
+
+def _colors_json_to_label_map(colors_path):
+    if not os.path.exists(colors_path):
+        return {}
+    raw = json.load(open(colors_path))
+    color_to_class_id = {}
+    for entry in raw:
+        color = tuple(entry.get("color", []))
+        class_name = entry.get("class", "")
+        class_id = CLASS_MAP.get(class_name.lower(), -1)
+        if class_id >= 0:
+            color_to_class_id[color] = class_id
+    return color_to_class_id
+
 
 def convert_npy_to_yolo(dataset_dir="/tmp/dataset"):
     npy_files = sorted(glob.glob(os.path.join(dataset_dir, "bounding_box_2d_tight_*.npy")))
@@ -21,21 +50,11 @@ def convert_npy_to_yolo(dataset_dir="/tmp/dataset"):
         print(f"Warning: No .npy files found in {dataset_dir}. Ensure BasicWriter has written output.")
         return
 
-    label_file = os.path.join(dataset_dir, "semantic_id_to_labels.json")
-    id_to_label = {}
-    if os.path.exists(label_file):
-        raw = json.load(open(label_file))
-        # format: {"4": {"class": "Person"}, ...}  or {"4": "Person", ...}
-        for k, v in raw.items():
-            label = v["class"] if isinstance(v, dict) else v
-            id_to_label[int(k)] = label
-    else:
-        print(f"Warning: {label_file} not found; class IDs will not be remapped.")
+    id_to_label = _load_id_to_label(dataset_dir)
 
     converted = 0
     for npy_path in npy_files:
         basename = os.path.splitext(os.path.basename(npy_path))[0]
-        # e.g. bounding_box_2d_tight_0000 -> 0000
         frame_str = basename.split("_")[-1]
 
         rgb_path = os.path.join(dataset_dir, f"rgb_{frame_str}.png")
@@ -59,7 +78,7 @@ def convert_npy_to_yolo(dataset_dir="/tmp/dataset"):
                 label = id_to_label.get(int(row["semanticId"]), "")
                 class_id = CLASS_MAP.get(label.lower(), -1)
                 if class_id == -1:
-                    continue  # skip unlabelled / background prims
+                    continue
 
                 x_center = (x_min + x_max) / 2.0 / img_width
                 y_center = (y_min + y_max) / 2.0 / img_height
@@ -73,8 +92,81 @@ def convert_npy_to_yolo(dataset_dir="/tmp/dataset"):
     print(f"Successfully converted {converted} frames to YOLO format in {dataset_dir}")
 
 
+def convert_instance_masks(dataset_dir="/tmp/dataset"):
+    seg_files = sorted(glob.glob(os.path.join(dataset_dir, "instance_segmentation_*.png")))
+    if not seg_files:
+        print("Warning: No instance segmentation files found. Skipping mask conversion.")
+        return 0
+
+    colors_json = os.path.join(dataset_dir, "instance_segmentation_colors.json")
+    color_to_class_id = _colors_json_to_label_map(colors_json)
+    if not color_to_class_id:
+        print("Warning: No valid color-to-class mapping found. Skipping mask conversion.")
+        return 0
+
+    converted = 0
+    for seg_path in seg_files:
+        basename = os.path.splitext(os.path.basename(seg_path))[0]
+        frame_str = basename.split("_")[-1]
+
+        rgb_path = os.path.join(dataset_dir, f"rgb_{frame_str}.png")
+        if not os.path.exists(rgb_path):
+            continue
+
+        with Image.open(rgb_path) as img:
+            img_width, img_height = img.size
+
+        seg_img = Image.open(seg_path).convert("RGB")
+        seg_array = np.array(seg_img)
+
+        mask_dir = os.path.join(dataset_dir, "masks")
+        os.makedirs(mask_dir, exist_ok=True)
+
+        mask_txt = os.path.join(mask_dir, f"rgb_{frame_str}.txt")
+
+        found_instances = {}
+        for color, class_id in color_to_class_id.items():
+            match = (seg_array[:, :, 0] == color[0]) & \
+                    (seg_array[:, :, 1] == color[1]) & \
+                    (seg_array[:, :, 2] == color[2])
+            if np.any(match):
+                found_instances[class_id] = match
+
+        if not found_instances:
+            converted += 1
+            continue
+
+        with open(mask_txt, "w") as f:
+            for class_id, match in found_instances.items():
+                class_name = REVERSE_CLASS_MAP[class_id]
+                mask_filename = f"{class_name}_{class_id:02d}_{frame_str}.png"
+                mask_path = os.path.join(mask_dir, mask_filename)
+
+                mask = (match * 255).astype(np.uint8)
+                mask_img = Image.fromarray(mask, mode="L")
+                mask_img.save(mask_path)
+
+                coords = np.column_stack(np.where(match))
+                if len(coords) > 0:
+                    y_min, x_min = coords.min(axis=0)
+                    y_max, x_max = coords.max(axis=0)
+                    x_center = (x_min + x_max) / 2.0 / img_width
+                    y_center = (y_min + y_max) / 2.0 / img_height
+                    width = (x_max - x_min) / img_width
+                    height = (y_max - y_min) / img_height
+                    f.write(f"{class_id} {x_center:.6f} {y_center:.6f} {width:.6f} {height:.6f} {mask_filename}\n")
+
+        converted += 1
+
+    print(f"Successfully converted {converted} frames to YOLO instance masks in {dataset_dir}/masks/")
+    return converted
+
+
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Convert BasicWriter numpy bbox output to YOLO format.")
+    parser = argparse.ArgumentParser(description="Convert BasicWriter output to YOLO format.")
     parser.add_argument("--dir", type=str, default="/tmp/dataset", help="Directory containing BasicWriter output.")
+    parser.add_argument("--masks", action="store_true", help="Also convert instance segmentation to YOLO mask format.")
     args = parser.parse_args()
     convert_npy_to_yolo(args.dir)
+    if args.masks:
+        convert_instance_masks(args.dir)

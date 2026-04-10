@@ -17,36 +17,40 @@ echo "========================================"
 PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 # Step 1: Generate config from prompt
-echo "[1/6] Running LLM Config Generator..."
+echo "[1/8] Running LLM Config Generator..."
 python3 "$PROJECT_ROOT/llm_pipeline/generator.py" --prompt "$PROMPT" --output "$PROJECT_ROOT/configs/current_scene.json"
 
 # Step 2: Clear old fast-disk data
-echo "[2/6] Cleaning up old dataset..."
+echo "[2/8] Cleaning up old dataset..."
 rm -rf /tmp/dataset
 
 # Step 3: Run Isaac Sim Headless Replicator Generation
-echo "[3/6] Generating dataset via Isaac Sim..."
+echo "[3/8] Generating dataset via Isaac Sim..."
 /isaac-sim/python.sh "$PROJECT_ROOT/isaac_backend/main.py" --config "$PROJECT_ROOT/configs/current_scene.json" --library "$PROJECT_ROOT/assets/library.json"
 
 # Step 4: Convert COCO annotations to YOLO format
-echo "[4/6] Converting COCO to YOLO..."
-python3 "$PROJECT_ROOT/scripts/coco_to_yolo.py" --dir /tmp/dataset
+echo "[4/8] Converting COCO to YOLO..."
+python3 "$PROJECT_ROOT/scripts/coco_to_yolo.py" --dir /tmp/dataset --masks
 
 # Step 5: Generate dataset.yaml for YOLO training
-echo "[5/6] Generating dataset.yaml..."
+echo "[5/8] Generating dataset.yaml..."
 python3 "$PROJECT_ROOT/scripts/gen_dataset_yaml.py" \
     --dir /tmp/dataset \
     --output /tmp/dataset/dataset.yaml
 
-# Step 6: Generate Video
-echo "[6/7] Generating video from frames..."
+# Step 6: Report class balance
+echo "[6/8] Analyzing class balance..."
+python3 "$PROJECT_ROOT/scripts/class_balance.py" --dir /tmp/dataset
+
+# Step 7: Generate Video
+echo "[7/8] Generating video from frames..."
 "$PROJECT_ROOT/scripts/make_video.sh" /tmp/dataset /tmp/dataset/output.mp4
 
-# Step 7: Archive and move to persistent storage
+# Step 8: Archive and move to persistent storage
 TIMESTAMP=$(date +%s)
 ARCHIVE_NAME="$PROJECT_ROOT/dataset_${TIMESTAMP}.tar.gz"
 
-echo "[7/7] Archiving output to $ARCHIVE_NAME..."
+echo "[8/8] Archiving output to $ARCHIVE_NAME..."
 tar -czf $ARCHIVE_NAME -C /tmp dataset/
 
 echo "========================================"
