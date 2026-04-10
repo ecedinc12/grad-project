@@ -105,6 +105,7 @@ def main():
 
     workers = [e for e in scene_config.get("entities", []) if e.get("type") == "worker"]
     others  = [e for e in scene_config.get("entities", []) if e.get("type") != "worker"]
+    worker_behaviors = scene_config.get("worker_behaviors", [])
 
     if workers and worker_behaviors:
         _progress("Enabling people extension BEFORE spawning workers...")
@@ -131,7 +132,6 @@ def main():
             rep.modify.semantics([("class", semantic_class)])
     _progress("Non-worker entities spawned.")
 
-    worker_behaviors = scene_config.get("worker_behaviors", [])
     if workers:
         _progress(f"Spawning {len(workers)} workers...")
         spawn_workers(workers, worker_behaviors, asset_library, stage)
