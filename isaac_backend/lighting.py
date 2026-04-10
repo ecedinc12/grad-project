@@ -18,11 +18,9 @@ def setup_camera_and_lighting(config):
 
     if condition == "dusk":
         rep.create.light(
-            light_type="Directional",
+            light_type="Distant",
             intensity=800,
             color=(1.0, 0.55, 0.20),
-            position=(15, -10, 3),
-            rotation=(15, -30, 0),
         )
         for x, y in _CEILING_LAMP_XY:
             rep.create.light(
