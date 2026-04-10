@@ -6,20 +6,35 @@ import omni.kit.commands
 import omni.replicator.core as rep
 from isaac_backend.semantics import apply_semantics
 
+def _find_skelroot(prim):
+    """Find the first SkelRoot descendant of a prim (inside referenced USD)."""
+    for child in Usd.PrimRange(prim):
+        if child.GetTypeName() == "SkelRoot":
+            return child
+    return None
+
 def attach_character_behavior(prim_path):
-    """Attach CharacterBehavior script to a worker prim so omni.anim.people can animate it."""
+    """Attach CharacterBehavior script to the SkelRoot inside the referenced character USD."""
+    stage = omni.usd.get_context().get_stage()
+    prim = stage.GetPrimAtPath(prim_path)
+
+    skelroot = _find_skelroot(prim)
+    if skelroot is None:
+        print(f"[ERROR] No SkelRoot found under {prim_path}")
+        return
+
+    target_path = str(skelroot.GetPath())
+
     script_path = (
         omni.kit.app.get_app().get_extension_manager()
         .get_extension_path_by_module("omni.anim.people")
         + "/omni/anim/people/scripts/character_behavior.py"
     )
-    
-    omni.kit.commands.execute("ApplyScriptingAPICommand", paths=[Sdf.Path(prim_path)])
-    stage = omni.usd.get_context().get_stage()
-    prim = stage.GetPrimAtPath(prim_path)
-    attr = prim.GetAttribute("omni:scripting:scripts")
+
+    omni.kit.commands.execute("ApplyScriptingAPICommand", paths=[Sdf.Path(target_path)])
+    attr = skelroot.GetAttribute("omni:scripting:scripts")
     attr.Set([script_path])
-    print(f"[INFO] Attached CharacterBehavior to {prim_path}")
+    print(f"[INFO] Attached CharacterBehavior to SkelRoot at {target_path}")
 
 def select_worker_usd(ppe_state, asset_library):
     """Return the worker USD path based on whether PPE is worn."""

@@ -25,12 +25,6 @@ def setup_navmesh():
     )
     print("[INFO] Direct navigation active (navmesh not available).")
 
-def setup_characters():
-    """Apply Animation Graph and BehaviorScript to all prims under /World/Characters."""
-    import omni.anim.people
-    omni.anim.people.setup_characters()
-    print("[INFO] setup_characters() called — Animation Graph applied to all characters.")
-
 def setup_people_simulation(command_file):
     """Configure omni.anim.people with character root path and command file."""
     carb.settings.get_settings().set(
