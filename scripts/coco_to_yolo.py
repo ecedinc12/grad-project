@@ -89,8 +89,9 @@ def convert_npy_to_yolo(dataset_dir="/tmp/dataset"):
 
                 semantic_id = int(row["semanticId"])
                 label = id_to_label.get(semantic_id, "")
-                if not label:
-                    label = row.get("class", "")
+                if not label and "class" in row.dtype.names:
+                    raw = row["class"]
+                    label = raw.decode() if isinstance(raw, bytes) else str(raw)
                 class_id = CLASS_MAP.get(label.lower(), -1)
                 if class_id == -1:
                     continue

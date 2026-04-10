@@ -212,6 +212,7 @@ def main():
         semantic_segmentation=True,
         distance_to_camera=True,
         instance_segmentation=True,
+        format="coco",
     )
     writer.attach([render_product])
 
