@@ -1,0 +1,46 @@
+/isaac-sim/python.sh -c "
+from isaacsim import SimulationApp
+app = SimulationApp({'headless': True})
+import carb
+carb.settings.get_settings().set('/persistent/exts/omni.anim.people/character_prim_path', '/World/Characters')
+manager = carb.settings.get_settings()
+ext_mgr = carb.settings.get_settings()
+# Enable extensions
+mgr = __import__('omni.kit.app', fromlist=['get_app']).get_app().get_extension_manager()
+for ext in ['omni.anim.graph.core', 'omni.anim.people']:
+    if not mgr.is_extension_enabled(ext):
+        mgr.set_extension_enabled_immediate(ext, True)
+import omni.usd
+import omni.kit.commands
+from pxr import Usd, UsdGeom, Sdf
+ctx = omni.usd.get_context()
+ctx.new_stage()
+for _ in range(5):
+    app.update()
+stage = omni.usd.get_context().get_stage()
+stage.DefinePrim('/World/Characters', 'Xform')
+worker_path = '/World/Characters/worker_01'
+prim = stage.DefinePrim(worker_path, 'Xform')
+prim.GetReferences().AddReference('https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/People/Characters/male_adult_construction_01_new/male_adult_construction_01_new.usd')
+for _ in range(20):
+    app.update()
+print('=== Prim hierarchy ===')
+for p in stage.Traverse():
+    print(f'{p.GetPath()} {p.GetTypeName()}')
+print()
+print('=== SkelRoot search ===')
+for p in Usd.PrimRange(prim):
+    if p.GetTypeName() == 'SkelRoot':
+        print(f'Found SkelRoot at: {p.GetPath()}')
+        print(f'Has AnimationGraphAPI: {p.HasAPI(__import__(\"AnimGraphSchema\").AnimationGraphAPI)}')
+print()
+print('=== ag.get_character tests ===')
+import omni.anim.graph.core as ag
+result_xform = ag.get_character(worker_path)
+print(f'ag.get_character(Xform path): {result_xform}')
+for p in Usd.PrimRange(prim):
+    if p.GetTypeName() == 'SkelRoot':
+        result_skel = ag.get_character(str(p.GetPath()))
+        print(f'ag.get_character(SkelRoot path): {result_skel}')
+app.close()
+"
