@@ -1,5 +1,5 @@
-import omni.replicator.core as rep
 import omni.usd
+from pxr import Sdf
 
 KEEP_SEMANTICS = {
     "rack", "pallet",
@@ -8,9 +8,29 @@ KEEP_SEMANTICS = {
 }
 
 def apply_semantics(prim_path, class_name):
-    """Applies semantic class to a given prim path using Replicator."""
-    with rep.get.prims(path_pattern=prim_path):
-        rep.modify.semantics([("class", class_name)])
+    """Apply semantic class to a prim using USD SemanticSchema API directly.
+
+    This writes attributes to the USD stage so BasicWriter can resolve
+    them and generate semantic_id_to_labels.json / instance_segmentation_colors.json.
+    """
+    stage = omni.usd.get_context().get_stage()
+    prim = stage.GetPrimAtPath(prim_path)
+    if not prim.IsValid():
+        print(f"[WARN] Cannot apply semantics: prim '{prim_path}' is not valid.")
+        return
+
+    data_attr_name = "semantic:Semantics:params:semanticData"
+    type_attr_name = "semantic:Semantics:params:semanticType"
+
+    if not prim.HasAttribute(data_attr_name):
+        prim.CreateAttribute(data_attr_name, Sdf.ValueTypeNames.Token, True).Set(class_name)
+    else:
+        prim.GetAttribute(data_attr_name).Set(class_name)
+
+    if not prim.HasAttribute(type_attr_name):
+        prim.CreateAttribute(type_attr_name, Sdf.ValueTypeNames.Token, True).Set("class")
+    else:
+        prim.GetAttribute(type_attr_name).Set("class")
 
 def clear_unwanted_warehouse_semantics(stage):
     """Strip pre-existing semantics from warehouse USD structural prims,

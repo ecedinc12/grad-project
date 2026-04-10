@@ -22,7 +22,7 @@ from pxr import Usd, UsdGeom
 from isaac_backend.config_loader import load_config
 from isaac_backend.camera import positions_for_angles
 from isaac_backend.lighting import setup_camera_and_lighting
-from isaac_backend.semantics import clear_unwanted_warehouse_semantics
+from isaac_backend.semantics import clear_unwanted_warehouse_semantics, apply_semantics
 from isaac_backend.spawner import get_geofenced_spawner, spawn_hazard_zones
 from isaac_backend.warehouse import spawn_warehouse_layout, hide_driver_prims
 from isaac_backend.workers import spawn_workers
@@ -37,6 +37,54 @@ from isaac_backend.people import (
 def _progress(msg):
     print(f"[PROGRESS] [{time.strftime('%H:%M:%S')}] {msg}")
     sys.stdout.flush()
+
+def _apply_scene_semantics(stage, spawned_asset_ids, workers):
+    """Walk the stage and apply USD-level semantics to all prims that need them.
+
+    This ensures BasicWriter can resolve semantic data and generate the JSON
+    mapping files (semantic_id_to_labels.json, instance_segmentation_colors.json).
+    """
+    from pxr import Sdf
+
+    def set_semantic(prim, class_name):
+        data_attr = "semantic:Semantics:params:semanticData"
+        type_attr = "semantic:Semantics:params:semanticType"
+        if not prim.HasAttribute(data_attr):
+            prim.CreateAttribute(data_attr, Sdf.ValueTypeNames.Token, True).Set(class_name)
+        else:
+            prim.GetAttribute(data_attr).Set(class_name)
+        if not prim.HasAttribute(type_attr):
+            prim.CreateAttribute(type_attr, Sdf.ValueTypeNames.Token, True).Set("class")
+        else:
+            prim.GetAttribute(type_attr).Set("class")
+
+    applied = 0
+
+    for asset_id, semantic_class in spawned_asset_ids:
+        for prim in stage.Traverse():
+            path = str(prim.GetPath())
+            if not prim.IsValid():
+                continue
+            ref_path = prim.GetReferences()
+            if ref_path and ref_path.GetAddedOrExplicitPaths():
+                for ref in ref_path.GetAddedOrExplicitPaths():
+                    if asset_id in str(ref) or os.path.basename(asset_id) in str(ref):
+                        if not prim.HasAttribute("semantic:Semantics:params:semanticData"):
+                            set_semantic(prim, semantic_class)
+                            applied += 1
+                            print(f"[INFO] Applied USD semantics '{semantic_class}' to {path}")
+                        break
+
+    if workers:
+        for prim in stage.Traverse():
+            path = str(prim.GetPath())
+            if path.startswith("/World/Characters/") and prim.GetTypeName() == "Xform":
+                if not prim.HasAttribute("semantic:Semantics:params:semanticData"):
+                    set_semantic(prim, "person")
+                    applied += 1
+                    print(f"[INFO] Applied USD semantics 'person' to {path}")
+
+    _progress(f"Applied USD-level semantics to {applied} prims.")
 
 def compute_scene_centroid(stage):
     """Walk /World/Characters and /World/Layout prims to find the average XY position."""
@@ -117,6 +165,7 @@ def main():
             simulation_app.update()
 
     _progress(f"Spawning {len(others)} non-worker entities...")
+    spawned_asset_ids = []
     for entity in others:
         asset_id = entity.get("asset_id", "")
         if asset_id == "zone":
@@ -134,6 +183,7 @@ def main():
         print(f"[INFO] Spawning {asset_id} with semantic class '{semantic_class}'")
         with prims:
             rep.modify.semantics([("class", semantic_class)])
+        spawned_asset_ids.append((asset_id, semantic_class))
     _progress("Non-worker entities spawned.")
 
     if workers:
@@ -153,6 +203,9 @@ def main():
 
     _progress("Hiding driver prims...")
     hide_driver_prims(stage)
+
+    _progress("Applying USD-level semantics to all scene prims...")
+    _apply_scene_semantics(stage, spawned_asset_ids, workers)
 
     _progress("Computing scene centroid for camera framing...")
     look_at_target = compute_scene_centroid(stage)
@@ -194,8 +247,10 @@ def main():
         rgb=True,
         bounding_box_2d_tight=True,
         semantic_segmentation=True,
+        semantic_segmentation_params={"write_semantic_id_to_labels": True},
         distance_to_camera=True,
         instance_segmentation=True,
+        instance_segmentation_params={"write_instance_segmentation_colors": True},
     )
     writer.attach([render_product])
 
@@ -219,7 +274,7 @@ def main():
     for step in range(NUM_FRAMES):
         if step % 100 == 0:
             _progress(f"Frame {step}/{NUM_FRAMES}")
-        world.step(render=True)
+        world.step(render=False)
         rep.orchestrator.step()
 
     _progress("Waiting for orchestrator to finish...")
