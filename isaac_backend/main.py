@@ -188,8 +188,7 @@ def main():
             simulation_app.update()
 
     _progress("Initializing BasicWriter...")
-    writer = rep.BasicWriter()
-    writer.initialize(
+    writer = rep.BasicWriter(
         output_dir="/tmp/dataset",
         rgb=True,
         bounding_box_2d_tight=True,
