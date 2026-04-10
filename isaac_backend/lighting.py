@@ -3,7 +3,7 @@ import omni.replicator.core as rep
 LIGHTING_MAP = {
     "daylight": {"intensity": 1000, "color": (1.0,  0.98, 0.95)},
     "overcast": {"intensity":  500, "color": (0.85, 0.88, 0.95)},
-    "dusk":     {"intensity":  300, "color": (1.0,  0.60, 0.30)},
+    "dusk":     {"intensity":  200, "color": (0.35, 0.40, 0.65)},
     "night":    {"intensity":   50, "color": (0.20, 0.25, 0.40)},
 }
 
@@ -15,6 +15,23 @@ def setup_camera_and_lighting(config):
     params = LIGHTING_MAP.get(condition, LIGHTING_MAP["daylight"])
     print(f"[INFO] lighting_conditions={condition!r}  →  intensity={params['intensity']}, color={params['color']}")
     rep.create.light(light_type="Dome", intensity=params["intensity"], color=params["color"])
+
+    if condition == "dusk":
+        rep.create.light(
+            light_type="Directional",
+            intensity=800,
+            color=(1.0, 0.55, 0.20),
+            position=(15, -10, 3),
+            rotation=(15, -30, 0),
+        )
+        for x, y in _CEILING_LAMP_XY:
+            rep.create.light(
+                light_type="Sphere",
+                intensity=400,
+                color=(1.0, 0.85, 0.60),
+                position=(x, y, _CEILING_Z),
+                scale=0.15,
+            )
 
     if condition == "night":
         for x, y in _CEILING_LAMP_XY:

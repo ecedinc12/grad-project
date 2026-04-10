@@ -201,7 +201,8 @@ def main():
 
     NUM_FRAMES = 200
     angle_hints = scene_config.get("camera_angles", [])
-    scene_positions = positions_for_angles(angle_hints)
+    hazard_zones = scene_config.get("hazard_zones", [])
+    scene_positions = positions_for_angles(angle_hints, hazard_zones=hazard_zones)
     
     chosen_position = scene_positions[0]
     _progress(f"camera_angles={angle_hints}  →  {len(scene_positions)} orbit positions, using index 0: {chosen_position}")
