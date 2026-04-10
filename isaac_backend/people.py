@@ -2,7 +2,7 @@ import os
 import carb
 import omni.kit.app
 import omni.timeline
-import omni.timeline
+import omni.anim.people
 
 def enable_extensions():
     """Enable all extensions required for omni.anim.people to animate characters."""
@@ -25,6 +25,11 @@ def setup_navmesh():
         "/persistent/omni/anim/people/navmeshBasedNavigation", False
     )
     print("[INFO] Direct navigation active (navmesh not available).")
+
+def setup_characters():
+    """Apply Animation Graph and BehaviorScript to all prims under /World/Characters."""
+    omni.anim.people.setup_characters()
+    print("[INFO] setup_characters() called — Animation Graph applied to all characters.")
 
 def setup_people_simulation(command_file):
     """Configure omni.anim.people with character root path and command file."""

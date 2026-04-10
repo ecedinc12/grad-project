@@ -30,6 +30,7 @@ from isaac_backend.people import (
     enable_extensions,
     setup_navmesh,
     setup_people_simulation,
+    setup_characters,
     write_command_file,
 )
 
@@ -199,6 +200,16 @@ def main():
             simulation_app.update()
         _progress("Starting timeline for behavior scripts...")
         omni.timeline.get_timeline_interface().play()
+        for _ in range(10):
+            simulation_app.update()
+
+        _progress("Applying Animation Graph to characters...")
+        setup_characters()
+        for _ in range(10):
+            simulation_app.update()
+
+        _progress("Applying Animation Graph to characters...")
+        setup_characters()
         for _ in range(10):
             simulation_app.update()
 
