@@ -19,16 +19,14 @@ def setup_navmesh():
     print("[INFO] Direct navigation active (navmesh not available).")
 
 def setup_people_simulation(command_file):
-    """Point omni.anim.people at the command file.
-
-    The extension auto-reads the command file during simulation via CharacterBehavior.
-    No explicit setup_characters() call is needed — the CharacterBehavior script
-    attached to worker prims initializes automatically during on_update().
-    """
+    """Configure omni.anim.people with character root path and command file."""
     carb.settings.get_settings().set(
-        "/persistent/omni/anim/people/commandFilePath", command_file
+        "/persistent/exts/omni.anim.people/character_prim_path", "/World/Characters"
     )
-    print(f"[INFO] People command file: {command_file}")
+    carb.settings.get_settings().set(
+        "/exts/omni.anim.people/command_settings/command_file_path", command_file
+    )
+    print(f"[INFO] People simulation configured, command file: {command_file}")
 
 def write_command_file(worker_behaviors, path):
     """Serialise worker_behaviors (list of WorkerBehavior dicts) to people_commands.txt format."""

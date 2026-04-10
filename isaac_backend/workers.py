@@ -1,8 +1,25 @@
 import random
-from pxr import Gf, UsdGeom, Usd
+from pxr import Gf, UsdGeom, Usd, Sdf
 import omni.usd
+import omni.kit.app
+import omni.kit.commands
 import omni.replicator.core as rep
 from isaac_backend.semantics import apply_semantics
+
+def attach_character_behavior(prim_path):
+    """Attach CharacterBehavior script to a worker prim so omni.anim.people can animate it."""
+    script_path = (
+        omni.kit.app.get_app().get_extension_manager()
+        .get_extension_path_by_module("omni.anim.people")
+        + "/omni/anim/people/scripts/character_behavior.py"
+    )
+    
+    omni.kit.commands.execute("ApplyScriptingAPICommand", paths=[Sdf.Path(prim_path)])
+    stage = omni.usd.get_context().get_stage()
+    prim = stage.GetPrimAtPath(prim_path)
+    attr = prim.GetAttribute("omni:scripting:scripts")
+    attr.Set([script_path])
+    print(f"[INFO] Attached CharacterBehavior to {prim_path}")
 
 def select_worker_usd(ppe_state, asset_library):
     """Return the worker USD path based on whether PPE is worn."""
@@ -34,6 +51,10 @@ def spawn_workers(workers, worker_behaviors, asset_library, stage):
 
         prim = stage.DefinePrim(prim_path, "Xform")
         prim.GetReferences().AddReference(usd_path)
+
+        attach_character_behavior(prim_path)
+
+        attach_character_behavior(prim_path)
 
         spawn_x, spawn_y = _initial_pos(name)
         xf = UsdGeom.Xformable(prim)
