@@ -128,7 +128,8 @@ def main():
         spawner = get_geofenced_spawner(usd_path, num_instances=1, bounds_min=b_min, bounds_max=b_max)
         prims = spawner()
         asset_type = entity.get("type", "")
-        semantic_class = "vehicle" if asset_type == "vehicle" else "zone"
+        semantic_class = "vehicle" if asset_type == "vehicle" else asset_id
+        print(f"[INFO] Spawning {asset_id} with semantic class '{semantic_class}'")
         with prims:
             rep.modify.semantics([("class", semantic_class)])
     _progress("Non-worker entities spawned.")
@@ -254,6 +255,40 @@ def main():
         capture_output=True, text=True
     )
     _progress(f"Files written to /tmp/dataset: {len(result.stdout.strip().splitlines()) if result.stdout.strip() else 0}")
+
+    _progress("=== DATASET DEBUG ===")
+    for ftype in ["rgb_", "bounding_box_2d_tight_", "semantic_segmentation_", "instance_segmentation_"]:
+        count = len(glob.glob(f"/tmp/dataset/{ftype}*"))
+        _progress(f"  {ftype}* files: {count}")
+    sid_path = "/tmp/dataset/semantic_id_to_labels.json"
+    if os.path.exists(sid_path):
+        _progress(f"  semantic_id_to_labels.json: {json.load(open(sid_path))}")
+    else:
+        _progress("  semantic_id_to_labels.json: MISSING")
+    isc_path = "/tmp/dataset/instance_segmentation_colors.json"
+    if os.path.exists(isc_path):
+        _progress(f"  instance_segmentation_colors.json: present")
+        _progress(f"    content: {json.load(open(isc_path))}")
+    else:
+        _progress("  instance_segmentation_colors.json: MISSING")
+    _progress("=== END DATASET DEBUG ===")
+
+    _progress("=== DATASET DEBUG ===")
+    for ftype in ["rgb_", "bounding_box_2d_tight_", "semantic_segmentation_", "instance_segmentation_"]:
+        count = len(glob.glob(f"/tmp/dataset/{ftype}*"))
+        _progress(f"  {ftype}* files: {count}")
+    sid_path = "/tmp/dataset/semantic_id_to_labels.json"
+    if os.path.exists(sid_path):
+        _progress(f"  semantic_id_to_labels.json: {json.load(open(sid_path))}")
+    else:
+        _progress("  semantic_id_to_labels.json: MISSING")
+    isc_path = "/tmp/dataset/instance_segmentation_colors.json"
+    if os.path.exists(isc_path):
+        _progress(f"  instance_segmentation_colors.json: present")
+        _progress(f"    content: {json.load(open(isc_path))}")
+    else:
+        _progress("  instance_segmentation_colors.json: MISSING")
+    _progress("=== END DATASET DEBUG ===")
 
     try:
         rep.orchestrator.stop()

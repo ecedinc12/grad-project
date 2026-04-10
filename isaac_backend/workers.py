@@ -75,14 +75,7 @@ def spawn_workers(workers, worker_behaviors, asset_library, stage):
         xf.ClearXformOpOrder()
         xf.AddTranslateOp().Set(Gf.Vec3d(spawn_x, spawn_y, 0.0))
 
-        semantics = [("class", "person")]
-        if ppe_state.get("hardhat", False):
-            semantics.append(("class", "hardhat"))
-        if ppe_state.get("vest", False):
-            semantics.append(("class", "vest"))
         apply_semantics(prim_path, "person")
-        with rep.get.prims(path_pattern=prim_path):
-            rep.modify.semantics(semantics)
 
         print(f"[INFO] Spawned {name} @ ({spawn_x:.2f}, {spawn_y:.2f}, 0.0) ppe={ppe_state}")
         print(f"[DEBUG] Worker {name} prim valid: {prim.IsValid()}")

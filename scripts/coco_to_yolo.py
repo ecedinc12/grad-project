@@ -25,7 +25,19 @@ def _load_id_to_label(dataset_dir):
             label = v["class"] if isinstance(v, dict) else v
             id_to_label[int(k)] = label
     else:
-        print(f"Warning: {label_file} not found; class IDs will not be remapped.")
+        print(f"Warning: {label_file} not found; trying instance_segmentation_colors.json fallback.")
+        colors_file = os.path.join(dataset_dir, "instance_segmentation_colors.json")
+        if os.path.exists(colors_file):
+            colors_raw = json.load(open(colors_file))
+            for entry in colors_raw:
+                class_name = entry.get("class", "")
+                color = tuple(entry.get("color", []))
+                class_id = CLASS_MAP.get(class_name.lower(), -1)
+                if class_id >= 0:
+                    id_to_label[class_id] = class_name
+            print(f"  Loaded {len(id_to_label)} class mappings from colors JSON.")
+        else:
+            print("Warning: No semantic mapping files found. Will attempt direct class name lookup from bbox data.")
     return id_to_label
 
 
@@ -75,7 +87,10 @@ def convert_npy_to_yolo(dataset_dir="/tmp/dataset"):
                 x_max = float(row["x_max"])
                 y_max = float(row["y_max"])
 
-                label = id_to_label.get(int(row["semanticId"]), "")
+                semantic_id = int(row["semanticId"])
+                label = id_to_label.get(semantic_id, "")
+                if not label:
+                    label = row.get("class", "")
                 class_id = CLASS_MAP.get(label.lower(), -1)
                 if class_id == -1:
                     continue
