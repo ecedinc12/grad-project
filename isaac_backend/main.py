@@ -152,12 +152,20 @@ def main():
         enable_extensions()
         for _ in range(10):
             simulation_app.update()
+        _progress("Setting up people simulation...")
+        setup_people_simulation(args.commands)
+        for _ in range(10):
+            simulation_app.update()
         _progress("Resetting world...")
         world.reset()
         for _ in range(5):
             simulation_app.update()
-        _progress("Setting up people simulation...")
-        setup_people_simulation(args.commands)
+        for _ in range(10):
+            simulation_app.update()
+        _progress("Resetting world...")
+        world.reset()
+        for _ in range(5):
+            simulation_app.update()
 
     _progress("Initializing BasicWriter...")
     writer = rep.WriterRegistry.get("BasicWriter")
