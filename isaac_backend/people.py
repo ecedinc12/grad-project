@@ -27,12 +27,12 @@ def setup_navmesh():
 
 def setup_people_simulation(command_file):
     """Configure omni.anim.people with character root path and command file."""
-    carb.settings.get_settings().set(
-        "/persistent/exts/omni.anim.people/character_prim_path", "/World/Characters"
-    )
-    carb.settings.get_settings().set(
-        "/exts/omni.anim.people/command_settings/command_file_path", command_file
-    )
+    settings = carb.settings.get_settings()
+    settings.set("/persistent/exts/omni.anim.people/character_prim_path", "/World/Characters")
+    settings.set("/exts/omni.anim.people/command_settings/command_file_path", command_file)
+    settings.set("/exts/omni.anim.people/command_settings/number_of_loop", "1")
+    settings.set("/exts/omni.anim.people/navigation_settings/navmesh_enabled", False)
+    settings.set("/exts/omni.anim.people/navigation_settings/dynamic_avoidance_enabled", False)
     print(f"[INFO] People simulation configured, command file: {command_file}")
 
 def write_command_file(worker_behaviors, path):
@@ -41,7 +41,11 @@ def write_command_file(worker_behaviors, path):
     lines = []
     for wb in worker_behaviors:
         worker_id = wb.get("worker_id", "worker_01")
-        for cmd in wb.get("commands", []):
+        cmds = wb.get("commands", [])
+        if not cmds:
+            lines.append(f"{worker_id} Idle 5.0")
+            continue
+        for cmd in cmds:
             command = cmd.get("command")
             if command == "GoTo":
                 x = cmd.get("x", 0.0)

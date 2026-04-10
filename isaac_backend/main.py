@@ -67,6 +67,8 @@ def main():
     parser.add_argument("--config", type=str, default="configs/current_scene.json", help="Path to the SceneConfig JSON")
     parser.add_argument("--library", type=str, default="assets/library.json", help="Path to the asset library JSON")
     parser.add_argument("--commands", type=str, default="/tmp/people_commands.txt", help="Output path for generated people_commands.txt")
+    parser.add_argument("--anim-mode", type=str, default="people", choices=["people", "direct"],
+                        help="Animation mode: 'people' uses omni.anim.people, 'direct' uses CharacterAnimator API")
     args = parser.parse_args()
 
     _progress("Loading configs...")
@@ -156,55 +158,36 @@ def main():
     look_at_target = compute_scene_centroid(stage)
 
     if workers and worker_behaviors:
-        _progress("=== WORKER DIAGNOSTICS ===")
-        for prim in stage.Traverse():
-            path = str(prim.GetPath())
-            if "worker" in path.lower() or "Characters" in path:
-                xf = UsdGeom.Xformable(prim)
-                if xf:
-                    mat = xf.ComputeLocalToWorldTransform(Usd.TimeCode.Default())
-                    pos = mat.ExtractTranslation()
-                    print(f"  {path} @ ({pos[0]:.2f}, {pos[1]:.2f}, {pos[2]:.2f})")
-                script_attr = prim.GetAttribute("omni:scripting:scripts")
-                if script_attr and script_attr.HasAuthoredValue():
-                    print(f"    scripts: {script_attr.Get()}")
-                else:
-                    print(f"    NO scripting attribute")
-        _progress("=== END DIAGNOSTICS ===")
-
-    if workers and worker_behaviors:
-        _progress("=== WORKER DIAGNOSTICS ===")
-        for prim in stage.Traverse():
-            path = str(prim.GetPath())
-            if "worker" in path.lower() or "Characters" in path:
-                xf = UsdGeom.Xformable(prim)
-                if xf:
-                    mat = xf.ComputeLocalToWorldTransform(Usd.TimeCode.Default())
-                    pos = mat.ExtractTranslation()
-                    print(f"  {path} @ ({pos[0]:.2f}, {pos[1]:.2f}, {pos[2]:.2f})")
-                script_attr = prim.GetAttribute("omni:scripting:scripts")
-                if script_attr and script_attr.HasAuthoredValue():
-                    print(f"    scripts: {script_attr.Get()}")
-                else:
-                    print(f"    NO scripting attribute")
-        _progress("=== END DIAGNOSTICS ===")
-
-    if workers and worker_behaviors:
-        _progress("Setting up people simulation...")
-        setup_people_simulation(args.commands)
-        for _ in range(10):
-            simulation_app.update()
-        _progress("Resetting world...")
-        world.reset()
-        for _ in range(5):
-            simulation_app.update()
-        _progress("Starting timeline for behavior scripts...")
+        if args.anim_mode == "people":
+            _progress("Setting up people simulation (command file mode)...")
+            setup_people_simulation(args.commands)
+            for _ in range(10):
+                simulation_app.update()
+            _progress("Starting timeline for behavior scripts...")
+            omni.timeline.get_timeline_interface().play()
+            for _ in range(30):
+                simulation_app.update()
+            _progress("Behavior scripts initialized.")
+        elif args.anim_mode == "direct":
+            _progress("Setting up direct-mode animations...")
+            omni.timeline.get_timeline_interface().play()
+            for _ in range(10):
+                simulation_app.update()
+            from isaac_backend.animator import play_idle
+            for prim in stage.Traverse():
+                path = str(prim.GetPath())
+                if path.startswith("/World/Characters/"):
+                    play_idle(path, stage)
+            for _ in range(10):
+                simulation_app.update()
+            _progress("Direct-mode animations active.")
+    elif workers:
+        _progress("No worker_behaviors — starting timeline for idle animations...")
         omni.timeline.get_timeline_interface().play()
         for _ in range(10):
             simulation_app.update()
 
     _progress("Initializing BasicWriter...")
-    writer = rep.WriterRegistry.get("BasicWriter")
     writer.initialize(
         output_dir="/tmp/dataset",
         rgb=True,
@@ -256,23 +239,6 @@ def main():
         capture_output=True, text=True
     )
     _progress(f"Files written to /tmp/dataset: {len(result.stdout.strip().splitlines()) if result.stdout.strip() else 0}")
-
-    _progress("=== DATASET DEBUG ===")
-    for ftype in ["rgb_", "bounding_box_2d_tight_", "semantic_segmentation_", "instance_segmentation_"]:
-        count = len(glob.glob(f"/tmp/dataset/{ftype}*"))
-        _progress(f"  {ftype}* files: {count}")
-    sid_path = "/tmp/dataset/semantic_id_to_labels.json"
-    if os.path.exists(sid_path):
-        _progress(f"  semantic_id_to_labels.json: {json.load(open(sid_path))}")
-    else:
-        _progress("  semantic_id_to_labels.json: MISSING")
-    isc_path = "/tmp/dataset/instance_segmentation_colors.json"
-    if os.path.exists(isc_path):
-        _progress(f"  instance_segmentation_colors.json: present")
-        _progress(f"    content: {json.load(open(isc_path))}")
-    else:
-        _progress("  instance_segmentation_colors.json: MISSING")
-    _progress("=== END DATASET DEBUG ===")
 
     _progress("=== DATASET DEBUG ===")
     for ftype in ["rgb_", "bounding_box_2d_tight_", "semantic_segmentation_", "instance_segmentation_"]:
