@@ -154,6 +154,40 @@ def main():
     look_at_target = compute_scene_centroid(stage)
 
     if workers and worker_behaviors:
+        _progress("=== WORKER DIAGNOSTICS ===")
+        for prim in stage.Traverse():
+            path = str(prim.GetPath())
+            if "worker" in path.lower() or "Characters" in path:
+                xf = UsdGeom.Xformable(prim)
+                if xf:
+                    mat = xf.ComputeLocalToWorldTransform(Usd.TimeCode.Default())
+                    pos = mat.ExtractTranslation()
+                    print(f"  {path} @ ({pos[0]:.2f}, {pos[1]:.2f}, {pos[2]:.2f})")
+                script_attr = prim.GetAttribute("omni:scripting:scripts")
+                if script_attr and script_attr.HasAuthoredValue():
+                    print(f"    scripts: {script_attr.Get()}")
+                else:
+                    print(f"    NO scripting attribute")
+        _progress("=== END DIAGNOSTICS ===")
+
+    if workers and worker_behaviors:
+        _progress("=== WORKER DIAGNOSTICS ===")
+        for prim in stage.Traverse():
+            path = str(prim.GetPath())
+            if "worker" in path.lower() or "Characters" in path:
+                xf = UsdGeom.Xformable(prim)
+                if xf:
+                    mat = xf.ComputeLocalToWorldTransform(Usd.TimeCode.Default())
+                    pos = mat.ExtractTranslation()
+                    print(f"  {path} @ ({pos[0]:.2f}, {pos[1]:.2f}, {pos[2]:.2f})")
+                script_attr = prim.GetAttribute("omni:scripting:scripts")
+                if script_attr and script_attr.HasAuthoredValue():
+                    print(f"    scripts: {script_attr.Get()}")
+                else:
+                    print(f"    NO scripting attribute")
+        _progress("=== END DIAGNOSTICS ===")
+
+    if workers and worker_behaviors:
         _progress("Setting up people simulation...")
         setup_people_simulation(args.commands)
         for _ in range(10):
@@ -179,8 +213,8 @@ def main():
     angle_hints = scene_config.get("camera_angles", [])
     scene_positions = positions_for_angles(angle_hints)
     
-    chosen_position = random.choice(scene_positions)
-    _progress(f"camera_angles={angle_hints}  →  {len(scene_positions)} orbit positions, chosen: {chosen_position}")
+    chosen_position = scene_positions[0]
+    _progress(f"camera_angles={angle_hints}  →  {len(scene_positions)} orbit positions, using index 0: {chosen_position}")
 
     _progress("Setting up frame trigger...")
     with rep.trigger.on_frame(num_frames=NUM_FRAMES):
