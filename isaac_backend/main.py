@@ -106,6 +106,12 @@ def main():
     workers = [e for e in scene_config.get("entities", []) if e.get("type") == "worker"]
     others  = [e for e in scene_config.get("entities", []) if e.get("type") != "worker"]
 
+    if workers and worker_behaviors:
+        _progress("Enabling people extension BEFORE spawning workers...")
+        enable_extensions()
+        for _ in range(10):
+            simulation_app.update()
+
     _progress(f"Spawning {len(others)} non-worker entities...")
     for entity in others:
         asset_id = entity.get("asset_id", "")
@@ -148,18 +154,8 @@ def main():
     look_at_target = compute_scene_centroid(stage)
 
     if workers and worker_behaviors:
-        _progress("Enabling extensions...")
-        enable_extensions()
-        for _ in range(10):
-            simulation_app.update()
         _progress("Setting up people simulation...")
         setup_people_simulation(args.commands)
-        for _ in range(10):
-            simulation_app.update()
-        _progress("Resetting world...")
-        world.reset()
-        for _ in range(5):
-            simulation_app.update()
         for _ in range(10):
             simulation_app.update()
         _progress("Resetting world...")

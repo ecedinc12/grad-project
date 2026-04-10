@@ -1,5 +1,5 @@
 import random
-from pxr import Gf, UsdGeom
+from pxr import Gf, UsdGeom, Usd
 import omni.usd
 import omni.replicator.core as rep
 from isaac_backend.semantics import apply_semantics
