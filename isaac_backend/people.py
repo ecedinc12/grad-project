@@ -1,6 +1,8 @@
 import os
 import carb
 import omni.kit.app
+import omni.timeline
+import omni.timeline
 
 def enable_extensions():
     """Enable all extensions required for omni.anim.people to animate characters."""

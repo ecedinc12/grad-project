@@ -14,6 +14,7 @@ simulation_app = SimulationApp({"headless": True})
 import carb
 import omni.replicator.core as rep
 import omni.kit.app
+import omni.timeline
 import omni.usd
 from omni.isaac.core import World
 from pxr import Usd, UsdGeom
@@ -196,6 +197,10 @@ def main():
         world.reset()
         for _ in range(5):
             simulation_app.update()
+        _progress("Starting timeline for behavior scripts...")
+        omni.timeline.get_timeline_interface().play()
+        for _ in range(10):
+            simulation_app.update()
 
     _progress("Initializing BasicWriter...")
     writer = rep.WriterRegistry.get("BasicWriter")
@@ -209,7 +214,7 @@ def main():
     )
     writer.attach([render_product])
 
-    NUM_FRAMES = 1000
+    NUM_FRAMES = 200
     angle_hints = scene_config.get("camera_angles", [])
     scene_positions = positions_for_angles(angle_hints)
     
