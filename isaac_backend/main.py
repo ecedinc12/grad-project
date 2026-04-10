@@ -188,14 +188,14 @@ def main():
             simulation_app.update()
 
     _progress("Initializing BasicWriter...")
-    writer = rep.BasicWriter(
+    writer = rep.WriterRegistry.get("BasicWriter")
+    writer.initialize(
         output_dir="/tmp/dataset",
         rgb=True,
         bounding_box_2d_tight=True,
         semantic_segmentation=True,
         distance_to_camera=True,
         instance_segmentation=True,
-        format="coco",
     )
     writer.attach([render_product])
 
