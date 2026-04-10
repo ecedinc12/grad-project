@@ -24,11 +24,15 @@ ANGLE_ELEVATION_MAP = {
 }
 
 def positions_for_angles(angle_hints):
-    """Return orbit positions filtered to the requested elevation bands.
+    """Return orbit positions filtered to the requested elevation bands,
+    sorted by Z descending so index 0 is always the highest position.
     Falls back to the full default hemisphere if hints are empty/unknown."""
     known = [h for h in angle_hints if h in ANGLE_ELEVATION_MAP]
     if not known:
-        return ORBIT_POSITIONS
+        return sorted(ORBIT_POSITIONS, key=lambda p: p[2], reverse=True)
     el_min = min(ANGLE_ELEVATION_MAP[h][0] for h in known)
     el_max = max(ANGLE_ELEVATION_MAP[h][1] for h in known)
-    return _build_orbit_positions(elevation_deg=(el_min, el_max))
+    return sorted(
+        _build_orbit_positions(elevation_deg=(el_min, el_max)),
+        key=lambda p: p[2], reverse=True,
+    )
