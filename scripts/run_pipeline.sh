@@ -16,6 +16,16 @@ echo "========================================"
 
 PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
+# Patch Isaac Sim fast_importer to handle None submodule_search_locations
+# https://github.com/NVIDIA-Omniverse/Isaac-Sim/issues/XXX
+FAST_IMPORTER="/isaac-sim/kit/kernel/py/omni/ext/_impl/fast_importer.py"
+if [ -f "$FAST_IMPORTER" ]; then
+    sed -i 's/for p in spec_default.submodule_search_locations:/for p in (spec_default.submodule_search_locations or []):/' "$FAST_IMPORTER"
+    echo "[OK] Patched fast_importer.py"
+else
+    echo "[WARN] fast_importer.py not found at $FAST_IMPORTER, skipping patch"
+fi
+
 # Step 1: Generate config from prompt
 echo "[1/8] Running LLM Config Generator..."
 python3 "$PROJECT_ROOT/llm_pipeline/generator.py" --prompt "$PROMPT" --output "$PROJECT_ROOT/configs/current_scene.json"
