@@ -11,3 +11,9 @@ pydantic>=2.0.0
 # COCO-to-YOLO post-processing (scripts/coco_to_yolo.py)
 numpy>=1.24.0
 Pillow>=10.0.0
+
+# RAG system (rag_system/)
+chromadb>=0.4.0
+sentence-transformers>=2.2.0
+beautifulsoup4>=4.12.0
+requests>=2.31.0
