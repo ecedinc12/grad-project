@@ -1,10 +1,10 @@
 import omni.replicator.core as rep
 
 LIGHTING_MAP = {
-    "daylight": {"intensity": 1000, "color": (1.0,  0.98, 0.95)},
-    "overcast": {"intensity":  500, "color": (0.85, 0.88, 0.95)},
-    "dusk":     {"intensity":  200, "color": (0.35, 0.40, 0.65)},
-    "night":    {"intensity":   50, "color": (0.20, 0.25, 0.40)},
+    "daylight": {"intensity": 800, "color": (0.85, 0.90, 1.0)},
+    "overcast": {"intensity": 450, "color": (0.88, 0.90, 0.95)},
+    "dusk":     {"intensity": 200, "color": (0.35, 0.40, 0.65)},
+    "night":    {"intensity":  50, "color": (0.20, 0.25, 0.40)},
 }
 
 _CEILING_LAMP_XY = [(-4, -4), (0, -4), (4, -4), (-4, 0), (0, 0), (4, 0), (-4, 4), (0, 4), (4, 4)]
@@ -15,6 +15,20 @@ def setup_camera_and_lighting(config):
     params = LIGHTING_MAP.get(condition, LIGHTING_MAP["daylight"])
     print(f"[INFO] lighting_conditions={condition!r}  →  intensity={params['intensity']}, color={params['color']}")
     rep.create.light(light_type="Dome", intensity=params["intensity"], color=params["color"])
+
+    if condition == "daylight":
+        rep.create.light(
+            light_type="Distant",
+            intensity=2500,
+            color=(1.0, 0.95, 0.85),
+        )
+
+    if condition == "overcast":
+        rep.create.light(
+            light_type="Distant",
+            intensity=150,
+            color=(0.95, 0.95, 0.95),
+        )
 
     if condition == "dusk":
         rep.create.light(

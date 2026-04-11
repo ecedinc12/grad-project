@@ -142,7 +142,7 @@ def main():
         simulation_app.update()
 
     _progress("Setting up navmesh...")
-    setup_navmesh()
+    navmesh_ok = setup_navmesh(bounds_min=(-10, -10), bounds_max=(10, 10))
 
     _progress("Setting up camera and lighting...")
     camera, render_product = setup_camera_and_lighting(scene_config)
@@ -186,18 +186,19 @@ def main():
         spawned_asset_ids.append((asset_id, semantic_class))
     _progress("Non-worker entities spawned.")
 
+    spawned_worker_names = set()
     if workers:
         _progress(f"Spawning {len(workers)} workers...")
-        spawn_workers(workers, worker_behaviors, asset_library, stage)
+        spawned_worker_names = spawn_workers(workers, worker_behaviors, asset_library, stage)
 
         _progress("Waiting for S3 worker assets to resolve...")
-        for _ in range(10):
+        for _ in range(15):
             simulation_app.update()
         _progress("Asset resolution complete.")
 
     if worker_behaviors:
         _progress("Writing people command file...")
-        write_command_file(worker_behaviors, args.commands)
+        write_command_file(worker_behaviors, args.commands, worker_names=spawned_worker_names or None)
     else:
         _progress("No worker_behaviors in config.")
 
@@ -213,31 +214,39 @@ def main():
     if workers and worker_behaviors:
         if args.anim_mode == "people":
             _progress("Setting up people simulation (command file mode)...")
-            setup_people_simulation(args.commands)
-            for _ in range(10):
+            setup_people_simulation(args.commands, navmesh_enabled=navmesh_ok)
+            for _ in range(15):
                 simulation_app.update()
             _progress("Starting timeline for behavior scripts...")
             omni.timeline.get_timeline_interface().play()
-            for _ in range(30):
+            for _ in range(60):
                 simulation_app.update()
-            _progress("Behavior scripts initialized.")
+
+            # Verify behavior scripts initialized
+            behavior_count = 0
+            for prim in stage.Traverse():
+                path = str(prim.GetPath())
+                if path.startswith("/World/Characters/") and prim.HasAttribute("omni:scripting:scripts"):
+                    behavior_count += 1
+            _progress(f"Behavior scripts attached to {behavior_count} character(s).")
+
         elif args.anim_mode == "direct":
             _progress("Setting up direct-mode animations...")
             omni.timeline.get_timeline_interface().play()
-            for _ in range(10):
+            for _ in range(15):
                 simulation_app.update()
             from isaac_backend.animator import play_idle
             for prim in stage.Traverse():
                 path = str(prim.GetPath())
                 if path.startswith("/World/Characters/"):
                     play_idle(path, stage)
-            for _ in range(10):
+            for _ in range(15):
                 simulation_app.update()
             _progress("Direct-mode animations active.")
     elif workers:
         _progress("No worker_behaviors — starting timeline for idle animations...")
         omni.timeline.get_timeline_interface().play()
-        for _ in range(10):
+        for _ in range(15):
             simulation_app.update()
 
     _progress("Initializing BasicWriter...")
@@ -257,7 +266,19 @@ def main():
     NUM_FRAMES = 200
     angle_hints = scene_config.get("camera_angles", [])
     hazard_zones = scene_config.get("hazard_zones", [])
-    scene_positions = positions_for_angles(angle_hints, hazard_zones=hazard_zones)
+
+    entity_positions = []
+    for prim in stage.Traverse():
+        path = str(prim.GetPath())
+        if not (path.startswith("/World/Characters/") or path.startswith("/World/Layout/") or path.startswith("/Replicator/")):
+            continue
+        xf = UsdGeom.Xformable(prim)
+        if xf:
+            mat = xf.ComputeLocalToWorldTransform(Usd.TimeCode.Default())
+            pos = mat.ExtractTranslation()
+            entity_positions.append((pos[0], pos[1]))
+
+    scene_positions = positions_for_angles(angle_hints, hazard_zones=hazard_zones, entity_positions=entity_positions)
     
     from isaac_backend.camera import orbit_distribution
     camera_pos_dist = orbit_distribution(scene_positions)
