@@ -261,10 +261,8 @@ def main():
         rgb=True,
         bounding_box_2d_tight=True,
         semantic_segmentation=True,
-        semantic_segmentation_params={"write_semantic_id_to_labels": True},
         distance_to_camera=True,
         instance_segmentation=True,
-        instance_segmentation_params={"write_instance_segmentation_colors": True},
     )
     writer.attach([render_product])
 
