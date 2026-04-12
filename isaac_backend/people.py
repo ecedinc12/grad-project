@@ -6,65 +6,86 @@ import omni.usd
 import omni.kit.commands
 from pxr import UsdGeom, Gf
 
-def enable_extensions():
+def enable_extensions(simulation_app=None):
     """Enable extensions required for omni.anim.people to animate characters.
 
-    Core extensions are force-enabled; optional extensions are tried but
-    failures are logged and ignored.
+    Extensions are enabled in dependency order with update ticks between groups
+    to ensure each extension fully initializes before the next loads.  This
+    prevents the ``NoneType`` import error in ``omni.anim.graph.core`` that
+    occurs when all three are enabled in a tight loop.
 
-    * ``omni.nav.mesh`` does not exist in Isaac Sim 5.1 extension registries
-      and must NOT be included — it causes a fatal dependency-resolution error.
-    * ``omni.anim.navigation.core`` is a declared dependency of
-      ``omni.anim.people`` and should auto-resolve, but we try to enable it
-      explicitly as a safety measure.  It provides the ``NavigationManager``
-      used by ``character_behavior.py`` (needed even in direct-nav mode).
-    * The ``RebuildNavMesh`` command is NOT available in 5.1 (it was provided
-      by the missing ``omni.nav.mesh``), so navmesh baking always falls back
-      to direct navigation.  See :func:`setup_navmesh`.
+    Parameters
+    ----------
+    simulation_app : SimulationApp, optional
+        Required to tick updates between extension groups so each can complete
+        its startup sequence.  If None, no ticks are inserted (risky — may
+        cause animation graph initialization failures).
     """
     manager = omni.kit.app.get_app().get_extension_manager()
-    required = [
+
+    # Phase 1: Scripting runtime — processes omni:scripting:scripts attributes
+    phase1 = [
+        "omni.kit.scripting",
+    ]
+    # Phase 2: Animation graph core — must fully initialize before people
+    phase2 = [
         "omni.anim.graph.core",
         "omni.anim.behavior.schema",
+    ]
+    # Phase 3: People — depends on graph core + behavior schema
+    phase3 = [
         "omni.anim.people",
     ]
-    optional = [
+    # Phase 4: Optional navigation
+    phase4 = [
         "omni.anim.navigation.core",
     ]
-    print("[DIAG] === EXTENSION ENABLEMENT DIAGNOSTICS ===")
-    for ext in required:
-        was_enabled = manager.is_extension_enabled(ext)
-        if not was_enabled:
-            print(f"[INFO] Enabling extension: {ext}")
+
+    def _enable_group(exts, group_label):
+        print(f"[DIAG] Enabling extension group: {group_label}")
+        for ext in exts:
+            was_enabled = manager.is_extension_enabled(ext)
+            if not was_enabled:
+                print(f"[INFO] Enabling extension: {ext}")
+                try:
+                    manager.set_extension_enabled_immediate(ext, True)
+                except Exception as e:
+                    print(f"[ERROR] Failed to enable {ext}: {e}")
+            else:
+                print(f"[INFO] Extension already active: {ext}")
+            is_enabled = manager.is_extension_enabled(ext)
             try:
-                manager.set_extension_enabled_immediate(ext, True)
-            except Exception as e:
-                print(f"[ERROR] Failed to enable {ext}: {e}")
-        else:
-            print(f"[INFO] Extension already active: {ext}")
-        is_enabled = manager.is_extension_enabled(ext)
-        try:
-            ext_path = manager.get_extension_path_by_module(ext)
-        except Exception:
-            ext_path = None
-        print(f"[DIAG]   {ext}: enabled={is_enabled}, path={ext_path}")
-    for ext in optional:
-        was_enabled = manager.is_extension_enabled(ext)
-        if not was_enabled:
-            print(f"[INFO] Enabling optional extension: {ext}")
-            try:
-                manager.set_extension_enabled_immediate(ext, True)
-            except Exception as e:
-                print(f"[WARN] Optional extension {ext} unavailable: {e}")
-        else:
-            print(f"[INFO] Optional extension already active: {ext}")
-        is_enabled = manager.is_extension_enabled(ext)
-        try:
-            ext_path = manager.get_extension_path_by_module(ext)
-        except Exception:
-            ext_path = None
-        print(f"[DIAG]   {ext}: enabled={is_enabled}, path={ext_path}")
-    print("[DIAG] === END EXTENSION ENABLEMENT DIAGNOSTICS ===")
+                ext_path = manager.get_extension_path_by_module(ext)
+            except Exception:
+                ext_path = None
+            print(f"[DIAG]   {ext}: enabled={is_enabled}, path={ext_path}")
+
+    _enable_group(phase1, "scripting runtime")
+    if simulation_app is not None:
+        for _ in range(10):
+            simulation_app.update()
+
+    _enable_group(phase2, "animation graph core")
+    if simulation_app is not None:
+        for _ in range(10):
+            simulation_app.update()
+
+    _enable_group(phase3, "people simulation")
+    if simulation_app is not None:
+        for _ in range(10):
+            simulation_app.update()
+
+    _enable_group(phase4, "optional navigation")
+
+    # Final diagnostic: check scripting extension
+    scripting_ok = manager.is_extension_enabled("omni.kit.scripting")
+    graph_ok = manager.is_extension_enabled("omni.anim.graph.core")
+    people_ok = manager.is_extension_enabled("omni.anim.people")
+    print(f"[DIAG] === EXTENSION STATUS SUMMARY ===")
+    print(f"[DIAG]   omni.kit.scripting: {scripting_ok}")
+    print(f"[DIAG]   omni.anim.graph.core: {graph_ok}")
+    print(f"[DIAG]   omni.anim.people: {people_ok}")
+    print(f"[DIAG] === END EXTENSION STATUS SUMMARY ===")
 
 def setup_navmesh(bounds_min=(-10, -10), bounds_max=(10, 10), height=4.0):
     """Bake a navmesh covering the scene for omni.anim.people GoTo commands.

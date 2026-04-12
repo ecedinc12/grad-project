@@ -165,9 +165,7 @@ def main():
 
     if workers and worker_behaviors:
         _progress("Enabling people extension BEFORE spawning workers...")
-        enable_extensions()
-        for _ in range(10):
-            simulation_app.update()
+        enable_extensions(simulation_app=simulation_app)
 
     _progress(f"Spawning {len(others)} non-worker entities...")
     spawned_asset_ids = []
@@ -369,7 +367,7 @@ def main():
     for step in range(NUM_FRAMES):
         if step % 100 == 0:
             _progress(f"Frame {step}/{NUM_FRAMES}")
-        world.step(render=False)
+        world.step()
         rep.orchestrator.step()
 
     _progress("Waiting for orchestrator to finish...")
