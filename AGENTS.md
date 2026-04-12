@@ -57,19 +57,111 @@ Search results can flood context. Use `context-mode_ctx_execute(language: "shell
 | `ctx doctor` | Call the `doctor` MCP tool, run the returned shell command, display as checklist |
 | `ctx upgrade` | Call the `upgrade` MCP tool, run the returned shell command, display as checklist |
 
-# System Prompt & Role
-You are an expert NVIDIA Isaac Sim, USD, and Cloud AI pipeline engineer. 
+---
 
-# Project Architecture
-We are running headless via SSH on a RunPod GPU container (`/workspace` is slow persistent storage, `/tmp` is fast NVMe).
-A two-part system:
-1. Standard Python environment: LLM extracts user text into a strict Pydantic/JSON schema. 
-2. Isaac Sim Python environment (`/isaac-sim/python.sh`): Parses this JSON to generate environments using `omni.replicator`.
+# Project: Isaac Sim Industrial Safety SDG Pipeline
 
-# CRITICAL RULES (NEVER VIOLATE)
-1. IN ALL ISAAC SIM SCRIPTS, `SimulationApp({"headless": True})` must be instantiated BEFORE any `omni.*` or `pxr.*` imports.
-2. Do NOT write Replicator output directly to `/workspace`. Write to `/tmp/dataset` and compress/move it after generation.
-3. Use `omni.replicator.core.BasicWriter` to output COCO format, then convert to YOLO via a separate post-processing script.
+## Execution Model — CRITICAL
 
-# Execution Context
-Always refer to `TODO.md` for the current step in the build process. Do not skip ahead.
+**Development happens locally. Execution happens on a RunPod GPU container.**
+- You CANNOT SSH into or run commands on the RunPod. You write code locally; the user runs it on the pod.
+- When you need to test or verify Isaac Sim code, guide the user to run it on their pod. Provide exact commands.
+- `/workspace` on the pod is slow persistent storage. `/tmp` is fast NVMe.
+- Always write Replicator output to `/tmp/dataset`, then `tar -czf` to `/workspace/` for persistence.
+
+## RAG System — Your First Stop for Isaac Sim APIs
+
+When you need help with Isaac Sim / Omniverse APIs, Replicator, USD, or any Isaac Sim function:
+1. Query the RAG system: `python -m rag_system.query "your question about the API"`
+2. Or build the index first if needed: `python -m rag_system.build_index`
+3. The RAG contains crawled Isaac Sim 5.1 docs, curated knowledge base, and project source code.
+4. Use RAG context to inform your code — do NOT guess Isaac Sim API signatures.
+
+## Two Python Environments
+
+| Component | Python | Location |
+|-----------|--------|----------|
+| LLM Pipeline (schemas, generator) | System `python3` | `llm_pipeline/` |
+| Isaac Sim Backend (Replicator, USD) | `/isaac-sim/python.sh` | `isaac_backend/` |
+| Post-processing scripts | System `python3` | `scripts/` |
+| RAG System | System `python3` | `rag_system/` |
+
+**CRITICAL:** In ALL Isaac Sim scripts, `SimulationApp({"headless": True})` MUST be instantiated BEFORE any `omni.*` or `pxr.*` imports. See `isaac_backend/main.py:11-12`.
+
+## Main Pipeline Orchestration
+
+Run on RunPod: `./scripts/run_pipeline.sh "your prompt"`
+
+This executes exactly 8 steps:
+1. `python3 llm_pipeline/generator.py` → LLM extracts SceneConfig JSON (requires `GEMINI_API_KEY`)
+2. `rm -rf /tmp/dataset` → Clear old data
+3. `/isaac-sim/python.sh isaac_backend/main.py` → Isaac Sim generates dataset
+4. `python3 scripts/coco_to_yolo.py --dir /tmp/dataset --masks` → Convert COCO to YOLO
+5. `python3 scripts/gen_dataset_yaml.py` → Generate `dataset.yaml`
+6. `python3 scripts/class_balance.py` → Report class distribution
+7. `./scripts/make_video.sh` → Generate video from frames
+8. `tar -czf /workspace/dataset_<timestamp>.tar.gz` → Archive to persistent storage
+
+The pipeline patches `/isaac-sim/kit/kernel/py/omni/ext/_impl/fast_importer.py` to fix a `None` `submodule_search_locations` bug. Do not remove this patch.
+
+## Environment Variables
+
+- `GEMINI_API_KEY` — Required for LLM generation (Gemini via OpenAI-compatible API)
+- `GEMINI_BASE_URL` — Optional, defaults to `https://generativelanguage.googleapis.com/v1beta/openai/`
+- `LLM_MODEL` — Optional, defaults to `gemini-2.5-flash`
+
+## Key Architecture
+
+```
+llm_pipeline/
+  schemas.py      — Pydantic models: SceneConfig, Entity, HazardZone, WorkerBehavior, BehaviorCommand
+  generator.py    — Instructor + Gemini: text → SceneConfig JSON
+
+isaac_backend/
+  main.py         — Entry point: SimulationApp bootstrap, scene assembly, Replicator loop
+  config_loader.py — Loads SceneConfig JSON + asset library
+  warehouse.py    — Warehouse layout spawning
+  layouts.py      — Procedural layout generator (8 presets: rows, grid, L-shape, perimeter, clusters, none)
+  spawner.py      — Geofenced entity spawner
+  camera.py       — Camera positioning and orbit distributions
+  lighting.py     — Camera and lighting setup
+  semantics.py    — USD semantic label application
+  workers.py      — Worker (character) spawning
+  people.py       — omni.anim.people integration, navmesh, command file writing
+  animator.py     — Direct-mode CharacterAnimator API
+
+rag_system/
+  build_index.py  — Crawl docs, chunk, embed, store in ChromaDB
+  query.py        — Interactive or one-shot RAG queries
+  generation.py   — RAG-augmented SceneConfig generation
+  vector_store.py — ChromaDB wrapper with sentence-transformers embeddings
+
+scripts/
+  run_pipeline.sh — Main orchestrator (8 steps)
+  coco_to_yolo.py — COCO → YOLO format converter
+  gen_dataset_yaml.py — YOLO dataset.yaml generator
+  class_balance.py — Class distribution analysis
+  make_video.sh   — FFmpeg video from frames
+```
+
+## Data Flow
+
+1. User prompt → LLM → `configs/current_scene.json` (Pydantic-validated SceneConfig)
+2. SceneConfig + `assets/library.json` → Isaac Sim → `/tmp/dataset/` (COCO format: RGB + bbox + segm + instance segm)
+3. COCO → YOLO `.txt` files + `dataset.yaml`
+4. Archive: `/tmp/dataset/` → `/workspace/dataset_<ts>.tar.gz`
+
+## Isaac Sim Gotchas
+
+- Use `omni.replicator.core.BasicWriter` for COCO output. Do NOT write directly to `/workspace`.
+- After generation, wait for writer flush — `main.py` polls for `bounding_box_2d_tight_*.npy` files with a 60s timeout.
+- Teardown order: `rep.orchestrator.stop()` → `writer.detach()` → `world.clear()` → `simulation_app.close()` → `os._exit(0)`.
+- `omni.timeline.get_timeline_interface().play()` must be called before character animations work.
+- People extension (`omni.anim.people`) must be enabled BEFORE spawning workers if using `--anim-mode people`.
+- Warehouse USD zone is loaded from `asset_library["zone"]` via `rep.create.from_usd()`.
+
+## Validation
+
+- Syntax check: `python3 -m py_compile <file>` for any Python file
+- Schema check: Run `python3 llm_pipeline/generator.py --prompt "test" --output /dev/null` (will fail without API key but validates imports)
+- Always check `TODO.md` for the current development step. Do not skip ahead.

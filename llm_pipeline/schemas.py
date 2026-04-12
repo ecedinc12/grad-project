@@ -24,6 +24,7 @@ class BehaviorCommand(BaseModel):
     command: Literal["GoTo", "Idle", "LookAround"]
     x: Optional[float] = None        # GoTo only — clamped to ±6m warehouse bounds
     y: Optional[float] = None        # GoTo only
+    z: Optional[float] = 0.0         # GoTo only — elevation (0.0 for ground plane)
     rotation: Optional[float] = None # GoTo only — facing direction (degrees)
     duration: Optional[float] = None # Idle / LookAround only (seconds)
 
