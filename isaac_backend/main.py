@@ -7,6 +7,26 @@ import glob
 import time
 import subprocess
 
+
+def _patch_fast_importer():
+    FAST_IMPORTER = "/isaac-sim/kit/kernel/py/omni/ext/_impl/fast_importer.py"
+    if not os.path.isfile(FAST_IMPORTER):
+        return
+    with open(FAST_IMPORTER, "r") as f:
+        src = f.read()
+    if "submodule_search_locations or []" in src:
+        return
+    patched = src.replace(
+        "for p in spec_default.submodule_search_locations:",
+        "for p in (spec_default.submodule_search_locations or []):",
+    )
+    with open(FAST_IMPORTER, "w") as f:
+        f.write(patched)
+    print("[OK] Patched fast_importer.py for None submodule_search_locations")
+
+
+_patch_fast_importer()
+
 # CRITICAL: Start SimulationApp BEFORE any omni/pxr imports
 from isaacsim import SimulationApp
 simulation_app = SimulationApp({"headless": True})
@@ -163,9 +183,13 @@ def main():
     others  = [e for e in scene_config.get("entities", []) if e.get("type") != "worker"]
     worker_behaviors = scene_config.get("worker_behaviors", [])
 
+    anim_ok = True
     if workers and worker_behaviors:
         _progress("Enabling people extension BEFORE spawning workers...")
-        enable_extensions(simulation_app=simulation_app)
+        anim_ok = enable_extensions(simulation_app=simulation_app)
+        if args.anim_mode == "people" and not anim_ok:
+            _progress("[WARN] omni.anim.people failed to initialize — falling back to direct-mode animation")
+            args.anim_mode = "direct"
 
     _progress(f"Spawning {len(others)} non-worker entities...")
     spawned_asset_ids = []

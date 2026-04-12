@@ -6,13 +6,43 @@ import omni.usd
 import omni.kit.commands
 from pxr import UsdGeom, Gf
 
+def _validate_anim_graph_core(max_retries=3, ticks_per_retry=30, simulation_app=None):
+    """Verify omni.anim.graph.core loaded by attempting to import and check CharacterManager.
+
+    Returns True if CharacterManager can be obtained, False otherwise.
+    """
+    for attempt in range(1, max_retries + 1):
+        try:
+            import omni.anim.graph.core as ag
+            cm = ag.get_character_manager()
+            if cm is not None:
+                print(f"[OK] CharacterManager available after {attempt} attempt(s)")
+                return True
+            print(f"[DIAG] CharacterManager is None (attempt {attempt}/{max_retries})")
+        except Exception as e:
+            print(f"[DIAG] omni.anim.graph.core import failed (attempt {attempt}/{max_retries}): {e}")
+        if simulation_app is not None and attempt < max_retries:
+            for _ in range(ticks_per_retry):
+                simulation_app.update()
+    print("[ERROR] CharacterManager failed to initialize after all retries")
+    return False
+
+
 def enable_extensions(simulation_app=None):
     """Enable extensions required for omni.anim.people to animate characters.
 
     Extensions are enabled in dependency order with update ticks between groups
-    to ensure each extension fully initializes before the next loads.  This
-    prevents the ``NoneType`` import error in ``omni.anim.graph.core`` that
-    occurs when all three are enabled in a tight loop.
+    to ensure each extension fully initializes before the next loads.  After
+    all extensions are enabled, a validation step checks that
+    ``omni.anim.graph.core`` actually loaded (CharacterManager is available).
+    If validation fails, incremental retry ticks are applied.
+
+    Returns
+    -------
+    bool
+        True if animation extensions (omni.anim.graph.core) initialized
+        successfully, False if they failed — caller should fall back to
+        direct-mode animation.
 
     Parameters
     ----------
@@ -23,20 +53,16 @@ def enable_extensions(simulation_app=None):
     """
     manager = omni.kit.app.get_app().get_extension_manager()
 
-    # Phase 1: Scripting runtime — processes omni:scripting:scripts attributes
     phase1 = [
         "omni.kit.scripting",
     ]
-    # Phase 2: Animation graph core — must fully initialize before people
     phase2 = [
         "omni.anim.graph.core",
         "omni.anim.behavior.schema",
     ]
-    # Phase 3: People — depends on graph core + behavior schema
     phase3 = [
         "omni.anim.people",
     ]
-    # Phase 4: Optional navigation
     phase4 = [
         "omni.anim.navigation.core",
     ]
@@ -62,22 +88,21 @@ def enable_extensions(simulation_app=None):
 
     _enable_group(phase1, "scripting runtime")
     if simulation_app is not None:
-        for _ in range(10):
+        for _ in range(30):
             simulation_app.update()
 
     _enable_group(phase2, "animation graph core")
     if simulation_app is not None:
-        for _ in range(10):
+        for _ in range(30):
             simulation_app.update()
 
     _enable_group(phase3, "people simulation")
     if simulation_app is not None:
-        for _ in range(10):
+        for _ in range(30):
             simulation_app.update()
 
     _enable_group(phase4, "optional navigation")
 
-    # Final diagnostic: check scripting extension
     scripting_ok = manager.is_extension_enabled("omni.kit.scripting")
     graph_ok = manager.is_extension_enabled("omni.anim.graph.core")
     people_ok = manager.is_extension_enabled("omni.anim.people")
@@ -86,6 +111,15 @@ def enable_extensions(simulation_app=None):
     print(f"[DIAG]   omni.anim.graph.core: {graph_ok}")
     print(f"[DIAG]   omni.anim.people: {people_ok}")
     print(f"[DIAG] === END EXTENSION STATUS SUMMARY ===")
+
+    anim_ok = _validate_anim_graph_core(
+        max_retries=3, ticks_per_retry=30, simulation_app=simulation_app
+    )
+    if anim_ok:
+        print("[OK] Animation extensions initialized successfully")
+    else:
+        print("[WARN] Animation extensions failed — direct-mode fallback recommended")
+    return anim_ok
 
 def setup_navmesh(bounds_min=(-10, -10), bounds_max=(10, 10), height=4.0):
     """Bake a navmesh covering the scene for omni.anim.people GoTo commands.
