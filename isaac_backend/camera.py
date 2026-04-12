@@ -1,7 +1,7 @@
 import math
 
-def _build_orbit_positions(n=30, radius_min=18, radius_max=30,
-                            azimuth_deg=(0, 360), elevation_deg=(20, 70)):
+def _build_orbit_positions(n=30, radius_min=4, radius_max=9,
+                            azimuth_deg=(0, 360), elevation_deg=(10, 70)):
     """Pre-compute n camera positions on a hemisphere — all at safe distance from origin."""
     positions = []
     for i in range(n):
@@ -17,10 +17,10 @@ def _build_orbit_positions(n=30, radius_min=18, radius_max=30,
 ORBIT_POSITIONS = _build_orbit_positions()
 
 ANGLE_ELEVATION_MAP = {
-    "overhead":   (65, 85),
-    "high_angle": (45, 65),
-    "eye_level":  (15, 35),
-    "low_angle":  (5,  20),
+    "overhead":   (55, 70),
+    "high_angle": (35, 55),
+    "eye_level":  (10, 30),
+    "low_angle":  (5,  15),
 }
 
 def _compute_scene_radius(hazard_zones=None, entity_positions=None):
@@ -44,11 +44,11 @@ def _compute_scene_radius(hazard_zones=None, entity_positions=None):
             points.append((ex, ey))
 
     if not points:
-        return (18, 30)
+        return (4, 9)
 
     max_dist = max(math.sqrt(px**2 + py**2) for px, py in points)
-    radius_min = max(18, math.ceil(max_dist * 1.75))
-    radius_max = radius_min + 12
+    radius_min = max(4, math.ceil(max_dist * 1.2))
+    radius_max = radius_min + 4
     return (radius_min, radius_max)
 
 def positions_for_angles(angle_hints, hazard_zones=None, entity_positions=None):

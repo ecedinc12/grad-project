@@ -14,6 +14,7 @@ def enable_extensions():
         "omni.anim.behavior.schema",
         "omni.anim.people",
         "omni.anim.navigation.core",
+        "omni.nav.mesh",
     ]
     for ext in required:
         if not manager.is_extension_enabled(ext):
@@ -51,6 +52,20 @@ def setup_navmesh(bounds_min=(-10, -10), bounds_max=(10, 10), height=4.0):
 
     vol_prim.SetCustomDataByKey("omni:navmesh:volume", True)
     vol_prim.SetCustomDataByKey("omni:navmesh:auto_rebuild", False)
+
+    registry = omni.kit.commands.get_command_registry()
+    cmd_available = registry.get_command_name("RebuildNavMesh") is not None
+
+    if not cmd_available:
+        print("[WARN] RebuildNavMesh command not registered; omni.nav.mesh extension may be unavailable.")
+        print("[INFO] Falling back to direct navigation (no pathfinding).")
+        try:
+            stage.RemovePrim(vol_prim.GetPath())
+        except Exception:
+            pass
+        settings.set("/exts/omni.anim.people/navigation_settings/navmesh_enabled", False)
+        settings.set("/persistent/omni/anim/people/navmeshBasedNavigation", False)
+        return False
 
     try:
         omni.kit.commands.execute("RebuildNavMesh")

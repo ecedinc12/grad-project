@@ -214,7 +214,8 @@ def main():
     _apply_scene_semantics(stage, spawned_asset_ids, workers)
 
     _progress("Computing scene centroid for camera framing...")
-    look_at_target = compute_scene_centroid(stage)
+    centroid = compute_scene_centroid(stage)
+    look_at_target = (centroid[0], centroid[1], 1.0)
 
     if workers and worker_behaviors:
         if args.anim_mode == "people":
