@@ -1,6 +1,7 @@
 {
-    "worker_with_ppe": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/People/Characters/male_adult_construction_01_new/male_adult_construction_01_new.usd",
-    "worker_no_ppe":   "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/People/Characters/M_Medical_01/M_Medical_01.usd",
+    "worker_with_ppe":     "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/People/Characters/male_adult_construction_01_new/male_adult_construction_01_new.usd",
+    "worker_with_ppe_alt": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/People/Characters/male_adult_construction_05_new/male_adult_construction_05_new.usd",
+    "worker_no_ppe":       "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/People/Characters/male_adult_construction_03/male_adult_construction_03.usd",
     "forklift": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Props/Forklift/forklift.usd",
     "pallet":   "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Props/Pallet/pallet.usd",
     "rack":     "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Environments/Simple_Warehouse/Props/SM_RackFrame_03.usd",

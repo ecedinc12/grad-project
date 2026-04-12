@@ -9,23 +9,27 @@ from pxr import UsdGeom, Gf
 def enable_extensions():
     """Enable extensions required for omni.anim.people to animate characters.
 
-    Only the three core extensions are force-enabled. ``omni.anim.navigation.core``
-    and ``omni.nav.mesh`` are omitted because:
+    Core extensions are force-enabled; optional extensions are tried but
+    failures are logged and ignored.
 
+    * ``omni.nav.mesh`` does not exist in Isaac Sim 5.1 extension registries
+      and must NOT be included — it causes a fatal dependency-resolution error.
     * ``omni.anim.navigation.core`` is a declared dependency of
-      ``omni.anim.people`` and auto-resolves when the latter is enabled.
-    * ``omni.nav.mesh`` does not exist in Isaac Sim 5.1 extension registries;
-      attempting to enable it causes a fatal dependency-resolution error.
-
-    Navigation (navmesh baking) is handled separately by :func:`setup_navmesh`,
-    which tries the ``RebuildNavMesh`` command and falls back to direct mode if
-    it is unavailable.
+      ``omni.anim.people`` and should auto-resolve, but we try to enable it
+      explicitly as a safety measure.  It provides the ``NavigationManager``
+      used by ``character_behavior.py`` (needed even in direct-nav mode).
+    * The ``RebuildNavMesh`` command is NOT available in 5.1 (it was provided
+      by the missing ``omni.nav.mesh``), so navmesh baking always falls back
+      to direct navigation.  See :func:`setup_navmesh`.
     """
     manager = omni.kit.app.get_app().get_extension_manager()
     required = [
         "omni.anim.graph.core",
         "omni.anim.behavior.schema",
         "omni.anim.people",
+    ]
+    optional = [
+        "omni.anim.navigation.core",
     ]
     for ext in required:
         if not manager.is_extension_enabled(ext):
@@ -36,6 +40,15 @@ def enable_extensions():
                 print(f"[ERROR] Failed to enable {ext}: {e}")
         else:
             print(f"[INFO] Extension already active: {ext}")
+    for ext in optional:
+        if not manager.is_extension_enabled(ext):
+            print(f"[INFO] Enabling optional extension: {ext}")
+            try:
+                manager.set_extension_enabled_immediate(ext, True)
+            except Exception as e:
+                print(f"[WARN] Optional extension {ext} unavailable: {e}")
+        else:
+            print(f"[INFO] Optional extension already active: {ext}")
 
 def setup_navmesh(bounds_min=(-10, -10), bounds_max=(10, 10), height=4.0):
     """Bake a navmesh covering the scene for omni.anim.people GoTo commands.
@@ -71,8 +84,8 @@ def setup_navmesh(bounds_min=(-10, -10), bounds_max=(10, 10), height=4.0):
     cmd_available = "RebuildNavMesh" in available_commands
 
     if not cmd_available:
-        print("[WARN] RebuildNavMesh command not registered; omni.nav.mesh extension may be unavailable.")
-        print("[INFO] Falling back to direct navigation (no pathfinding).")
+        print("[WARN] RebuildNavMesh command not available (omni.nav.mesh removed in Isaac Sim 5.1).")
+        print("[INFO] Falling back to direct navigation (straight lines, no obstacle avoidance).")
         try:
             stage.RemovePrim(vol_prim.GetPath())
         except Exception:

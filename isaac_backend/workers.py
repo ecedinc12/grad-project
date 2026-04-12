@@ -15,6 +15,43 @@ def _find_skelroot(prim):
             return child
     return None
 
+
+def _wait_for_skelroot(prim_path, stage, simulation_app, max_ticks=240):
+    """Poll until the SkelRoot descendent appears inside a referenced character USD.
+
+    S3-hosted USD assets load asynchronously. After ``AddReference()``, the
+    SkelRoot inside the reference is not immediately reachable via
+    ``Usd.PrimRange``.  This function ticks the simulation app and re-checks
+    until the SkelRoot resolves or the timeout expires.
+
+    Parameters
+    ----------
+    prim_path : str
+        Path of the parent Xform prim (e.g. ``/World/Characters/worker_01``).
+    stage : Usd.Stage
+        The USD stage.
+    simulation_app : SimulationApp
+        The Isaac Sim app handle used to tick updates.
+    max_ticks : int
+        Maximum number of ``simulation_app.update()`` calls before giving up.
+
+    Returns
+    -------
+    Usd.Prim or None
+        The resolved SkelRoot prim, or None if it never appeared.
+    """
+    for tick in range(max_ticks):
+        prim = stage.GetPrimAtPath(prim_path)
+        skelroot = _find_skelroot(prim) if prim and prim.IsValid() else None
+        if skelroot is not None:
+            print(f"[INFO] SkelRoot resolved for {prim_path} after {tick + 1} ticks")
+            return skelroot
+        simulation_app.update()
+        if tick > 0 and tick % 60 == 0:
+            print(f"[INFO] Still waiting for SkelRoot at {prim_path} ({tick}/{max_ticks} ticks)...")
+    print(f"[ERROR] SkelRoot never appeared for {prim_path} after {max_ticks} ticks")
+    return None
+
 def attach_character_behavior(prim_path):
     """Attach CharacterBehavior script to the SkelRoot inside the referenced character USD.
 
@@ -69,16 +106,34 @@ def attach_character_behavior(prim_path):
     print(f"[INFO] Attached CharacterBehavior to SkelRoot at {skelroot.GetPath()}")
     return str(skelroot.GetPath())
 
-def select_worker_usd(ppe_state, asset_library):
-    """Return the worker USD path based on whether PPE is worn."""
-    if ppe_state.get("hardhat", False) or ppe_state.get("vest", False):
-        return asset_library["worker_with_ppe"]
-    return asset_library["worker_no_ppe"]
+_PPE_KEYS = ["worker_with_ppe", "worker_with_ppe_alt"]
+_NO_PPE_KEYS = ["worker_no_ppe"]
 
-def spawn_workers(workers, worker_behaviors, asset_library, stage):
+
+def select_worker_usd(ppe_state, asset_library):
+    """Return a randomly-selected worker USD path based on whether PPE is worn.
+
+    Picks from a pool of appearance variants for visual diversity while
+    keeping all characters appropriate for a warehouse environment.
+    """
+    if ppe_state.get("hardhat", False) or ppe_state.get("vest", False):
+        key = random.choice(_PPE_KEYS)
+    else:
+        key = random.choice(_NO_PPE_KEYS)
+    return asset_library[key]
+
+def spawn_workers(workers, worker_behaviors, asset_library, stage, simulation_app=None):
     """Spawn workers directly on the USD stage (required by omni.anim.people).
 
     Returns a set of successfully spawned character names (e.g. {"worker_01", "worker_02"}).
+
+    Parameters
+    ----------
+    simulation_app : SimulationApp, optional
+        Required to poll for async S3 asset resolution.  If provided, the
+        function will tick the simulation until each worker's SkelRoot appears
+        before attaching the behavior script.  If None, behavior attachment
+        is attempted immediately (may fail for remote USD assets).
     """
     def _initial_pos(worker_id):
         for wb in worker_behaviors:
@@ -92,6 +147,7 @@ def spawn_workers(workers, worker_behaviors, asset_library, stage):
         stage.DefinePrim("/World/Characters", "Xform")
 
     spawned_names = set()
+    spawned_prims = []
     worker_idx = 0
     for entity in workers:
         worker_idx += 1
@@ -104,10 +160,6 @@ def spawn_workers(workers, worker_behaviors, asset_library, stage):
         prim = stage.DefinePrim(prim_path, "Xform")
         prim.GetReferences().AddReference(usd_path)
 
-        skel_path = attach_character_behavior(prim_path)
-        if skel_path is None:
-            print(f"[WARN] Behavior script not attached to {name}; character may not animate.")
-
         spawn_x, spawn_y = _initial_pos(name)
         xf = UsdGeom.Xformable(prim)
         xf.ClearXformOpOrder()
@@ -115,6 +167,7 @@ def spawn_workers(workers, worker_behaviors, asset_library, stage):
 
         apply_semantics(prim_path, "person")
         spawned_names.add(name)
+        spawned_prims.append(prim_path)
 
         print(f"[INFO] Spawned {name} @ ({spawn_x:.2f}, {spawn_y:.2f}, 0.0) ppe={ppe_state}")
         print(f"[DEBUG] Worker {name} prim valid: {prim.IsValid()}")
@@ -122,5 +175,22 @@ def spawn_workers(workers, worker_behaviors, asset_library, stage):
         mat = xf.ComputeLocalToWorldTransform(Usd.TimeCode.Default())
         pos = mat.ExtractTranslation()
         print(f"[DEBUG] Worker {name} world position: ({pos[0]:.2f}, {pos[1]:.2f}, {pos[2]:.2f})")
+
+    if simulation_app is not None:
+        for prim_path in spawned_prims:
+            name = prim_path.rsplit("/", 1)[-1]
+            skelroot = _wait_for_skelroot(prim_path, stage, simulation_app)
+            if skelroot is not None:
+                skel_path = attach_character_behavior(prim_path)
+                if skel_path is None:
+                    print(f"[WARN] Behavior script not attached to {name}; character may not animate.")
+            else:
+                print(f"[ERROR] SkelRoot not found for {name} after timeout; skipping behavior attachment.")
+    else:
+        for prim_path in spawned_prims:
+            name = prim_path.rsplit("/", 1)[-1]
+            skel_path = attach_character_behavior(prim_path)
+            if skel_path is None:
+                print(f"[WARN] Behavior script not attached to {name}; character may not animate.")
 
     return spawned_names

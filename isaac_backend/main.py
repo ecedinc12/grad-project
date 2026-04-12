@@ -194,12 +194,7 @@ def main():
     spawned_worker_names = set()
     if workers:
         _progress(f"Spawning {len(workers)} workers...")
-        spawned_worker_names = spawn_workers(workers, worker_behaviors, asset_library, stage)
-
-        _progress("Waiting for S3 worker assets to resolve...")
-        for _ in range(15):
-            simulation_app.update()
-        _progress("Asset resolution complete.")
+        spawned_worker_names = spawn_workers(workers, worker_behaviors, asset_library, stage, simulation_app=simulation_app)
 
     if worker_behaviors:
         _progress("Writing people command file...")
@@ -234,18 +229,27 @@ def main():
                 path = str(prim.GetPath())
                 if path.startswith("/World/Characters/") and prim.HasAttribute("omni:scripting:scripts"):
                     behavior_count += 1
-            _progress(f"Behavior scripts attached to {behavior_count} character(s).")
+            if behavior_count == 0:
+                _progress("[CRITICAL] No behavior scripts found on any character — workers will not animate!")
+            elif behavior_count < len(workers):
+                _progress(f"[WARN] Behavior scripts attached to {behavior_count}/{len(workers)} character(s). Some workers may not animate.")
+            else:
+                _progress(f"Behavior scripts attached to {behavior_count} character(s).")
 
         elif args.anim_mode == "direct":
             _progress("Setting up direct-mode animations...")
             omni.timeline.get_timeline_interface().play()
             for _ in range(15):
                 simulation_app.update()
-            from isaac_backend.animator import play_idle
-            for prim in stage.Traverse():
-                path = str(prim.GetPath())
-                if path.startswith("/World/Characters/"):
-                    play_idle(path, stage)
+            from isaac_backend.animator import play_idle, wait_for_animations
+            character_paths = [f"/World/Characters/{name}" for name in sorted(spawned_worker_names)]
+            _progress(f"Waiting for SkelAnimation on {len(character_paths)} character(s)...")
+            anim_map = wait_for_animations(character_paths, stage, simulation_app)
+            for char_path, _ in anim_map.items():
+                play_idle(char_path, stage)
+            for char_path in character_paths:
+                if char_path not in anim_map:
+                    print(f"[WARN] Skipping play_idle for {char_path} — SkelAnimation never resolved")
             for _ in range(15):
                 simulation_app.update()
             _progress("Direct-mode animations active.")
