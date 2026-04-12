@@ -20,7 +20,7 @@ from omni.isaac.core import World
 from pxr import Usd, UsdGeom
 
 from isaac_backend.config_loader import load_config
-from isaac_backend.camera import positions_for_angles
+from isaac_backend.camera import positions_for_angles, pick_indoor_position, clamp_to_warehouse
 from isaac_backend.lighting import setup_camera_and_lighting
 from isaac_backend.semantics import clear_unwanted_warehouse_semantics, apply_semantics
 from isaac_backend.spawner import get_geofenced_spawner, spawn_hazard_zones
@@ -270,8 +270,11 @@ def main():
     NUM_FRAMES = 200
     angle_hints = scene_config.get("camera_angles", [])
     hazard_zones = scene_config.get("hazard_zones", [])
+    camera_mode = scene_config.get("camera_mode", "indoor")
+    camera_position_override = scene_config.get("camera_position")
 
     entity_positions = []
+    worker_positions = []
     for prim in stage.Traverse():
         path = str(prim.GetPath())
         if not (path.startswith("/World/Characters/") or path.startswith("/World/Layout/") or path.startswith("/Replicator/")):
@@ -281,20 +284,39 @@ def main():
             mat = xf.ComputeLocalToWorldTransform(Usd.TimeCode.Default())
             pos = mat.ExtractTranslation()
             entity_positions.append((pos[0], pos[1]))
+            if path.startswith("/World/Characters/"):
+                worker_positions.append((pos[0], pos[1]))
 
-    scene_positions = positions_for_angles(angle_hints, hazard_zones=hazard_zones, entity_positions=entity_positions)
-    
-    from isaac_backend.camera import orbit_distribution
-    camera_pos_dist = orbit_distribution(scene_positions)
-    _progress(f"camera_angles={angle_hints}  →  {len(scene_positions)} orbit positions, radius range: {min(p[0]**2+p[1]**2+p[2]**2 for p in scene_positions)**0.5:.1f}-{max(p[0]**2+p[1]**2+p[2]**2 for p in scene_positions)**0.5:.1f}m")
-
-    _progress("Setting up frame trigger...")
-    with rep.trigger.on_frame(num_frames=NUM_FRAMES):
-        with camera:
-            rep.modify.pose(
-                position=camera_pos_dist,
-                look_at=look_at_target
+    if camera_mode == "indoor":
+        if camera_position_override:
+            cam_x, cam_y, cam_z = clamp_to_warehouse(*camera_position_override)
+            _progress(f"camera_positionOverride={camera_position_override} clamped to ({cam_x:.2f}, {cam_y:.2f}, {cam_z:.2f})")
+        else:
+            cam_x, cam_y, cam_z = pick_indoor_position(
+                angle_hints, hazard_zones=hazard_zones,
+                entity_positions=entity_positions,
+                worker_positions=worker_positions or None,
             )
+        camera_pos = (cam_x, cam_y, cam_z)
+        _progress(f"camera_mode=indoor  camera_angles={angle_hints}  camera=({cam_x:.2f}, {cam_y:.2f}, {cam_z:.2f})  look_at=({look_at_target[0]:.2f}, {look_at_target[1]:.2f}, {look_at_target[2]:.2f})")
+
+        _progress("Setting up frame trigger (fixed position)...")
+        with rep.trigger.on_frame(num_frames=NUM_FRAMES):
+            with camera:
+                rep.modify.pose(position=camera_pos, look_at=look_at_target)
+    else:
+        scene_positions = positions_for_angles(angle_hints, hazard_zones=hazard_zones,
+                                               entity_positions=entity_positions,
+                                               worker_positions=worker_positions or None,
+                                               mode="orbit")
+        from isaac_backend.camera import orbit_distribution
+        camera_pos_dist = orbit_distribution(scene_positions)
+        _progress(f"camera_mode=orbit  camera_angles={angle_hints}  →  {len(scene_positions)} positions, radius range: {min(p[0]**2+p[1]**2+p[2]**2 for p in scene_positions)**0.5:.1f}-{max(p[0]**2+p[1]**2+p[2]**2 for p in scene_positions)**0.5:.1f}m")
+
+        _progress("Setting up frame trigger (orbit distribution)...")
+        with rep.trigger.on_frame(num_frames=NUM_FRAMES):
+            with camera:
+                rep.modify.pose(position=camera_pos_dist, look_at=look_at_target)
 
     _progress("Running simulation loop: 1000 frames...")
     for step in range(NUM_FRAMES):

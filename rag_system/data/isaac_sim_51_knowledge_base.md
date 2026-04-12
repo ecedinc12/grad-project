@@ -336,26 +336,28 @@ simulation_app.close()
 
 Characters are spawned using people simulation extension. Key steps:
 
-1. Enable extensions before spawning
-2. Create navmesh for pathfinding
+1. Enable extensions before spawning (only `omni.anim.graph.core`, `omni.anim.behavior.schema`, `omni.anim.people`)
+2. Attempt navmesh bake (falls back to direct navigation if unavailable)
 3. Write command files (GoTo, Idle, LookAround)
 4. Start timeline for behavior scripts
 
+**IMPORTANT:** `omni.nav.mesh` does NOT exist in Isaac Sim 5.1 registries. Never include it in extension enable lists — it causes fatal dependency-resolution errors. `omni.anim.navigation.core` auto-resolves as a dependency of `omni.anim.people`.
+
 ```python
-# Enable people simulation
 from isaac_backend.people import enable_extensions, setup_navmesh, setup_people_simulation
 
 enable_extensions()
-setup_navmesh()
-setup_people_simulation(command_file_path)
+navmesh_ok = setup_navmesh(bounds_min=(-10, -10), bounds_max=(10, 10))
+setup_people_simulation(command_file_path, navmesh_enabled=navmesh_ok)
 
-# Start timeline
 import omni.timeline
 omni.timeline.get_timeline_interface().play()
 ```
 
+When `navmesh_enabled=False`, GoTo commands use **direct navigation** (straight lines, no obstacle avoidance). Workers still animate and move but may clip through geometry.
+
 Worker behavior commands:
-- GoTo: `GoTo x y rotation` — character walks to (x, y) facing `rotation` degrees
+- GoTo: `GoTo x y z rotation` — character walks to (x, y) facing `rotation` degrees
 - Idle: `Idle duration` — character stands still for `duration` seconds
 - LookAround: `LookAround duration` — character looks around for `duration` seconds
 

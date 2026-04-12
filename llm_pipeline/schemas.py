@@ -42,6 +42,14 @@ class SceneConfig(BaseModel):
         default_factory=list,
         description="Camera elevation hints. Each value must be one of: overhead, high_angle, eye_level, low_angle"
     )
+    camera_mode: Literal["indoor", "orbit"] = Field(
+        default="indoor",
+        description="Camera placement: 'indoor' = single fixed position inside warehouse, 'orbit' = spherical orbit (legacy)"
+    )
+    camera_position: Optional[tuple[float, float, float]] = Field(
+        default=None,
+        description="Explicit camera (x, y, z) in meters. If None, auto-derived from scene. x,y clamped to warehouse interior."
+    )
     lighting_conditions: Literal["daylight", "overcast", "dusk", "night"] = Field(
         default="daylight",
         description="Lighting condition. Must be one of: daylight, overcast, dusk, night"

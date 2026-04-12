@@ -1,8 +1,75 @@
 import math
+import random
+
+WAREHOUSE_INTERIOR_X = (-7.0, 7.0)
+WAREHOUSE_INTERIOR_Y = (-7.0, 7.0)
+INTERIOR_MARGIN = 0.5
+CEILING_Z = 6.0
+FLOOR_Z = 0.3
+
+ANGLE_HEIGHT_MAP = {
+    "overhead":   (5.0, 6.0),
+    "high_angle": (3.0, 4.5),
+    "eye_level":  (1.4, 2.0),
+    "low_angle":  (0.3, 1.0),
+}
+DEFAULT_HEIGHT_RANGE = (1.4, 4.5)
+
+
+def clamp_to_warehouse(x, y, z):
+    x_lo = WAREHOUSE_INTERIOR_X[0] + INTERIOR_MARGIN
+    x_hi = WAREHOUSE_INTERIOR_X[1] - INTERIOR_MARGIN
+    y_lo = WAREHOUSE_INTERIOR_Y[0] + INTERIOR_MARGIN
+    y_hi = WAREHOUSE_INTERIOR_Y[1] - INTERIOR_MARGIN
+    x = max(x_lo, min(x_hi, x))
+    y = max(y_lo, min(y_hi, y))
+    z = max(FLOOR_Z, min(CEILING_Z, z))
+    return (x, y, z)
+
+
+def pick_indoor_position(angle_hints, hazard_zones=None,
+                         entity_positions=None, worker_positions=None):
+    points = []
+
+    if worker_positions:
+        for wx, wy in worker_positions:
+            points.append((wx, wy))
+    elif entity_positions:
+        for ex, ey in entity_positions:
+            points.append((ex, ey))
+
+    if hazard_zones:
+        for zone in hazard_zones:
+            bmin = zone.get("bounds_min", (-2, -2))
+            bmax = zone.get("bounds_max", (2, 2))
+            cx = (bmin[0] + bmax[0]) / 2.0
+            cy = (bmin[1] + bmax[1]) / 2.0
+            points.append((cx, cy))
+
+    if points:
+        cx = sum(p[0] for p in points) / len(points)
+        cy = sum(p[1] for p in points) / len(points)
+    else:
+        cx, cy = 0.0, 0.0
+
+    cx, cy, _ = clamp_to_warehouse(cx, cy, 0.0)
+
+    if angle_hints:
+        first_known = next((h for h in angle_hints if h in ANGLE_HEIGHT_MAP), None)
+        if first_known:
+            z_lo, z_hi = ANGLE_HEIGHT_MAP[first_known]
+        else:
+            z_lo, z_hi = DEFAULT_HEIGHT_RANGE
+    else:
+        z_lo, z_hi = DEFAULT_HEIGHT_RANGE
+
+    z = (z_lo + z_hi) / 2.0
+
+    return (cx, cy, z)
+
 
 def _build_orbit_positions(n=30, radius_min=4, radius_max=9,
                             azimuth_deg=(0, 360), elevation_deg=(10, 70)):
-    """Pre-compute n camera positions on a hemisphere — all at safe distance from origin."""
     positions = []
     for i in range(n):
         az = math.radians(azimuth_deg[0] + (azimuth_deg[1] - azimuth_deg[0]) * i / n)
@@ -14,7 +81,6 @@ def _build_orbit_positions(n=30, radius_min=4, radius_max=9,
         positions.append((x, y, z))
     return positions
 
-ORBIT_POSITIONS = _build_orbit_positions()
 
 ANGLE_ELEVATION_MAP = {
     "overhead":   (55, 70),
@@ -23,12 +89,8 @@ ANGLE_ELEVATION_MAP = {
     "low_angle":  (5,  15),
 }
 
-def _compute_scene_radius(hazard_zones=None, entity_positions=None):
-    """Compute a safe camera radius that can see all entities and zones.
 
-    Returns (radius_min, radius_max) tuple. Uses the furthest entity/zone corner
-    from the origin plus a 75% margin as the minimum radius.
-    """
+def _compute_scene_radius(hazard_zones=None, entity_positions=None):
     points = []
 
     if hazard_zones:
@@ -51,13 +113,18 @@ def _compute_scene_radius(hazard_zones=None, entity_positions=None):
     radius_max = radius_min + 4
     return (radius_min, radius_max)
 
-def positions_for_angles(angle_hints, hazard_zones=None, entity_positions=None):
-    """Return orbit positions filtered to the requested elevation bands,
-    sorted by Z descending so index 0 is always the highest position.
-    Falls back to the full default hemisphere if hints are empty/unknown.
 
-    Dynamically adjusts radius based on scene bounds when provided.
-    """
+def positions_for_angles(angle_hints, hazard_zones=None,
+                         entity_positions=None, worker_positions=None,
+                         mode="indoor"):
+    if mode == "indoor":
+        pos = pick_indoor_position(
+            angle_hints, hazard_zones=hazard_zones,
+            entity_positions=entity_positions,
+            worker_positions=worker_positions,
+        )
+        return [pos]
+
     radius_min, radius_max = _compute_scene_radius(hazard_zones, entity_positions)
 
     known = [h for h in angle_hints if h in ANGLE_ELEVATION_MAP]
@@ -77,12 +144,8 @@ def positions_for_angles(angle_hints, hazard_zones=None, entity_positions=None):
         key=lambda p: p[2], reverse=True,
     )
 
-def orbit_distribution(scene_positions):
-    """Return a rep.distribution.uniform that samples across all orbit positions.
 
-    Each frame gets a random camera position from the pre-computed list,
-    providing varied angles of the full scene.
-    """
+def orbit_distribution(scene_positions):
     import omni.replicator.core as rep
 
     xs = [p[0] for p in scene_positions]

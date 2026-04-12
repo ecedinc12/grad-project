@@ -55,6 +55,6 @@ def setup_camera_and_lighting(config):
                 scale=0.15,
             )
 
-    camera = rep.create.camera(position=(0, 5, 10), look_at=(0, 0, 0))
+    camera = rep.create.camera(position=(0, 0, 3), look_at=(0, 0, 1))
     render_product = rep.create.render_product(camera, (1024, 1024))
     return camera, render_product

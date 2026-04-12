@@ -7,19 +7,33 @@ import omni.kit.commands
 from pxr import UsdGeom, Gf
 
 def enable_extensions():
-    """Enable all extensions required for omni.anim.people to animate characters."""
+    """Enable extensions required for omni.anim.people to animate characters.
+
+    Only the three core extensions are force-enabled. ``omni.anim.navigation.core``
+    and ``omni.nav.mesh`` are omitted because:
+
+    * ``omni.anim.navigation.core`` is a declared dependency of
+      ``omni.anim.people`` and auto-resolves when the latter is enabled.
+    * ``omni.nav.mesh`` does not exist in Isaac Sim 5.1 extension registries;
+      attempting to enable it causes a fatal dependency-resolution error.
+
+    Navigation (navmesh baking) is handled separately by :func:`setup_navmesh`,
+    which tries the ``RebuildNavMesh`` command and falls back to direct mode if
+    it is unavailable.
+    """
     manager = omni.kit.app.get_app().get_extension_manager()
     required = [
         "omni.anim.graph.core",
         "omni.anim.behavior.schema",
         "omni.anim.people",
-        "omni.anim.navigation.core",
-        "omni.nav.mesh",
     ]
     for ext in required:
         if not manager.is_extension_enabled(ext):
             print(f"[INFO] Enabling extension: {ext}")
-            manager.set_extension_enabled_immediate(ext, True)
+            try:
+                manager.set_extension_enabled_immediate(ext, True)
+            except Exception as e:
+                print(f"[ERROR] Failed to enable {ext}: {e}")
         else:
             print(f"[INFO] Extension already active: {ext}")
 
