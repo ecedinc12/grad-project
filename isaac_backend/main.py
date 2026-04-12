@@ -61,19 +61,24 @@ def _apply_scene_semantics(stage, spawned_asset_ids, workers):
     applied = 0
 
     for asset_id, semantic_class in spawned_asset_ids:
+        target_name = os.path.basename(asset_id)
         for prim in stage.Traverse():
             path = str(prim.GetPath())
             if not prim.IsValid():
                 continue
-            ref_path = prim.GetReferences()
-            if ref_path and ref_path.GetAddedOrExplicitPaths():
-                for ref in ref_path.GetAddedOrExplicitPaths():
-                    if asset_id in str(ref) or os.path.basename(asset_id) in str(ref):
-                        if not prim.HasAttribute("semantic:Semantics:params:semanticData"):
-                            set_semantic(prim, semantic_class)
-                            applied += 1
-                            print(f"[INFO] Applied USD semantics '{semantic_class}' to {path}")
+            if target_name in path:
+                parent = prim
+                found = False
+                while parent and parent.IsValid():
+                    if parent.HasAttribute("semantic:Semantics:params:semanticData"):
+                        found = True
                         break
+                    parent = parent.GetParent()
+                if not found and not prim.HasAttribute("semantic:Semantics:params:semanticData"):
+                    set_semantic(prim, semantic_class)
+                    applied += 1
+                    print(f"[INFO] Applied USD semantics '{semantic_class}' to {path}")
+                    break
 
     if workers:
         for prim in stage.Traverse():
