@@ -53,8 +53,8 @@ def setup_navmesh(bounds_min=(-10, -10), bounds_max=(10, 10), height=4.0):
     vol_prim.SetCustomDataByKey("omni:navmesh:volume", True)
     vol_prim.SetCustomDataByKey("omni:navmesh:auto_rebuild", False)
 
-    registry = omni.kit.commands.get_command_registry()
-    cmd_available = registry.get_command_name("RebuildNavMesh") is not None
+    available_commands = omni.kit.commands.get_commands_list()
+    cmd_available = "RebuildNavMesh" in available_commands
 
     if not cmd_available:
         print("[WARN] RebuildNavMesh command not registered; omni.nav.mesh extension may be unavailable.")
