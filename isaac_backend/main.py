@@ -216,6 +216,28 @@ def main():
         if args.anim_mode == "people":
             _progress("Setting up people simulation (command file mode)...")
             setup_people_simulation(args.commands, navmesh_enabled=navmesh_ok)
+
+            _progress("[DIAG] Verifying carb settings for people simulation...")
+            settings = carb.settings.get_settings()
+            diag_keys = [
+                "/persistent/exts/omni.anim.people/character_prim_path",
+                "/exts/omni.anim.people/command_settings/command_file_path",
+                "/exts/omni.anim.people/command_settings/number_of_loop",
+                "/exts/omni.anim.people/navigation_settings/navmesh_enabled",
+                "/exts/omni.anim.people/navigation_settings/dynamic_avoidance_enabled",
+                "/persistent/omni/anim/people/navmeshBasedNavigation",
+            ]
+            for key in diag_keys:
+                val = settings.get(key)
+                print(f"[DIAG]   {key} = {val}")
+
+            if os.path.exists(args.commands):
+                with open(args.commands, "r") as f:
+                    cmd_content = f.read()
+                print(f"[DIAG] Command file ({args.commands}):\n{cmd_content}")
+            else:
+                print(f"[DIAG] Command file NOT FOUND at {args.commands}")
+
             for _ in range(15):
                 simulation_app.update()
             _progress("Starting timeline for behavior scripts...")
@@ -223,7 +245,17 @@ def main():
             for _ in range(60):
                 simulation_app.update()
 
-            # Verify behavior scripts initialized
+            _progress("[DIAG] Inspecting /World/Characters after timeline play...")
+            for prim in stage.Traverse():
+                path = str(prim.GetPath())
+                if path.startswith("/World/Characters/"):
+                    type_name = prim.GetTypeName() or ""
+                    has_scripts = prim.HasAttribute("omni:scripting:scripts")
+                    scripts_val = ""
+                    if has_scripts:
+                        scripts_val = f" scripts={prim.GetAttribute('omni:scripting:scripts').Get()}"
+                    print(f"[DIAG]   {path} [{type_name}]{scripts_val}")
+
             behavior_count = 0
             for prim in stage.Traverse():
                 path = str(prim.GetPath())
@@ -243,15 +275,26 @@ def main():
                 simulation_app.update()
             from isaac_backend.animator import play_idle, wait_for_animations
             character_paths = [f"/World/Characters/{name}" for name in sorted(spawned_worker_names)]
+            _progress(f"[DIAG] Direct-mode character_paths: {character_paths}")
             _progress(f"Waiting for SkelAnimation on {len(character_paths)} character(s)...")
             anim_map = wait_for_animations(character_paths, stage, simulation_app)
+            _progress(f"[DIAG] SkelAnimation resolution results: {anim_map}")
             for char_path, _ in anim_map.items():
-                play_idle(char_path, stage)
+                result = play_idle(char_path, stage)
+                _progress(f"[DIAG] play_idle({char_path}) returned: {result}")
             for char_path in character_paths:
                 if char_path not in anim_map:
                     print(f"[WARN] Skipping play_idle for {char_path} — SkelAnimation never resolved")
             for _ in range(15):
                 simulation_app.update()
+
+            _progress("[DIAG] Inspecting /World/Characters after direct-mode setup...")
+            import omni.anim.graph.core as ag
+            for char_path in character_paths:
+                animator = ag.get_character_animator(char_path)
+                print(f"[DIAG]   get_character_animator({char_path}) = {animator}")
+                if animator:
+                    print(f"[DIAG]     type={type(animator)}")
             _progress("Direct-mode animations active.")
     elif workers:
         _progress("No worker_behaviors — starting timeline for idle animations...")

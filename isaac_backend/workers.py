@@ -52,6 +52,24 @@ def _wait_for_skelroot(prim_path, stage, simulation_app, max_ticks=240):
     print(f"[ERROR] SkelRoot never appeared for {prim_path} after {max_ticks} ticks")
     return None
 
+def _dump_prim_tree(prim_path, stage, max_depth=3):
+    """Log the child prim tree under a character for diagnostics."""
+    prim = stage.GetPrimAtPath(prim_path)
+    if not prim or not prim.IsValid():
+        print(f"[DIAG] {prim_path}: prim invalid")
+        return
+    print(f"[DIAG] Prim tree under {prim_path}:")
+    for child in Usd.PrimRange(prim):
+        depth = str(child.GetPath()).count("/") - str(prim.GetPath()).count("/")
+        if depth <= max_depth:
+            type_name = child.GetTypeName() or ""
+            has_scripts = child.HasAttribute("omni:scripting:scripts")
+            scripts_val = ""
+            if has_scripts:
+                scripts_val = f" scripts={child.GetAttribute('omni:scripting:scripts').Get()}"
+            print(f"[DIAG]   {child.GetPath()} [{type_name}]{scripts_val}")
+
+
 def attach_character_behavior(prim_path):
     """Attach CharacterBehavior script to the SkelRoot inside the referenced character USD.
 
@@ -86,9 +104,12 @@ def attach_character_behavior(prim_path):
             candidate = os.path.join(ext_path, "omni", "anim", "people", "scripts", "character_behavior.py")
             if os.path.isfile(candidate):
                 script_path = candidate
+                print(f"[DIAG] character_behavior.py found at: {script_path}")
             else:
                 script_path = ext_path + "/omni/anim/people/scripts/character_behavior.py"
+                print(f"[DIAG] character_behavior.py NOT on disk, using path: {script_path}")
         else:
+            print(f"[DIAG] omni.anim.people extension path is None")
             print(f"[WARN] Could not resolve omni.anim.people extension path for {prim_path}")
     except Exception as e:
         print(f"[WARN] Failed to resolve script path for {prim_path}: {e}")
@@ -104,6 +125,7 @@ def attach_character_behavior(prim_path):
 
     skelroot.GetAttribute("omni:scripting:scripts").Set([script_path])
     print(f"[INFO] Attached CharacterBehavior to SkelRoot at {skelroot.GetPath()}")
+    print(f"[DIAG] Verifying omni:scripting:scripts attribute value: {skelroot.GetAttribute('omni:scripting:scripts').Get()}")
     return str(skelroot.GetPath())
 
 _PPE_KEYS = ["worker_with_ppe", "worker_with_ppe_alt"]
@@ -192,5 +214,18 @@ def spawn_workers(workers, worker_behaviors, asset_library, stage, simulation_ap
             skel_path = attach_character_behavior(prim_path)
             if skel_path is None:
                 print(f"[WARN] Behavior script not attached to {name}; character may not animate.")
+
+    print(f"[DIAG] === WORKER SPAWN DIAGNOSTICS ===")
+    print(f"[DIAG] Spawned {len(spawned_names)} workers: {sorted(spawned_names)}")
+    print(f"[DIAG] SkelRoot resolution + behavior attachment complete.")
+    for prim_path in spawned_prims:
+        _dump_prim_tree(prim_path, stage, max_depth=3)
+    omni_anim_people_enabled = False
+    try:
+        omni_anim_people_enabled = omni.kit.app.get_app().get_extension_manager().is_extension_enabled("omni.anim.people")
+    except Exception:
+        pass
+    print(f"[DIAG] omni.anim.people extension enabled: {omni_anim_people_enabled}")
+    print(f"[DIAG] === END WORKER SPAWN DIAGNOSTICS ===")
 
     return spawned_names

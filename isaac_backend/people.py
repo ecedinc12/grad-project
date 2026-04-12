@@ -31,8 +31,10 @@ def enable_extensions():
     optional = [
         "omni.anim.navigation.core",
     ]
+    print("[DIAG] === EXTENSION ENABLEMENT DIAGNOSTICS ===")
     for ext in required:
-        if not manager.is_extension_enabled(ext):
+        was_enabled = manager.is_extension_enabled(ext)
+        if not was_enabled:
             print(f"[INFO] Enabling extension: {ext}")
             try:
                 manager.set_extension_enabled_immediate(ext, True)
@@ -40,8 +42,15 @@ def enable_extensions():
                 print(f"[ERROR] Failed to enable {ext}: {e}")
         else:
             print(f"[INFO] Extension already active: {ext}")
+        is_enabled = manager.is_extension_enabled(ext)
+        try:
+            ext_path = manager.get_extension_path_by_module(ext)
+        except Exception:
+            ext_path = None
+        print(f"[DIAG]   {ext}: enabled={is_enabled}, path={ext_path}")
     for ext in optional:
-        if not manager.is_extension_enabled(ext):
+        was_enabled = manager.is_extension_enabled(ext)
+        if not was_enabled:
             print(f"[INFO] Enabling optional extension: {ext}")
             try:
                 manager.set_extension_enabled_immediate(ext, True)
@@ -49,6 +58,13 @@ def enable_extensions():
                 print(f"[WARN] Optional extension {ext} unavailable: {e}")
         else:
             print(f"[INFO] Optional extension already active: {ext}")
+        is_enabled = manager.is_extension_enabled(ext)
+        try:
+            ext_path = manager.get_extension_path_by_module(ext)
+        except Exception:
+            ext_path = None
+        print(f"[DIAG]   {ext}: enabled={is_enabled}, path={ext_path}")
+    print("[DIAG] === END EXTENSION ENABLEMENT DIAGNOSTICS ===")
 
 def setup_navmesh(bounds_min=(-10, -10), bounds_max=(10, 10), height=4.0):
     """Bake a navmesh covering the scene for omni.anim.people GoTo commands.
