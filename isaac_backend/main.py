@@ -374,7 +374,12 @@ def main():
     _progress("Starting timeline for behavior scripts...")
     omni.timeline.get_timeline_interface().play()
     for _ in range(60):
-        simulation_app.update()
+        world.step(render=True)
+
+    import omni.anim.graph.core as ag
+    for name in spawned_worker_names:
+        animator = ag.get_character_animator(f"/World/Characters/{name}")
+        print(f"[DEBUG] Post-warmup animator for {name}: {animator}")
 
     _progress("Initializing CocoWriter...")
     writer = _setup_coco_writer()
@@ -388,7 +393,7 @@ def main():
     for step in range(num_frames):
         if step % 100 == 0:
             _progress(f"Frame {step}/{num_frames}")
-        world.step(render=True)
+        world.step(render=False)
         rep.orchestrator.step()
 
     _progress("Waiting for orchestrator to finish...")
