@@ -1,7 +1,18 @@
+"""
+Config Loader — Load SceneConfig JSON and asset library JSON.
+
+Pure Python — no Isaac Sim dependencies.
+"""
+
 import sys
 import json
 
+
 def load_config(config_path="configs/current_scene.json", library_path="assets/library.json", simulation_app=None):
+    """Load and return (scene_config, asset_library) from JSON files.
+
+    On failure, closes simulation_app (if provided) and exits.
+    """
     try:
         with open(config_path, "r") as f:
             scene_config = json.load(f)

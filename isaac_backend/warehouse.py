@@ -1,11 +1,20 @@
+"""
+Warehouse Layout Spawner
+
+Procedurally spawns warehouse interior: rack rows, pallet staging areas,
+and aisle clutter (boxes, barrels, cones). Uses CreateReferenceCommand
+for USD references and XformCommonAPI for transforms.
+"""
+
 import random
 from pxr import UsdGeom, Gf
 import omni.usd
 import omni.kit.commands
-from isaac_backend.semantics import apply_semantics
+from isaac_backend.semantics import apply_usd_semantics
+
 
 def spawn_warehouse_layout(asset_library, stage):
-    """Build an organised warehouse interior: rack rows, pallet staging, aisle clutter."""
+    """Build an organized warehouse interior: rack rows, pallet staging, aisle clutter."""
     _idx = [0]
     spawned = 0
 
@@ -29,7 +38,7 @@ def spawn_warehouse_layout(asset_library, stage):
         xf = UsdGeom.XformCommonAPI(prim)
         xf.SetTranslate(Gf.Vec3d(x, y, z))
         xf.SetRotate(Gf.Vec3f(0, 0, rot_z), UsdGeom.XformCommonAPI.RotationOrderXYZ)
-        apply_semantics(path, asset_id)
+        apply_usd_semantics(path, asset_id)
         spawned += 1
 
     rack_xs = [-6, -3, 0, 3, 6]
@@ -62,6 +71,7 @@ def spawn_warehouse_layout(asset_library, stage):
               rot_z=random.uniform(0, 360))
 
     print(f"[INFO] Spawned {spawned} layout props.")
+
 
 def hide_driver_prims(stage):
     """Hide baked-in driver/operator meshes inside vehicle assets."""

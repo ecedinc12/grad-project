@@ -1,3 +1,11 @@
+"""
+Isaac Sim 5.1 IRA Behavior Script Manager
+
+Enables isaacsim.replicator.behavior extension and attaches behavior scripts
+(patrol/idle) to worker prims. Falls back to direct USD attribute manipulation
+when the IRA extension is unavailable.
+"""
+
 import asyncio
 import inspect
 
@@ -33,10 +41,10 @@ except ImportError:
 
 
 def enable_behavior_extensions(simulation_app=None):
+    """Enable extensions required for IRA behavior scripts."""
     manager = omni.kit.app.get_app().get_extension_manager()
     extensions = [
         "omni.kit.scripting",
-        "omni.behavior.scripting.core",
         "isaacsim.replicator.behavior",
         "omni.anim.graph.core",
     ]
@@ -55,6 +63,7 @@ def enable_behavior_extensions(simulation_app=None):
 
 
 def _extract_waypoints(worker_behavior):
+    """Extract GoTo waypoints from a worker behavior config."""
     waypoints = []
     for cmd in worker_behavior.get("commands", []):
         if cmd.get("command") == "GoTo":
@@ -64,6 +73,7 @@ def _extract_waypoints(worker_behavior):
 
 
 async def _attach_patrol_async(prim, waypoints, speed=1.0, idle_duration=3.0, look_around_duration=2.0):
+    """Attach WorkerPatrolBehavior via IRA add_behavior_script_with_parameters_async."""
     script_path = inspect.getfile(WorkerPatrolBehavior)
     waypoints_csv = ";".join(f"{x},{y},{z},{r}" for x, y, z, r in waypoints)
     parameters = {
@@ -77,6 +87,7 @@ async def _attach_patrol_async(prim, waypoints, speed=1.0, idle_duration=3.0, lo
 
 
 async def _attach_idle_pose_async(prim, interval=10, rotation_range=(-15.0, 15.0)):
+    """Attach WorkerIdlePoseBehavior via IRA add_behavior_script_with_parameters_async."""
     script_path = inspect.getfile(WorkerIdlePoseBehavior)
     parameters = {
         f"{EXPOSED_ATTR_NS}:workerIdlePose:interval": interval,
@@ -87,6 +98,7 @@ async def _attach_idle_pose_async(prim, interval=10, rotation_range=(-15.0, 15.0
 
 
 def _set_exposed_attr(prim, namespace, attr_name, value, attr_type):
+    """Set or create an exposed behavior attribute on a prim."""
     full_name = f"{EXPOSED_ATTR_NS}:{namespace}:{attr_name}"
     attr = prim.GetAttribute(full_name)
     if attr and attr.IsValid():
@@ -96,6 +108,7 @@ def _set_exposed_attr(prim, namespace, attr_name, value, attr_type):
 
 
 def _apply_scripting_api_fallback(prim_path):
+    """Apply ScriptingAPI to a prim via kit commands (fallback when IRA unavailable)."""
     if not _HAS_KIT_COMMANDS or Sdf is None:
         print(f"[WARN] Cannot apply ScriptingAPI to {prim_path} — kit commands unavailable")
         return False
@@ -111,6 +124,7 @@ def _apply_scripting_api_fallback(prim_path):
 
 
 def _attach_behavior_script_fallback(prim, script_path):
+    """Attach a behavior script via direct USD omni:scripting:scripts attribute."""
     if not prim or not prim.IsValid():
         return False
     attr = prim.GetAttribute("omni:scripting:scripts")
@@ -122,6 +136,7 @@ def _attach_behavior_script_fallback(prim, script_path):
 
 
 async def _attach_patrol_fallback_async(prim, waypoints, speed=1.0, idle_duration=3.0, look_around_duration=2.0):
+    """Attach WorkerPatrolBehavior via fallback (direct USD attributes)."""
     prim_path = str(prim.GetPath())
     _apply_scripting_api_fallback(prim_path)
     script_path = inspect.getfile(WorkerPatrolBehavior)
@@ -135,6 +150,7 @@ async def _attach_patrol_fallback_async(prim, waypoints, speed=1.0, idle_duratio
 
 
 async def _attach_idle_pose_fallback_async(prim, interval=10, rotation_range=(-15.0, 15.0)):
+    """Attach WorkerIdlePoseBehavior via fallback (direct USD attributes)."""
     prim_path = str(prim.GetPath())
     _apply_scripting_api_fallback(prim_path)
     script_path = inspect.getfile(WorkerIdlePoseBehavior)
@@ -146,6 +162,12 @@ async def _attach_idle_pose_fallback_async(prim, interval=10, rotation_range=(-1
 
 
 async def setup_all_behaviors_async(spawned_worker_names, worker_behaviors, stage):
+    """Orchestrate behavior attachment for all spawned workers.
+
+    Workers with GoTo commands get WorkerPatrolBehavior.
+    Workers without commands get WorkerIdlePoseBehavior.
+    Uses IRA when available, falls back to direct USD attributes otherwise.
+    """
     attached = 0
     failed = 0
 

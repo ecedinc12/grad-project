@@ -1,15 +1,24 @@
+"""
+Isaac Sim 5.1 Industrial Safety SDG Pipeline — Main Entry Point
+
+Bootstraps headless simulation, assembles the scene from SceneConfig JSON,
+runs Replicator with CocoWriter, and outputs COCO-format dataset to /tmp/dataset.
+
+CRITICAL: SimulationApp MUST be created BEFORE any omni.* or pxr.* imports.
+"""
+
 import os
 import sys
 import json
-import random
-import argparse
 import glob
 import time
-import subprocess
 import asyncio
+import argparse
+import subprocess
 
 
 def _patch_fast_importer():
+    """Patch Isaac Sim's fast_importer.py to handle None submodule_search_locations."""
     FAST_IMPORTER = "/isaac-sim/kit/kernel/py/omni/ext/_impl/fast_importer.py"
     if not os.path.isfile(FAST_IMPORTER):
         return
@@ -23,36 +32,59 @@ def _patch_fast_importer():
     )
     with open(FAST_IMPORTER, "w") as f:
         f.write(patched)
-    print("[OK] Patched fast_importer.py for None submodule_search_locations")
-
-
-_patch_fast_importer()
-
-from isaacsim import SimulationApp
-simulation_app = SimulationApp({"headless": True})
-
-import omni.replicator.core as rep
-import omni.usd
-import omni.timeline
-from omni.isaac.core import World
-from pxr import Usd, UsdGeom
-
-from isaac_backend.config_loader import load_config
-from isaac_backend.camera import positions_for_angles, pick_indoor_position, clamp_to_warehouse
-from isaac_backend.lighting import setup_camera_and_lighting
-from isaac_backend.semantics import clear_unwanted_warehouse_semantics, apply_semantics
-from isaac_backend.spawner import get_geofenced_spawner, spawn_hazard_zones
-from isaac_backend.warehouse import spawn_warehouse_layout, hide_driver_prims
-from isaac_backend.workers import spawn_workers
-from isaac_backend.animation import enable_behavior_extensions, setup_all_behaviors_async
+    _progress("Patched fast_importer.py for None submodule_search_locations")
 
 
 def _progress(msg):
     print(f"[PROGRESS] [{time.strftime('%H:%M:%S')}] {msg}")
     sys.stdout.flush()
 
+
+_patch_fast_importer()
+
+from isaacsim import SimulationApp
+
+simulation_app = SimulationApp({
+    "headless": True,
+    "renderer": "RayTracedLighting",
+})
+
+import carb
+import omni.replicator.core as rep
+import omni.usd
+import omni.timeline
+from isaacsim.core.api import World
+from pxr import Usd, UsdGeom, Sdf
+
+from isaac_backend.config_loader import load_config
+from isaac_backend.camera import positions_for_angles, pick_indoor_position, clamp_to_warehouse
+from isaac_backend.lighting import setup_camera_and_lighting
+from isaac_backend.semantics import clear_unwanted_warehouse_semantics, apply_usd_semantics
+from isaac_backend.spawner import get_geofenced_spawner, spawn_hazard_zones
+from isaac_backend.warehouse import spawn_warehouse_layout, hide_driver_prims
+from isaac_backend.workers import spawn_workers
+from isaac_backend.animation import enable_behavior_extensions, setup_all_behaviors_async
+
+COCO_CATEGORIES = {
+    "person": {"name": "person", "id": 1, "supercategory": "worker", "color": [255, 0, 0, 255], "isthing": 1},
+    "vehicle": {"name": "vehicle", "id": 2, "supercategory": "equipment", "color": [0, 255, 0, 255], "isthing": 1},
+    "rack": {"name": "rack", "id": 3, "supercategory": "warehouse", "color": [0, 0, 255, 255], "isthing": 1},
+    "pallet": {"name": "pallet", "id": 4, "supercategory": "warehouse", "color": [255, 255, 0, 255], "isthing": 1},
+    "box": {"name": "box", "id": 5, "supercategory": "warehouse", "color": [255, 0, 255, 255], "isthing": 1},
+    "barrel": {"name": "barrel", "id": 6, "supercategory": "warehouse", "color": [0, 255, 255, 255], "isthing": 1},
+    "cone": {"name": "cone", "id": 7, "supercategory": "safety", "color": [255, 128, 0, 255], "isthing": 1},
+    "fire_extinguisher": {"name": "fire_extinguisher", "id": 8, "supercategory": "safety", "color": [255, 0, 128, 255], "isthing": 1},
+    "cart": {"name": "cart", "id": 9, "supercategory": "warehouse", "color": [128, 255, 0, 255], "isthing": 1},
+    "sign": {"name": "sign", "id": 10, "supercategory": "safety", "color": [128, 0, 255, 255], "isthing": 1},
+    "pillar": {"name": "pillar", "id": 11, "supercategory": "structure", "color": [0, 128, 255, 255], "isthing": 1},
+    "hazard_zone_warning": {"name": "hazard_zone_warning", "id": 12, "supercategory": "zone", "color": [255, 255, 0, 128], "isthing": 0},
+    "hazard_zone_restricted": {"name": "hazard_zone_restricted", "id": 13, "supercategory": "zone", "color": [255, 128, 0, 128], "isthing": 0},
+    "hazard_zone_critical": {"name": "hazard_zone_critical", "id": 14, "supercategory": "zone", "color": [255, 0, 0, 128], "isthing": 0},
+}
+
+
 def _apply_scene_semantics(stage, spawned_asset_ids, workers):
-    from pxr import Sdf
+    """Walk the stage and apply USD-level semantics to all prims that need them."""
 
     def set_semantic(prim, class_name):
         data_attr = "semantic:Semantics:params:semanticData"
@@ -99,7 +131,9 @@ def _apply_scene_semantics(stage, spawned_asset_ids, workers):
 
     _progress(f"Applied USD-level semantics to {applied} prims.")
 
+
 def compute_scene_centroid(stage):
+    """Walk /World/Characters, /World/Layout, and /Replicator prims to find average position."""
     xs, ys, zs = [], [], []
     for prim in stage.Traverse():
         path = str(prim.GetPath())
@@ -122,6 +156,115 @@ def compute_scene_centroid(stage):
     return (cx, cy, cz)
 
 
+def _configure_sdg_settings():
+    """Apply recommended settings for synthetic data generation."""
+    settings = carb.settings.get_settings()
+    settings.set("/rtx/post/dlss/execMode", 2)
+    rep.orchestrator.set_capture_on_play(False)
+    _progress("SDG settings configured: DLSS=Quality, capture_on_play=False")
+
+
+def _setup_coco_writer():
+    """Initialize and return a CocoWriter with all category definitions."""
+    writer = rep.WriterRegistry.get("CocoWriter")
+    writer.initialize(
+        output_dir="/tmp/dataset",
+        rgb=True,
+        bounding_box_2d_tight=True,
+        semantic_segmentation=True,
+        instance_segmentation=True,
+        coco_categories=COCO_CATEGORIES,
+    )
+    _progress("CocoWriter initialized with 14 categories (including hazard zones)")
+    return writer
+
+
+def _collect_entity_positions(stage):
+    """Gather all entity and worker positions for camera framing."""
+    entity_positions = []
+    worker_positions = []
+    for prim in stage.Traverse():
+        path = str(prim.GetPath())
+        if not (path.startswith("/World/Characters/") or path.startswith("/World/Layout/") or path.startswith("/Replicator/")):
+            continue
+        xf = UsdGeom.Xformable(prim)
+        if xf:
+            mat = xf.ComputeLocalToWorldTransform(Usd.TimeCode.Default())
+            pos = mat.ExtractTranslation()
+            entity_positions.append((pos[0], pos[1]))
+            if path.startswith("/World/Characters/"):
+                worker_positions.append((pos[0], pos[1]))
+    return entity_positions, worker_positions
+
+
+def _configure_camera_trigger(camera, scene_config, look_at_target):
+    """Set up the frame trigger with either fixed indoor position or orbit distribution."""
+    num_frames = 200
+    angle_hints = scene_config.get("camera_angles", [])
+    hazard_zones = scene_config.get("hazard_zones", [])
+    camera_mode = scene_config.get("camera_mode", "indoor")
+    camera_position_override = scene_config.get("camera_position")
+
+    stage = omni.usd.get_context().get_stage()
+    entity_positions, worker_positions = _collect_entity_positions(stage)
+
+    if camera_mode == "indoor":
+        if camera_position_override:
+            cam_x, cam_y, cam_z = clamp_to_warehouse(*camera_position_override)
+            _progress(f"camera_position_override={camera_position_override} clamped to ({cam_x:.2f}, {cam_y:.2f}, {cam_z:.2f})")
+        else:
+            cam_x, cam_y, cam_z = pick_indoor_position(
+                angle_hints, hazard_zones=hazard_zones,
+                entity_positions=entity_positions,
+                worker_positions=worker_positions or None,
+            )
+        camera_pos = (cam_x, cam_y, cam_z)
+        _progress(f"camera_mode=indoor  camera_angles={angle_hints}  camera=({cam_x:.2f}, {cam_y:.2f}, {cam_z:.2f})  look_at=({look_at_target[0]:.2f}, {look_at_target[1]:.2f}, {look_at_target[2]:.2f})")
+
+        with rep.trigger.on_frame(num_frames=num_frames):
+            with camera:
+                rep.modify.pose(position=camera_pos, look_at=look_at_target)
+    else:
+        scene_positions = positions_for_angles(
+            angle_hints, hazard_zones=hazard_zones,
+            entity_positions=entity_positions,
+            worker_positions=worker_positions or None,
+            mode="orbit",
+        )
+        from isaac_backend.camera import orbit_distribution
+        camera_pos_dist = orbit_distribution(scene_positions)
+        _progress(f"camera_mode=orbit  camera_angles={angle_hints}  ->  {len(scene_positions)} positions")
+
+        with rep.trigger.on_frame(num_frames=num_frames):
+            with camera:
+                rep.modify.pose(position=camera_pos_dist, look_at=look_at_target)
+
+    return num_frames
+
+
+def _teardown(rep, writer, world, simulation_app):
+    """Clean teardown in the correct order to avoid crashes."""
+    try:
+        rep.orchestrator.stop()
+    except Exception as e:
+        print(f"[WARN] teardown step failed: {e}", file=sys.stderr)
+
+    try:
+        writer.detach()
+    except Exception as e:
+        print(f"[WARN] teardown step failed: {e}", file=sys.stderr)
+
+    try:
+        world.clear()
+    except Exception as e:
+        print(f"[WARN] teardown step failed: {e}", file=sys.stderr)
+
+    simulation_app.close()
+    _progress("Generation complete. Data saved to /tmp/dataset.")
+    sys.stdout.flush()
+    os._exit(0)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Run Isaac Sim Headless Generation")
     parser.add_argument("--config", type=str, default="configs/current_scene.json", help="Path to the SceneConfig JSON")
@@ -135,9 +278,11 @@ def main():
     world = World(stage_units_in_meters=1.0)
     for _ in range(5):
         simulation_app.update()
-    _progress("World created.")
 
     stage = omni.usd.get_context().get_stage()
+
+    _progress("Configuring SDG settings...")
+    _configure_sdg_settings()
 
     _progress("Loading warehouse zone...")
     rep.create.from_usd(asset_library["zone"])
@@ -218,74 +363,18 @@ def main():
     for _ in range(30):
         simulation_app.update()
 
-    _progress("Initializing BasicWriter...")
-    writer = rep.WriterRegistry.get("BasicWriter")
-    writer.initialize(
-        output_dir="/tmp/dataset",
-        rgb=True,
-        bounding_box_2d_tight=True,
-        semantic_segmentation=True,
-        distance_to_camera=True,
-        instance_segmentation=True,
-    )
+    _progress("Initializing CocoWriter...")
+    writer = _setup_coco_writer()
     writer.attach([render_product])
 
-    NUM_FRAMES = 200
-    angle_hints = scene_config.get("camera_angles", [])
-    hazard_zones = scene_config.get("hazard_zones", [])
-    camera_mode = scene_config.get("camera_mode", "indoor")
-    camera_position_override = scene_config.get("camera_position")
-
-    entity_positions = []
-    worker_positions = []
-    for prim in stage.Traverse():
-        path = str(prim.GetPath())
-        if not (path.startswith("/World/Characters/") or path.startswith("/World/Layout/") or path.startswith("/Replicator/")):
-            continue
-        xf = UsdGeom.Xformable(prim)
-        if xf:
-            mat = xf.ComputeLocalToWorldTransform(Usd.TimeCode.Default())
-            pos = mat.ExtractTranslation()
-            entity_positions.append((pos[0], pos[1]))
-            if path.startswith("/World/Characters/"):
-                worker_positions.append((pos[0], pos[1]))
-
-    if camera_mode == "indoor":
-        if camera_position_override:
-            cam_x, cam_y, cam_z = clamp_to_warehouse(*camera_position_override)
-            _progress(f"camera_positionOverride={camera_position_override} clamped to ({cam_x:.2f}, {cam_y:.2f}, {cam_z:.2f})")
-        else:
-            cam_x, cam_y, cam_z = pick_indoor_position(
-                angle_hints, hazard_zones=hazard_zones,
-                entity_positions=entity_positions,
-                worker_positions=worker_positions or None,
-            )
-        camera_pos = (cam_x, cam_y, cam_z)
-        _progress(f"camera_mode=indoor  camera_angles={angle_hints}  camera=({cam_x:.2f}, {cam_y:.2f}, {cam_z:.2f})  look_at=({look_at_target[0]:.2f}, {look_at_target[1]:.2f}, {look_at_target[2]:.2f})")
-
-        _progress("Setting up frame trigger (fixed position)...")
-        with rep.trigger.on_frame(num_frames=NUM_FRAMES):
-            with camera:
-                rep.modify.pose(position=camera_pos, look_at=look_at_target)
-    else:
-        scene_positions = positions_for_angles(angle_hints, hazard_zones=hazard_zones,
-                                               entity_positions=entity_positions,
-                                               worker_positions=worker_positions or None,
-                                               mode="orbit")
-        from isaac_backend.camera import orbit_distribution
-        camera_pos_dist = orbit_distribution(scene_positions)
-        _progress(f"camera_mode=orbit  camera_angles={angle_hints}  ->  {len(scene_positions)} positions")
-
-        _progress("Setting up frame trigger (orbit distribution)...")
-        with rep.trigger.on_frame(num_frames=NUM_FRAMES):
-            with camera:
-                rep.modify.pose(position=camera_pos_dist, look_at=look_at_target)
+    _progress("Configuring camera trigger...")
+    num_frames = _configure_camera_trigger(camera, scene_config, look_at_target)
 
     _progress("Running simulation loop...")
-    for step in range(NUM_FRAMES):
+    for step in range(num_frames):
         if step % 100 == 0:
-            _progress(f"Frame {step}/{NUM_FRAMES}")
-        world.step()
+            _progress(f"Frame {step}/{num_frames}")
+        world.step(render=False)
         rep.orchestrator.step()
 
     _progress("Waiting for orchestrator to finish...")
@@ -293,10 +382,10 @@ def main():
 
     _progress("Waiting for writer flush...")
     deadline = time.time() + 60
-    while len(glob.glob("/tmp/dataset/bounding_box_2d_tight_*.npy")) < NUM_FRAMES:
+    while len(glob.glob("/tmp/dataset/bounding_box_2d_tight_*.npy")) < num_frames:
         if time.time() > deadline:
             found = len(glob.glob("/tmp/dataset/bounding_box_2d_tight_*.npy"))
-            print(f"[WARNING] Timed out waiting for writer flush ({found}/{NUM_FRAMES} files written).")
+            print(f"[WARNING] Timed out waiting for writer flush ({found}/{num_frames} files written).")
             break
         time.sleep(0.1)
         simulation_app.update()
@@ -307,25 +396,7 @@ def main():
     )
     _progress(f"Files written to /tmp/dataset: {len(result.stdout.strip().splitlines()) if result.stdout.strip() else 0}")
 
-    try:
-        rep.orchestrator.stop()
-    except Exception as e:
-        print(f"[WARN] teardown step failed: {e}", file=sys.stderr)
-
-    try:
-        writer.detach()
-    except Exception as e:
-        print(f"[WARN] teardown step failed: {e}", file=sys.stderr)
-
-    try:
-        world.clear()
-    except Exception as e:
-        print(f"[WARN] teardown step failed: {e}", file=sys.stderr)
-
-    simulation_app.close()
-    _progress("Generation complete. Data saved to /tmp/dataset.")
-    sys.stdout.flush()
-    os._exit(0)
+    _teardown(rep, writer, world, simulation_app)
 
 
 if __name__ == "__main__":

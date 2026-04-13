@@ -1,5 +1,17 @@
+"""
+Camera Positioning Logic
+
+Provides indoor fixed-position placement and orbit distribution for
+camera viewpoints in warehouse SDG. Pure Python — no Isaac Sim imports
+except rep.distribution in orbit_distribution().
+
+Constants define warehouse interior bounds, angle-to-height mappings,
+and angle-to-elevation mappings.
+"""
+
 import math
 import random
+import omni.replicator.core as rep
 
 WAREHOUSE_INTERIOR_X = (-7.0, 7.0)
 WAREHOUSE_INTERIOR_Y = (-7.0, 7.0)
@@ -15,8 +27,16 @@ ANGLE_HEIGHT_MAP = {
 }
 DEFAULT_HEIGHT_RANGE = (1.4, 4.5)
 
+ANGLE_ELEVATION_MAP = {
+    "overhead":   (55, 70),
+    "high_angle": (35, 55),
+    "eye_level":  (10, 30),
+    "low_angle":  (5,  15),
+}
+
 
 def clamp_to_warehouse(x, y, z):
+    """Constrain a position to warehouse interior bounds with margin."""
     x_lo = WAREHOUSE_INTERIOR_X[0] + INTERIOR_MARGIN
     x_hi = WAREHOUSE_INTERIOR_X[1] - INTERIOR_MARGIN
     y_lo = WAREHOUSE_INTERIOR_Y[0] + INTERIOR_MARGIN
@@ -28,7 +48,8 @@ def clamp_to_warehouse(x, y, z):
 
 
 def pick_indoor_position(angle_hints, hazard_zones=None,
-                         entity_positions=None, worker_positions=None):
+                          entity_positions=None, worker_positions=None):
+    """Compute a centroid-based indoor camera position with angle-aware height."""
     points = []
 
     if worker_positions:
@@ -70,6 +91,7 @@ def pick_indoor_position(angle_hints, hazard_zones=None,
 
 def _build_orbit_positions(n=30, radius_min=4, radius_max=9,
                             azimuth_deg=(0, 360), elevation_deg=(10, 70)):
+    """Generate n camera positions on a spherical shell around the origin."""
     positions = []
     for i in range(n):
         az = math.radians(azimuth_deg[0] + (azimuth_deg[1] - azimuth_deg[0]) * i / n)
@@ -82,15 +104,8 @@ def _build_orbit_positions(n=30, radius_min=4, radius_max=9,
     return positions
 
 
-ANGLE_ELEVATION_MAP = {
-    "overhead":   (55, 70),
-    "high_angle": (35, 55),
-    "eye_level":  (10, 30),
-    "low_angle":  (5,  15),
-}
-
-
 def _compute_scene_radius(hazard_zones=None, entity_positions=None):
+    """Compute orbit radius bounds from scene entity extents."""
     points = []
 
     if hazard_zones:
@@ -115,8 +130,13 @@ def _compute_scene_radius(hazard_zones=None, entity_positions=None):
 
 
 def positions_for_angles(angle_hints, hazard_zones=None,
-                         entity_positions=None, worker_positions=None,
-                         mode="indoor"):
+                          entity_positions=None, worker_positions=None,
+                          mode="indoor"):
+    """Return camera positions for the given angle hints.
+
+    mode="indoor" — single fixed position inside the warehouse.
+    mode="orbit" — multiple positions on a spherical shell around the scene.
+    """
     if mode == "indoor":
         pos = pick_indoor_position(
             angle_hints, hazard_zones=hazard_zones,
@@ -146,8 +166,7 @@ def positions_for_angles(angle_hints, hazard_zones=None,
 
 
 def orbit_distribution(scene_positions):
-    import omni.replicator.core as rep
-
+    """Return a rep.distribution.uniform over the bounding box of scene_positions."""
     xs = [p[0] for p in scene_positions]
     ys = [p[1] for p in scene_positions]
     zs = [p[2] for p in scene_positions]

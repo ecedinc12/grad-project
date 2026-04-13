@@ -1,14 +1,21 @@
+"""
+Worker Spawner — Spawn worker characters as Xform prims with USD references + semantics.
+
+No behavior script attachment here — that is handled separately by animation.py
+using isaacsim.replicator.behavior (IRA).
+"""
+
 import random
 from pxr import Gf, UsdGeom
 import omni.usd
-import omni.replicator.core as rep
-from isaac_backend.semantics import apply_semantics
+from isaac_backend.semantics import apply_usd_semantics
 
 _PPE_KEYS = ["worker_with_ppe", "worker_with_ppe_alt"]
 _NO_PPE_KEYS = ["worker_no_ppe"]
 
 
 def select_worker_usd(ppe_state, asset_library):
+    """Return the worker USD path based on PPE state."""
     if ppe_state.get("hardhat", False) or ppe_state.get("vest", False):
         key = random.choice(_PPE_KEYS)
     else:
@@ -17,6 +24,10 @@ def select_worker_usd(ppe_state, asset_library):
 
 
 def spawn_workers(workers, worker_behaviors, asset_library, stage):
+    """Spawn workers as Xform prims with USD references and semantics.
+
+    Returns a set of spawned worker names (e.g. {"worker_01", "worker_02"}).
+    """
     def _initial_pos(worker_id):
         for wb in worker_behaviors:
             if wb.get("worker_id") == worker_id:
@@ -46,7 +57,7 @@ def spawn_workers(workers, worker_behaviors, asset_library, stage):
         xf.ClearXformOpOrder()
         xf.AddTranslateOp().Set(Gf.Vec3d(spawn_x, spawn_y, 0.0))
 
-        apply_semantics(prim_path, "person")
+        apply_usd_semantics(prim_path, "person")
         spawned_names.add(name)
 
         print(f"[INFO] Spawned {name} @ ({spawn_x:.2f}, {spawn_y:.2f}, 0.0) ppe={ppe_state}")

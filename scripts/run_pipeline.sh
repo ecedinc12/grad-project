@@ -36,7 +36,10 @@ rm -rf /tmp/dataset
 
 # Step 3: Run Isaac Sim Headless Replicator Generation
 echo "[3/8] Generating dataset via Isaac Sim..."
-/isaac-sim/python.sh "$PROJECT_ROOT/isaac_backend/main.py" --config "$PROJECT_ROOT/configs/current_scene.json" --library "$PROJECT_ROOT/assets/library.json"
+/isaac-sim/python.sh "$PROJECT_ROOT/isaac_backend/main.py" \
+    --config "$PROJECT_ROOT/configs/current_scene.json" \
+    --library "$PROJECT_ROOT/assets/library.json" \
+    --/exts/isaacsim.core.throttling/enable_async=false
 
 # Step 4: Convert COCO annotations to YOLO format
 echo "[4/8] Converting COCO to YOLO..."

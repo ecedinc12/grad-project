@@ -46,3 +46,45 @@
 - [x] **Task 6.3: Simplify Worker Spawning.** Rewrite `workers.py` — remove `attach_character_behavior()`, `_find_skelroot()`, `_wait_for_skelroot()`, `AnimGraphSchema` dependency. Workers are now just Xform + USD ref + semantics; behavior scripts attached separately by `animation.py`.
 - [x] **Task 6.4: Simplify Pipeline Orchestrator.** Rewrite `main.py` — remove `--anim-mode` flag, `enable_extensions()`, `setup_navmesh()`, `setup_people_simulation()`, `write_command_file()`, direct-mode branch, all diagnostics. Single animation path: `spawn_workers()` → `setup_all_behaviors()` → timeline play → Replicator loop.
 - [x] **Task 6.5: Clean Up.** Delete `isaac_backend/people.py` and `isaac_backend/animator.py`. Update `__init__.py` exports.
+
+#### Phase 7: Complete Rewrite — Isaac Sim 5.1 Extension & Library Update
+- [x] **Task 7.1: Delete Deprecated Files.** Removed `people.py`, `animator.py`, `test_people_walk.py`, `references/omni_anim_people/`.
+- [x] **Task 7.2: Rewrite `main.py`.** `isaacsim.core.api.World`, CocoWriter with 14 categories (incl. hazard zones), DLSS Quality mode, capture_on_play=False, extracted helper functions.
+- [x] **Task 7.3: Rewrite `animation.py`.** Removed `omni.behavior.scripting.core` from explicit extension list, clean IRA/fallback paths.
+- [x] **Task 7.4: Rewrite `behaviors/worker_patrol.py`.** Clean imports, docstring with exposed attribute docs.
+- [x] **Task 7.5: Rewrite `behaviors/worker_idle_pose.py`.** Clean imports, docstring with exposed attribute docs.
+- [x] **Task 7.6: Rewrite `workers.py`.** Updated `apply_semantics` → `apply_usd_semantics`, removed unused imports.
+- [x] **Task 7.7: Rewrite `semantics.py`.** Renamed `apply_semantics` → `apply_usd_semantics`, added docstrings.
+- [x] **Task 7.8: Rewrite `warehouse.py`.** Updated import to `apply_usd_semantics`.
+- [x] **Task 7.9: Rewrite `spawner.py`.** Added docstrings, no API changes needed.
+- [x] **Task 7.10: Rewrite `camera.py`.** Moved `rep` import to top level, added docstrings.
+- [x] **Task 7.11: Rewrite `lighting.py`.** Added docstring, no API changes needed.
+- [x] **Task 7.12: Rewrite `config_loader.py`.** Added docstring, no API changes needed.
+- [x] **Task 7.13: Update `__init__.py`.** Updated `apply_semantics` → `apply_usd_semantics` export.
+- [x] **Task 7.14: Update `run_pipeline.sh`.** Added `--/exts/isaacsim.core.throttling/enable_async=false` flag.
+- [x] **Task 7.15: Update `coco_to_yolo.py`.** Updated help text from BasicWriter → CocoWriter.
+- [x] **Task 7.16: Update `AGENTS.md`.** Updated architecture diagram, gotchas (CocoWriter, isaacsim.core.api, IRA-only, DLSS, async flag).
+- [x] **Task 7.17: Update `TODO.md`.** Added Phase 7 tracking.
+- [ ] **Task 7.18: Rebuild RAG Index.** Run `python3 -m rag_system.build_index` on the pod.
+- [ ] **Task 7.19: Syntax Validation.** Run `python3 -m py_compile` on all modified files.
+
+#### Phase 7: Complete Rewrite — Isaac Sim 5.1 Extension & Library Update
+- [x] **Task 7.1: Delete Deprecated Files.** Removed `people.py`, `animator.py`, `test_people_walk.py`, `references/omni_anim_people/`.
+- [x] **Task 7.2: Rewrite `main.py`.** `isaacsim.core.api.World`, CocoWriter with 14 categories (incl. hazard zones), DLSS Quality mode, capture_on_play=False, extracted helper functions.
+- [x] **Task 7.3: Rewrite `animation.py`.** Removed `omni.behavior.scripting.core` from explicit extension list, clean IRA/fallback paths.
+- [x] **Task 7.4: Rewrite `behaviors/worker_patrol.py`.** Clean imports, docstring with exposed attribute docs.
+- [x] **Task 7.5: Rewrite `behaviors/worker_idle_pose.py`.** Clean imports, docstring with exposed attribute docs.
+- [x] **Task 7.6: Rewrite `workers.py`.** Updated `apply_semantics` → `apply_usd_semantics`, removed unused imports.
+- [x] **Task 7.7: Rewrite `semantics.py`.** Renamed `apply_semantics` → `apply_usd_semantics`, added docstrings.
+- [x] **Task 7.8: Rewrite `warehouse.py`.** Updated import to `apply_usd_semantics`.
+- [x] **Task 7.9: Rewrite `spawner.py`.** Added docstrings, no API changes needed.
+- [x] **Task 7.10: Rewrite `camera.py`.** Moved `rep` import to top level, added docstrings.
+- [x] **Task 7.11: Rewrite `lighting.py`.** Added docstring, no API changes needed.
+- [x] **Task 7.12: Rewrite `config_loader.py`.** Added docstring, no API changes needed.
+- [x] **Task 7.13: Update `__init__.py`.** Updated `apply_semantics` → `apply_usd_semantics` export.
+- [x] **Task 7.14: Update `run_pipeline.sh`.** Added `--/exts/isaacsim.core.throttling/enable_async=false` flag.
+- [x] **Task 7.15: Update `coco_to_yolo.py`.** Updated help text from BasicWriter → CocoWriter.
+- [x] **Task 7.16: Update `AGENTS.md`.** Updated architecture diagram, gotchas (CocoWriter, isaacsim.core.api, IRA-only, DLSS, async flag).
+- [x] **Task 7.17: Update `TODO.md`.** Added Phase 7 tracking.
+- [ ] **Task 7.18: Rebuild RAG Index.** Run `python3 -m rag_system.build_index` on the pod.
+- [ ] **Task 7.19: Syntax Validation.** Run `python3 -m py_compile` on all modified files.

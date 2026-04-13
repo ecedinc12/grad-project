@@ -1,3 +1,10 @@
+"""
+Camera and Lighting Setup
+
+Creates dome/distant/sphere lights based on lighting condition and
+returns a camera + render product for Replicator SDG.
+"""
+
 import omni.replicator.core as rep
 
 LIGHTING_MAP = {
@@ -10,10 +17,12 @@ LIGHTING_MAP = {
 _CEILING_LAMP_XY = [(-4, -4), (0, -4), (4, -4), (-4, 0), (0, 0), (4, 0), (-4, 4), (0, 4), (4, 4)]
 _CEILING_Z = 5.5
 
+
 def setup_camera_and_lighting(config):
+    """Create lights based on lighting condition and return (camera, render_product)."""
     condition = config.get("lighting_conditions", "daylight")
     params = LIGHTING_MAP.get(condition, LIGHTING_MAP["daylight"])
-    print(f"[INFO] lighting_conditions={condition!r}  →  intensity={params['intensity']}, color={params['color']}")
+    print(f"[INFO] lighting_conditions={condition!r}  ->  intensity={params['intensity']}, color={params['color']}")
     rep.create.light(light_type="Dome", intensity=params["intensity"], color=params["color"])
 
     if condition == "daylight":

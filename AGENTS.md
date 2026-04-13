@@ -127,8 +127,8 @@ isaac_backend/
   lighting.py     — Camera and lighting setup
   semantics.py    — USD semantic label application
   workers.py      — Worker (character) spawning
-  people.py       — omni.anim.people integration, navmesh, command file writing
-  animator.py     — Direct-mode CharacterAnimator API
+  animation.py    — IRA behavior script manager (isaacsim.replicator.behavior)
+  behaviors/      — WorkerPatrolBehavior, WorkerIdlePoseBehavior (BehaviorScript subclasses)
 
 rag_system/
   build_index.py  — Crawl docs, chunk, embed, store in ChromaDB
@@ -153,12 +153,21 @@ scripts/
 
 ## Isaac Sim Gotchas
 
-- Use `omni.replicator.core.BasicWriter` for COCO output. Do NOT write directly to `/workspace`.
+- Use `CocoWriter` (not `BasicWriter`) for COCO output with explicit `coco_categories`. Do NOT write directly to `/workspace`.
 - After generation, wait for writer flush — `main.py` polls for `bounding_box_2d_tight_*.npy` files with a 60s timeout.
 - Teardown order: `rep.orchestrator.stop()` → `writer.detach()` → `world.clear()` → `simulation_app.close()` → `os._exit(0)`.
 - `omni.timeline.get_timeline_interface().play()` must be called before character animations work.
-- People extension (`omni.anim.people`) must be enabled BEFORE spawning workers if using `--anim-mode people`.
 - Warehouse USD zone is loaded from `asset_library["zone"]` via `rep.create.from_usd()`.
+- DLSS must be set to Quality mode (`/rtx/post/dlss/execMode = 2`) to avoid rendering artifacts at low resolutions.
+- `rep.orchestrator.set_capture_on_play(False)` is required — manual `step()` controls capture.
+- Pass `--/exts/isaacsim.core.throttling/enable_async=false` to prevent frame skipping during Replicator runs.
+- Worker animation uses IRA behavior scripts (`isaacsim.replicator.behavior`). No `omni.anim.people` dependency.
+- Import `World` from `isaacsim.core.api`, NOT `omni.isaac.core`.
+- DLSS must be set to Quality mode (`/rtx/post/dlss/execMode = 2`) to avoid rendering artifacts at low resolutions.
+- `rep.orchestrator.set_capture_on_play(False)` is required — manual `step()` controls capture.
+- Pass `--/exts/isaacsim.core.throttling/enable_async=false` to prevent frame skipping during Replicator runs.
+- Worker animation uses IRA behavior scripts (`isaacsim.replicator.behavior`). No `omni.anim.people` dependency.
+- Import `World` from `isaacsim.core.api`, NOT `omni.isaac.core`.
 
 ## Validation
 

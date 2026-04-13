@@ -1,3 +1,16 @@
+"""
+Worker Patrol Behavior Script — IRA BehaviorScript subclass
+
+Waypoint lerping with walk/idle/look_around state machine and skeletal
+animation blending. Attached to worker prims via isaacsim.replicator.behavior.
+
+Exposed attributes (set by animation.py):
+  rep:behaviors:workerPatrol:waypoints:csv  — "x,y,z,rot;x,y,z,rot;..."
+  rep:behaviors:workerPatrol:speed          — movement speed (m/s)
+  rep:behaviors:workerPatrol:idleDuration   — seconds to idle at waypoint
+  rep:behaviors:workerPatrol:lookAroundDuration — seconds to look around
+"""
+
 import math
 
 try:
@@ -7,6 +20,7 @@ except ImportError:
     _HAS_BEHAVIOR_SCRIPT = False
 
     class BehaviorScript:
+        """Fallback stub when omni.behavior.scripting.core is unavailable."""
         def __init__(self):
             self.prim = None
             self.prim_path = ""
@@ -15,7 +29,6 @@ except ImportError:
             if not self.prim or not self.prim.IsValid():
                 return None
             from pxr import Sdf
-            import omni.usd
             full_name = f"rep:behaviors:{self.BEHAVIOR_NS}:{name}"
             attr = self.prim.GetAttribute(full_name)
             if attr and attr.IsValid():
@@ -28,14 +41,13 @@ try:
 except ImportError:
     _HAS_ANIM_GRAPH = False
 
-try:
-    import omni.usd
-    from pxr import Gf, UsdGeom, Usd
-except ImportError:
-    pass
+import omni.usd
+from pxr import Gf, UsdGeom, Usd
 
 
 class WorkerPatrolBehavior(BehaviorScript):
+    """Patrol between waypoints with walk/idle/look_around state machine."""
+
     BEHAVIOR_NS = "workerPatrol"
 
     def on_init(self):

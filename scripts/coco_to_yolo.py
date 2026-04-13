@@ -197,8 +197,8 @@ def convert_instance_masks(dataset_dir="/tmp/dataset"):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Convert BasicWriter output to YOLO format.")
-    parser.add_argument("--dir", type=str, default="/tmp/dataset", help="Directory containing BasicWriter output.")
+    parser = argparse.ArgumentParser(description="Convert CocoWriter output to YOLO format.")
+    parser.add_argument("--dir", type=str, default="/tmp/dataset", help="Directory containing CocoWriter output.")
     parser.add_argument("--masks", action="store_true", help="Also convert instance segmentation to YOLO mask format.")
     args = parser.parse_args()
     convert_npy_to_yolo(args.dir)

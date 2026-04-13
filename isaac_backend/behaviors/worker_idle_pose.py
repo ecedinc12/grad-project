@@ -1,3 +1,14 @@
+"""
+Worker Idle Pose Behavior Script — IRA BehaviorScript subclass
+
+Periodic Y-rotation randomization with idle animation. Attached to workers
+that have no patrol commands.
+
+Exposed attributes (set by animation.py):
+  rep:behaviors:workerIdlePose:interval          — frames between rotation changes
+  rep:behaviors:workerIdlePose:rotationRange:csv — "min_deg,max_deg"
+"""
+
 import random
 
 try:
@@ -7,6 +18,7 @@ except ImportError:
     _HAS_BEHAVIOR_SCRIPT = False
 
     class BehaviorScript:
+        """Fallback stub when omni.behavior.scripting.core is unavailable."""
         def __init__(self):
             self.prim = None
             self.prim_path = ""
@@ -15,7 +27,6 @@ except ImportError:
             if not self.prim or not self.prim.IsValid():
                 return None
             from pxr import Sdf
-            import omni.usd
             full_name = f"rep:behaviors:{self.BEHAVIOR_NS}:{name}"
             attr = self.prim.GetAttribute(full_name)
             if attr and attr.IsValid():
@@ -28,14 +39,13 @@ try:
 except ImportError:
     _HAS_ANIM_GRAPH = False
 
-try:
-    import omni.usd
-    from pxr import Gf, UsdGeom, Usd
-except ImportError:
-    pass
+import omni.usd
+from pxr import Gf, UsdGeom, Usd
 
 
 class WorkerIdlePoseBehavior(BehaviorScript):
+    """Periodically randomize Y rotation while playing idle animation."""
+
     BEHAVIOR_NS = "workerIdlePose"
 
     def on_init(self):

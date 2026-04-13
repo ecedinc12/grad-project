@@ -1,3 +1,14 @@
+"""
+USD Semantic Label Applicator
+
+Applies/clears USD-level semantic attributes so Replicator writers can
+resolve class names for bounding boxes and segmentation outputs.
+
+Attributes written:
+  semantic:Semantics:params:semanticData — class name (e.g. "person")
+  semantic:Semantics:params:semanticType — always "class"
+"""
+
 import omni.usd
 from pxr import Sdf
 
@@ -7,12 +18,9 @@ KEEP_SEMANTICS = {
     "fire_extinguisher", "cart",
 }
 
-def apply_semantics(prim_path, class_name):
-    """Apply semantic class to a prim using USD SemanticSchema API directly.
 
-    This writes attributes to the USD stage so BasicWriter can resolve
-    them and generate semantic_id_to_labels.json / instance_segmentation_colors.json.
-    """
+def apply_usd_semantics(prim_path, class_name):
+    """Apply USD-level semantics to a prim for Replicator writer resolution."""
     stage = omni.usd.get_context().get_stage()
     prim = stage.GetPrimAtPath(prim_path)
     if not prim.IsValid():
@@ -32,9 +40,10 @@ def apply_semantics(prim_path, class_name):
     else:
         prim.GetAttribute(type_attr_name).Set("class")
 
+
 def clear_unwanted_warehouse_semantics(stage):
     """Strip pre-existing semantics from warehouse USD structural prims,
-    keeping only rack and pallet so their bounding boxes are preserved."""
+    keeping only rack/pallet so their bounding boxes are preserved."""
     warehouse_root = stage.GetPrimAtPath("/Replicator/Ref_Xform")
     if not warehouse_root.IsValid():
         print("[WARN] Warehouse root /Replicator/Ref_Xform not found — skipping semantic cleanup.")
@@ -47,8 +56,9 @@ def clear_unwanted_warehouse_semantics(stage):
 
     print(f"[INFO] Cleared unwanted semantics from {cleared} warehouse prims (kept rack/pallet).")
 
+
 def _clear_semantics_if_needed(prim):
-    """Remove semantics from a prim if its label is not in KEEP_SEMANTICS. Returns 1 if cleared, 0 otherwise."""
+    """Remove semantics from a prim if its label is not in KEEP_SEMANTICS."""
     semantic_data_attr = prim.GetAttribute("semantic:Semantics:params:semanticData")
     if not semantic_data_attr or not semantic_data_attr.HasAuthoredValue():
         return 0
