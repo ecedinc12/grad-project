@@ -351,7 +351,7 @@ def main():
     spawned_worker_names = set()
     if workers:
         _progress(f"Spawning {len(workers)} workers...")
-        spawned_worker_names = spawn_workers(workers, worker_behaviors, asset_library, stage)
+        spawned_worker_names = spawn_workers(workers, worker_behaviors, asset_library, stage, simulation_app)
 
     if workers:
         _progress("Attaching IRA behavior scripts to workers...")
@@ -378,8 +378,16 @@ def main():
 
     import omni.anim.graph.core as ag
     for name in spawned_worker_names:
-        animator = ag.get_character_animator(f"/World/Characters/{name}")
-        print(f"[DEBUG] Post-warmup animator for {name}: {animator}")
+        worker_prim = stage.GetPrimAtPath(f"/World/Characters/{name}")
+        skel_path = f"/World/Characters/{name}"
+        if worker_prim and worker_prim.IsValid():
+            from pxr import Usd
+            for child in Usd.PrimRange(worker_prim):
+                if child.GetTypeName() == "SkelRoot":
+                    skel_path = str(child.GetPath())
+                    break
+        animator = ag.get_character_animator(skel_path)
+        print(f"[DEBUG] Post-warmup animator for {name} (skel_path={skel_path}): {animator}")
 
     _progress("Initializing CocoWriter...")
     writer = _setup_coco_writer()

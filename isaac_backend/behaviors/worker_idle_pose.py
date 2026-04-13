@@ -115,22 +115,30 @@ class WorkerIdlePoseBehavior(BehaviorScript):
         translate_op.Set(Gf.Vec3d(t[0], t[1], t[2]))
         rotateY_op.Set(angle_deg)
 
+    def _get_skel_root_path(self):
+        """Find the SkelRoot prim path within the worker hierarchy for animation graph access."""
+        if not self.prim or not self.prim.IsValid():
+            return self.prim_path
+        for child in Usd.PrimRange(self.prim):
+            if child.GetTypeName() == "SkelRoot":
+                path = str(child.GetPath())
+                return path
+        return self.prim_path
+
+    def _get_skel_root_path(self):
+        """Find the SkelRoot prim path within the worker hierarchy for animation graph access."""
+        if not self.prim or not self.prim.IsValid():
+            return self.prim_path
+        for child in Usd.PrimRange(self.prim):
+            if child.GetTypeName() == "SkelRoot":
+                path = str(child.GetPath())
+                return path
+        return self.prim_path
+
     def _find_skel_animation(self):
         if not self.prim or not self.prim.IsValid():
             print(f"[DEBUG][FindSkelAnim] Prim invalid for {self.prim_path}")
             return None
-        print(f"[DEBUG][FindSkelAnim] Searching for SkelAnimation in {self.prim_path}")
-        found_anims = []
-        for child in Usd.PrimRange(self.prim):
-            type_name = child.GetTypeName()
-            if type_name == "SkelAnimation":
-                found_anims.append(str(child.GetPath()))
-                print(f"[DEBUG][FindSkelAnim] Found SkelAnimation: {child.GetPath()}")
-            elif type_name in ("SkelRoot", "Xform", "Scope", "Mesh"):
-                print(f"[DEBUG][FindSkelAnim] Found {type_name}: {child.GetPath()}")
-        if not found_anims:
-            print(f"[DEBUG][FindSkelAnim] No SkelAnimation found in {self.prim_path}")
-        return found_anims[0] if found_anims else None
         print(f"[DEBUG][FindSkelAnim] Searching for SkelAnimation in {self.prim_path}")
         found_anims = []
         for child in Usd.PrimRange(self.prim):
@@ -148,11 +156,12 @@ class WorkerIdlePoseBehavior(BehaviorScript):
         if not _HAS_ANIM_GRAPH:
             print(f"[DEBUG][IdleAnim] _HAS_ANIM_GRAPH=False for {self.prim_path}, skipping")
             return
-        print(f"[DEBUG][IdleAnim] Attempting idle anim for {self.prim_path}")
+        skel_path = self._get_skel_root_path()
+        print(f"[DEBUG][IdleAnim] Attempting idle anim for {self.prim_path}, skel_path={skel_path}")
         try:
-            animator = ag.get_character_animator(self.prim_path)
+            animator = ag.get_character_animator(skel_path)
             if animator is None:
-                print(f"[DEBUG][IdleAnim] ag.get_character_animator('{self.prim_path}') returned None")
+                print(f"[DEBUG][IdleAnim] ag.get_character_animator('{skel_path}') returned None")
                 return
             print(f"[DEBUG][IdleAnim] Animator obtained: {animator}")
             anim_path = self._find_skel_animation()
@@ -171,8 +180,9 @@ class WorkerIdlePoseBehavior(BehaviorScript):
     def _stop_idle_anim(self):
         if not _HAS_ANIM_GRAPH or self.anim_id is None:
             return
+        skel_path = self._get_skel_root_path()
         try:
-            animator = ag.get_character_animator(self.prim_path)
+            animator = ag.get_character_animator(skel_path)
             if animator:
                 animator.stop_animation(self.anim_id)
         except Exception:

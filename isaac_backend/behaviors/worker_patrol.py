@@ -194,6 +194,26 @@ class WorkerPatrolBehavior(BehaviorScript):
         translate_op.Set(Gf.Vec3d(tx, ty, tz))
         rotateY_op.Set(ry_deg)
 
+    def _get_skel_root_path(self):
+        """Find the SkelRoot prim path within the worker hierarchy for animation graph access."""
+        if not self.prim or not self.prim.IsValid():
+            return self.prim_path
+        for child in Usd.PrimRange(self.prim):
+            if child.GetTypeName() == "SkelRoot":
+                path = str(child.GetPath())
+                return path
+        return self.prim_path
+
+    def _get_skel_root_path(self):
+        """Find the SkelRoot prim path within the worker hierarchy for animation graph access."""
+        if not self.prim or not self.prim.IsValid():
+            return self.prim_path
+        for child in Usd.PrimRange(self.prim):
+            if child.GetTypeName() == "SkelRoot":
+                path = str(child.GetPath())
+                return path
+        return self.prim_path
+
     def _find_skel_animation(self):
         for child in Usd.PrimRange(self.prim):
             if child.GetTypeName() == "SkelAnimation":
@@ -214,11 +234,12 @@ class WorkerPatrolBehavior(BehaviorScript):
         if not _HAS_ANIM_GRAPH:
             print(f"[DEBUG][PatrolIdleAnim] _HAS_ANIM_GRAPH=False for {self.prim_path}, skipping")
             return
-        print(f"[DEBUG][PatrolIdleAnim] Attempting idle anim for {self.prim_path}")
+        skel_path = self._get_skel_root_path()
+        print(f"[DEBUG][PatrolIdleAnim] Attempting idle anim for {self.prim_path}, skel_path={skel_path}")
         try:
-            animator = ag.get_character_animator(self.prim_path)
+            animator = ag.get_character_animator(skel_path)
             if animator is None:
-                print(f"[DEBUG][PatrolIdleAnim] ag.get_character_animator('{self.prim_path}') returned None")
+                print(f"[DEBUG][PatrolIdleAnim] ag.get_character_animator('{skel_path}') returned None")
                 return
             print(f"[DEBUG][PatrolIdleAnim] Animator obtained: {animator}")
             anim_path = self._find_skel_animation()
@@ -240,40 +261,12 @@ class WorkerPatrolBehavior(BehaviorScript):
             return
         if self.walk_anim_id is not None:
             return
-        print(f"[DEBUG][PatrolWalkAnim] Attempting walk anim for {self.prim_path}")
+        skel_path = self._get_skel_root_path()
+        print(f"[DEBUG][PatrolWalkAnim] Attempting walk anim for {self.prim_path}, skel_path={skel_path}")
         try:
-            animator = ag.get_character_animator(self.prim_path)
+            animator = ag.get_character_animator(skel_path)
             if animator is None:
-                print(f"[DEBUG][PatrolWalkAnim] ag.get_character_animator('{self.prim_path}') returned None")
-                return
-            print(f"[DEBUG][PatrolWalkAnim] Animator obtained: {animator}")
-            walk_anim_path = self._find_walk_animation()
-            if walk_anim_path is None:
-                print(f"[DEBUG][PatrolWalkAnim] _find_walk_animation() returned None for {self.prim_path}")
-                return
-            print(f"[DEBUG][PatrolWalkAnim] Found walk animation: {walk_anim_path}")
-            if self.anim_id is not None:
-                animator.stop_animation(self.anim_id)
-                self.anim_id = None
-            anim = ag.load_animation(walk_anim_path, looping=True, blend_in=0.3)
-            self.walk_anim_id = animator.play_animation(anim)
-            print(f"[DEBUG][PatrolWalkAnim] Walk animation played, anim_id={self.walk_anim_id}")
-        except Exception as e:
-            print(f"[DEBUG][PatrolWalkAnim] Exception for {self.prim_path}: {e}")
-            import traceback
-            traceback.print_exc()
-
-    def _try_play_walk_anim(self):
-        if not _HAS_ANIM_GRAPH:
-            print(f"[DEBUG][PatrolWalkAnim] _HAS_ANIM_GRAPH=False for {self.prim_path}, skipping")
-            return
-        if self.walk_anim_id is not None:
-            return
-        print(f"[DEBUG][PatrolWalkAnim] Attempting walk anim for {self.prim_path}")
-        try:
-            animator = ag.get_character_animator(self.prim_path)
-            if animator is None:
-                print(f"[DEBUG][PatrolWalkAnim] ag.get_character_animator('{self.prim_path}') returned None")
+                print(f"[DEBUG][PatrolWalkAnim] ag.get_character_animator('{skel_path}') returned None")
                 return
             print(f"[DEBUG][PatrolWalkAnim] Animator obtained: {animator}")
             walk_anim_path = self._find_walk_animation()
@@ -295,8 +288,9 @@ class WorkerPatrolBehavior(BehaviorScript):
     def _stop_walk_anim(self):
         if not _HAS_ANIM_GRAPH or self.walk_anim_id is None:
             return
+        skel_path = self._get_skel_root_path()
         try:
-            animator = ag.get_character_animator(self.prim_path)
+            animator = ag.get_character_animator(skel_path)
             if animator:
                 animator.stop_animation(self.walk_anim_id)
         except Exception:
@@ -306,8 +300,40 @@ class WorkerPatrolBehavior(BehaviorScript):
     def _stop_idle_anim(self):
         if not _HAS_ANIM_GRAPH or self.anim_id is None:
             return
+        skel_path = self._get_skel_root_path()
         try:
-            animator = ag.get_character_animator(self.prim_path)
+            animator = ag.get_character_animator(skel_path)
+            if animator:
+                animator.stop_animation(self.anim_id)
+        except Exception:
+            pass
+        self.anim_id = None
+            anim = ag.load_animation(walk_anim_path, looping=True, blend_in=0.3)
+            self.walk_anim_id = animator.play_animation(anim)
+            print(f"[DEBUG][PatrolWalkAnim] Walk animation played, anim_id={self.walk_anim_id}")
+        except Exception as e:
+            print(f"[DEBUG][PatrolWalkAnim] Exception for {self.prim_path}: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def _stop_walk_anim(self):
+        if not _HAS_ANIM_GRAPH or self.walk_anim_id is None:
+            return
+        skel_path = self._get_skel_root_path()
+        try:
+            animator = ag.get_character_animator(skel_path)
+            if animator:
+                animator.stop_animation(self.walk_anim_id)
+        except Exception:
+            pass
+        self.walk_anim_id = None
+
+    def _stop_idle_anim(self):
+        if not _HAS_ANIM_GRAPH or self.anim_id is None:
+            return
+        skel_path = self._get_skel_root_path()
+        try:
+            animator = ag.get_character_animator(skel_path)
             if animator:
                 animator.stop_animation(self.anim_id)
         except Exception:
