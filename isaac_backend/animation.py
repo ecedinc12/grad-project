@@ -8,6 +8,7 @@ when the IRA extension is unavailable.
 
 import asyncio
 import inspect
+import time
 
 import omni.kit.app
 import omni.usd
@@ -161,19 +162,23 @@ async def _attach_idle_pose_fallback_async(prim, interval=10, rotation_range=(-1
     print(f"[INFO] WorkerIdlePose attached (fallback) to {prim_path} (interval={interval}, range={rotation_range})")
 
 
-async def _run_with_app_pumps(coro, simulation_app):
-    """Run a coroutine while pumping the Omniverse event loop to prevent deadlock.
+def _wait_for_async(coro, simulation_app):
+    """Schedule coroutine on the existing Omniverse asyncio loop and poll while pumping.
 
     IRA's add_behavior_script_with_parameters_async sends commands to
     omni.kit.scripting which processes them on the Omniverse main event loop.
-    If we block that loop with run_until_complete(), the coroutine can never
-    complete. This wrapper alternates between pumping the app and yielding to
-    asyncio, allowing both event loops to make progress.
+    Using run_until_complete() creates a nested task context that blocks all
+    other Omniverse tasks (ScriptManager, PrimCaching, etc.), causing re-entry
+    errors. Instead, we schedule the coroutine cooperatively on the existing
+    loop and pump the app until it completes.
     """
-    task = asyncio.ensure_future(coro)
+    loop = asyncio.get_event_loop()
+    task = asyncio.ensure_future(coro, loop=loop)
+
     while not task.done():
         simulation_app.update()
-        await asyncio.sleep(0)
+        time.sleep(0.01)
+
     return task.result()
 
 
