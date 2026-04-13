@@ -9,7 +9,7 @@ are attached separately by animation.py using isaacsim.replicator.behavior (IRA)
 import random
 import time
 import AnimGraphSchema
-from pxr import Gf, UsdGeom, Usd
+from pxr import Gf, Sdf, Usd, UsdGeom
 import omni.usd
 from isaac_backend.semantics import apply_usd_semantics
 
@@ -47,13 +47,33 @@ def _wait_for_skelroot(prim_path, stage, simulation_app, max_ticks=240):
 
 
 def _apply_animation_graph(skelroot, simulation_app):
-    """Apply AnimationGraphAPI to a SkelRoot prim so the character animator can drive it."""
+    """Apply AnimationGraphAPI to a SkelRoot prim, link it to the AnimationGraph
+    prim inside the referenced USD, and force the graph enabled."""
     try:
-        AnimGraphSchema.AnimationGraphAPI.Apply(skelroot)
+        anim_api = AnimGraphSchema.AnimationGraphAPI.Apply(skelroot)
         print(f"[INFO] Applied AnimationGraphAPI to {skelroot.GetPath()}")
     except Exception as e:
         print(f"[WARN] AnimationGraphAPI.Apply failed for {skelroot.GetPath()}: {e}")
         return False
+
+    graph_prim = None
+    for child in Usd.PrimRange(skelroot):
+        if child.GetTypeName() == "AnimationGraph":
+            graph_prim = child
+            break
+
+    if graph_prim is not None:
+        graph_path = str(graph_prim.GetPath())
+        anim_api.GetAnimationGraphRel().SetTargets([Sdf.Path(graph_path)])
+        print(f"[INFO] Linked AnimationGraphAPI -> {graph_path}")
+
+        enabled_attr = graph_prim.GetAttribute("enabled")
+        if not enabled_attr or not enabled_attr.IsValid():
+            enabled_attr = graph_prim.CreateAttribute("enabled", Sdf.ValueTypeNames.Bool, True)
+        enabled_attr.Set(True)
+        print(f"[INFO] AnimationGraph enabled=True at {graph_path}")
+    else:
+        print(f"[WARN] No AnimationGraph prim found under {skelroot.GetPath()}")
 
     for _ in range(10):
         simulation_app.update()

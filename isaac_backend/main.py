@@ -373,10 +373,13 @@ def main():
 
     _progress("Starting timeline for behavior scripts...")
     omni.timeline.get_timeline_interface().play()
-    for _ in range(60):
-        world.step(render=True)
 
     import omni.anim.graph.core as ag
+    ag.get_instance().update_graphs(0.0)
+    print("[INFO] Forced animation graph runtime update")
+
+    for _ in range(100):
+        world.step(render=True)
     for name in spawned_worker_names:
         worker_prim = stage.GetPrimAtPath(f"/World/Characters/{name}")
         skel_path = f"/World/Characters/{name}"

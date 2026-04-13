@@ -115,26 +115,6 @@ class WorkerIdlePoseBehavior(BehaviorScript):
         translate_op.Set(Gf.Vec3d(t[0], t[1], t[2]))
         rotateY_op.Set(angle_deg)
 
-    def _get_skel_root_path(self):
-        """Find the SkelRoot prim path within the worker hierarchy for animation graph access."""
-        if not self.prim or not self.prim.IsValid():
-            return self.prim_path
-        for child in Usd.PrimRange(self.prim):
-            if child.GetTypeName() == "SkelRoot":
-                path = str(child.GetPath())
-                return path
-        return self.prim_path
-
-    def _get_skel_root_path(self):
-        """Find the SkelRoot prim path within the worker hierarchy for animation graph access."""
-        if not self.prim or not self.prim.IsValid():
-            return self.prim_path
-        for child in Usd.PrimRange(self.prim):
-            if child.GetTypeName() == "SkelRoot":
-                path = str(child.GetPath())
-                return path
-        return self.prim_path
-
     def _find_skel_animation(self):
         if not self.prim or not self.prim.IsValid():
             print(f"[DEBUG][FindSkelAnim] Prim invalid for {self.prim_path}")

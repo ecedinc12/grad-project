@@ -194,26 +194,6 @@ class WorkerPatrolBehavior(BehaviorScript):
         translate_op.Set(Gf.Vec3d(tx, ty, tz))
         rotateY_op.Set(ry_deg)
 
-    def _get_skel_root_path(self):
-        """Find the SkelRoot prim path within the worker hierarchy for animation graph access."""
-        if not self.prim or not self.prim.IsValid():
-            return self.prim_path
-        for child in Usd.PrimRange(self.prim):
-            if child.GetTypeName() == "SkelRoot":
-                path = str(child.GetPath())
-                return path
-        return self.prim_path
-
-    def _get_skel_root_path(self):
-        """Find the SkelRoot prim path within the worker hierarchy for animation graph access."""
-        if not self.prim or not self.prim.IsValid():
-            return self.prim_path
-        for child in Usd.PrimRange(self.prim):
-            if child.GetTypeName() == "SkelRoot":
-                path = str(child.GetPath())
-                return path
-        return self.prim_path
-
     def _find_skel_animation(self):
         for child in Usd.PrimRange(self.prim):
             if child.GetTypeName() == "SkelAnimation":
