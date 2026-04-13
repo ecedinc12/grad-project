@@ -75,8 +75,11 @@ def _extract_waypoints(worker_behavior):
 
 async def _attach_patrol_async(prim, waypoints, speed=1.0, idle_duration=3.0, look_around_duration=2.0):
     """Attach WorkerPatrolBehavior via IRA add_behavior_script_with_parameters_async."""
+    print(f"[DEBUG][AttachPatrol] Attaching patrol to {prim.GetPath()}")
     script_path = inspect.getfile(WorkerPatrolBehavior)
+    print(f"[DEBUG][AttachPatrol] Script path: {script_path}")
     waypoints_csv = ";".join(f"{x},{y},{z},{r}" for x, y, z, r in waypoints)
+    print(f"[DEBUG][AttachPatrol] Waypoints CSV: {waypoints_csv}")
 
     _set_exposed_attr(prim, "workerPatrol", "waypoints:csv", waypoints_csv, Sdf.ValueTypeNames.String)
     _set_exposed_attr(prim, "workerPatrol", "speed", speed, Sdf.ValueTypeNames.Float)
@@ -89,13 +92,16 @@ async def _attach_patrol_async(prim, waypoints, speed=1.0, idle_duration=3.0, lo
         f"{EXPOSED_ATTR_NS}:workerPatrol:idleDuration": idle_duration,
         f"{EXPOSED_ATTR_NS}:workerPatrol:lookAroundDuration": look_around_duration,
     }
+    print(f"[DEBUG][AttachPatrol] Calling add_behavior_script_with_parameters_async with params: {parameters}")
     await add_behavior_script_with_parameters_async(prim, script_path, parameters)
     print(f"[INFO] WorkerPatrol attached to {prim.GetPath()} with {len(waypoints)} waypoints")
 
 
 async def _attach_idle_pose_async(prim, interval=10, rotation_range=(-15.0, 15.0)):
     """Attach WorkerIdlePoseBehavior via IRA add_behavior_script_with_parameters_async."""
+    print(f"[DEBUG][AttachIdle] Attaching idle pose to {prim.GetPath()}")
     script_path = inspect.getfile(WorkerIdlePoseBehavior)
+    print(f"[DEBUG][AttachIdle] Script path: {script_path}")
 
     _set_exposed_attr(prim, "workerIdlePose", "interval", interval, Sdf.ValueTypeNames.UInt)
     _set_exposed_attr(prim, "workerIdlePose", "rotationRange:csv", f"{rotation_range[0]},{rotation_range[1]}", Sdf.ValueTypeNames.String)
@@ -104,6 +110,7 @@ async def _attach_idle_pose_async(prim, interval=10, rotation_range=(-15.0, 15.0
         f"{EXPOSED_ATTR_NS}:workerIdlePose:interval": interval,
         f"{EXPOSED_ATTR_NS}:workerIdlePose:rotationRange:csv": f"{rotation_range[0]},{rotation_range[1]}",
     }
+    print(f"[DEBUG][AttachIdle] Calling add_behavior_script_with_parameters_async with params: {parameters}")
     await add_behavior_script_with_parameters_async(prim, script_path, parameters)
     print(f"[INFO] WorkerIdlePose attached to {prim.GetPath()} (interval={interval}, range={rotation_range})")
 
@@ -202,6 +209,10 @@ async def setup_all_behaviors_async(spawned_worker_names, worker_behaviors, stag
     attached = 0
     failed = 0
 
+    print(f"[DEBUG][SetupBehaviors] _HAS_IRA={_HAS_IRA}")
+    print(f"[DEBUG][SetupBehaviors] spawned_worker_names={spawned_worker_names}")
+    print(f"[DEBUG][SetupBehaviors] worker_behaviors={worker_behaviors}")
+
     for wb in worker_behaviors:
         worker_id = wb.get("worker_id", "worker_01")
         if worker_id not in spawned_worker_names:
@@ -216,6 +227,7 @@ async def setup_all_behaviors_async(spawned_worker_names, worker_behaviors, stag
             continue
 
         waypoints = _extract_waypoints(wb)
+        print(f"[DEBUG][SetupBehaviors] Processing {worker_id}: waypoints={waypoints}")
 
         try:
             if _HAS_IRA:
@@ -224,6 +236,7 @@ async def setup_all_behaviors_async(spawned_worker_names, worker_behaviors, stag
                 else:
                     await _attach_idle_pose_async(prim)
             else:
+                print(f"[DEBUG][SetupBehaviors] IRA not available, using fallback for {worker_id}")
                 if waypoints:
                     await _attach_patrol_fallback_async(prim, waypoints)
                 else:
@@ -231,6 +244,8 @@ async def setup_all_behaviors_async(spawned_worker_names, worker_behaviors, stag
             attached += 1
         except Exception as e:
             print(f"[ERROR] Failed to attach behavior to {worker_id}: {e}")
+            import traceback
+            traceback.print_exc()
             failed += 1
 
     for worker_name in spawned_worker_names:
@@ -243,10 +258,13 @@ async def setup_all_behaviors_async(spawned_worker_names, worker_behaviors, stag
                     if _HAS_IRA:
                         await _attach_idle_pose_async(prim)
                     else:
+                        print(f"[DEBUG][SetupBehaviors] IRA not available, using fallback for {worker_name}")
                         await _attach_idle_pose_fallback_async(prim)
                     attached += 1
                 except Exception as e:
                     print(f"[ERROR] Failed to attach idle behavior to {worker_name}: {e}")
+                    import traceback
+                    traceback.print_exc()
                     failed += 1
 
     print(f"[INFO] IRA behaviors: {attached} attached, {failed} failed")

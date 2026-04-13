@@ -117,25 +117,56 @@ class WorkerIdlePoseBehavior(BehaviorScript):
 
     def _find_skel_animation(self):
         if not self.prim or not self.prim.IsValid():
+            print(f"[DEBUG][FindSkelAnim] Prim invalid for {self.prim_path}")
             return None
+        print(f"[DEBUG][FindSkelAnim] Searching for SkelAnimation in {self.prim_path}")
+        found_anims = []
         for child in Usd.PrimRange(self.prim):
-            if child.GetTypeName() == "SkelAnimation":
-                return str(child.GetPath())
-        return None
+            type_name = child.GetTypeName()
+            if type_name == "SkelAnimation":
+                found_anims.append(str(child.GetPath()))
+                print(f"[DEBUG][FindSkelAnim] Found SkelAnimation: {child.GetPath()}")
+            elif type_name in ("SkelRoot", "Xform", "Scope", "Mesh"):
+                print(f"[DEBUG][FindSkelAnim] Found {type_name}: {child.GetPath()}")
+        if not found_anims:
+            print(f"[DEBUG][FindSkelAnim] No SkelAnimation found in {self.prim_path}")
+        return found_anims[0] if found_anims else None
+        print(f"[DEBUG][FindSkelAnim] Searching for SkelAnimation in {self.prim_path}")
+        found_anims = []
+        for child in Usd.PrimRange(self.prim):
+            type_name = child.GetTypeName()
+            if type_name == "SkelAnimation":
+                found_anims.append(str(child.GetPath()))
+                print(f"[DEBUG][FindSkelAnim] Found SkelAnimation: {child.GetPath()}")
+            elif type_name in ("SkelRoot", "Xform", "Scope", "Mesh"):
+                print(f"[DEBUG][FindSkelAnim] Found {type_name}: {child.GetPath()}")
+        if not found_anims:
+            print(f"[DEBUG][FindSkelAnim] No SkelAnimation found in {self.prim_path}")
+        return found_anims[0] if found_anims else None
 
     def _try_play_idle_anim(self):
         if not _HAS_ANIM_GRAPH:
+            print(f"[DEBUG][IdleAnim] _HAS_ANIM_GRAPH=False for {self.prim_path}, skipping")
             return
+        print(f"[DEBUG][IdleAnim] Attempting idle anim for {self.prim_path}")
         try:
             animator = ag.get_character_animator(self.prim_path)
             if animator is None:
+                print(f"[DEBUG][IdleAnim] ag.get_character_animator('{self.prim_path}') returned None")
                 return
+            print(f"[DEBUG][IdleAnim] Animator obtained: {animator}")
             anim_path = self._find_skel_animation()
-            if anim_path:
-                anim = ag.load_animation(anim_path, looping=True, blend_in=0.3)
-                self.anim_id = animator.play_animation(anim)
-        except Exception:
-            pass
+            if anim_path is None:
+                print(f"[DEBUG][IdleAnim] _find_skel_animation() returned None for {self.prim_path}")
+                return
+            print(f"[DEBUG][IdleAnim] Found SkelAnimation: {anim_path}")
+            anim = ag.load_animation(anim_path, looping=True, blend_in=0.3)
+            self.anim_id = animator.play_animation(anim)
+            print(f"[DEBUG][IdleAnim] Animation played, anim_id={self.anim_id}")
+        except Exception as e:
+            print(f"[DEBUG][IdleAnim] Exception for {self.prim_path}: {e}")
+            import traceback
+            traceback.print_exc()
 
     def _stop_idle_anim(self):
         if not _HAS_ANIM_GRAPH or self.anim_id is None:
