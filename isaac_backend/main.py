@@ -47,6 +47,15 @@ from isaacsim import SimulationApp
 simulation_app = SimulationApp({
     "headless": True,
     "renderer": "RayTracedLighting",
+    "extension_remote_config": True,
+    "extensions": [
+        "omni.isaac.core",
+        "omni.isaac.generic",
+        "omni.anim.people",
+        "omni.anim.graph.core",
+        "omni.anim.graph.ui",
+        "omni.anim.navigation.core",
+    ],
 })
 
 import carb
@@ -161,8 +170,9 @@ def _configure_sdg_settings():
     settings = carb.settings.get_settings()
     settings.set("/rtx/post/dlss/execMode", 2)
     settings.set("/exts/isaacsim.core.throttling/enable_async", False)
+    settings.set("/app/animation/update_all_animations", True)
     rep.orchestrator.set_capture_on_play(False)
-    _progress("SDG settings configured: DLSS=Quality, capture_on_play=False, throttling_async=False")
+    _progress("SDG settings configured: DLSS=Quality, capture_on_play=False, throttling_async=False, update_all_animations=True")
 
 
 def _setup_coco_writer():
@@ -274,6 +284,8 @@ def main():
 
     _progress("Loading configs...")
     scene_config, asset_library = load_config(args.config, args.library)
+    layout_name = scene_config.get("layout", "standard_warehouse")
+    _progress(f"Layout: {layout_name}")
 
     _progress("Creating World...")
     world = World(stage_units_in_meters=1.0)
@@ -292,7 +304,7 @@ def main():
 
     _progress("Clearing semantics and spawning warehouse layout...")
     clear_unwanted_warehouse_semantics(stage)
-    spawn_warehouse_layout(asset_library, stage)
+    spawn_bounds_min, spawn_bounds_max = spawn_warehouse_layout(scene_config, asset_library, stage)
     for _ in range(10):
         simulation_app.update()
 
@@ -321,7 +333,7 @@ def main():
             print(f"[WARNING] Unknown asset_id '{asset_id}'. Skipping.")
             continue
 
-        b_min, b_max = (-5, -2), (5, 2)
+        b_min, b_max = spawn_bounds_min, spawn_bounds_max
         spawner = get_geofenced_spawner(usd_path, num_instances=1, bounds_min=b_min, bounds_max=b_max)
         prims = spawner()
         asset_type = entity.get("type", "")
@@ -361,7 +373,7 @@ def main():
 
     _progress("Starting timeline for behavior scripts...")
     omni.timeline.get_timeline_interface().play()
-    for _ in range(30):
+    for _ in range(60):
         simulation_app.update()
 
     _progress("Initializing CocoWriter...")
@@ -372,10 +384,12 @@ def main():
     num_frames = _configure_camera_trigger(camera, scene_config, look_at_target)
 
     _progress("Running simulation loop...")
+    stage_ctx = omni.usd.get_context()
     for step in range(num_frames):
         if step % 100 == 0:
             _progress(f"Frame {step}/{num_frames}")
-        world.step(render=False)
+        world.step(render=True)
+        stage_ctx.get_stage().Update()
         rep.orchestrator.step()
 
     _progress("Waiting for orchestrator to finish...")
