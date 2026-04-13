@@ -2,7 +2,7 @@
 
 ## Overview
 
-Replace the single hardcoded warehouse layout with a parameterized procedural engine.
+Replace the single hardcoded warehouse layout in `isaac_backend/warehouse.py` with a parameterized procedural engine.
 Users can select from 8 presets, override individual parameters, or define fully custom layouts via natural language.
 
 **Architecture:** JSON metadata (`assets/layouts.json`) → LLM extracts `layout` + `layout_params` → Procedural generator (`isaac_backend/layouts.py`) builds the scene.
@@ -50,7 +50,7 @@ Define 8 layout presets. Each entry contains:
 | `storage_yard` | 4 rack clusters with wide lanes, outdoor-style yard |
 
 **Conventions:**
-- All `bounds_min`/`bounds_max` values must fit within the warehouse USD footprint (±8m X, ±7m Y)
+- All `bounds_min`/`bounds_max` values must fit within the warehouse USD footprint (±7m X, ±7m Y per `camera.py:WAREHOUSE_INTERIOR_X/Y`)
 - `clutter_zones` is optional; if empty or absent, clutter is distributed globally
 - `keywords` must include synonyms the LLM might encounter (e.g., "cramped", "tight", "dense" for `narrow_aisle`)
 
@@ -59,6 +59,8 @@ Define 8 layout presets. Each entry contains:
 ## Task 6.2: Schema Extension
 
 **File:** `llm_pipeline/schemas.py`
+
+Current state (line 35-60): `SceneConfig` has `entities`, `hazard_zones`, `camera_angles`, `camera_mode`, `camera_position`, `lighting_conditions`, `worker_behaviors`.
 
 Add two new Pydantic models and extend `SceneConfig`:
 
@@ -87,7 +89,7 @@ class LayoutParams(BaseModel):
     pallet_cols: int = 1
 ```
 
-### Extend `SceneConfig`:
+### Extend `SceneConfig` (after line 60):
 ```python
 layout: str = Field(default="standard_warehouse", description="Layout preset name or 'custom'")
 layout_params: Optional[LayoutParams] = Field(default=None, description="Parameter overrides for custom or preset-based layouts")
@@ -104,6 +106,8 @@ layout_params: Optional[LayoutParams] = Field(default=None, description="Paramet
 
 **File:** `llm_pipeline/generator.py`
 
+Current state: `system_prompt` (lines 29-66) covers entities, PPE, hazard zones, camera, lighting, worker behaviors. No layout awareness.
+
 ### Changes:
 
 1. **Load layout metadata at prompt-build time:**
@@ -114,7 +118,7 @@ layout_params: Optional[LayoutParams] = Field(default=None, description="Paramet
    ```
 
 2. **Inject layout descriptions into system prompt dynamically:**
-   Build a section listing each preset's `description` and `keywords` so the LLM knows all options.
+   Build a section listing each preset's `description` and `keywords` so the LLM knows all options. Insert this into the existing `system_prompt` string before the RULES section.
 
 3. **Add layout selection rules to system prompt:**
    ```
@@ -136,7 +140,7 @@ layout_params: Optional[LayoutParams] = Field(default=None, description="Paramet
    - rack_rows: number of rack rows (1-12). Default 5.
    - rack_cols: number of rack columns (1-3). Default 1.
    - aisle_width: distance between rack rows in meters (1.0-5.0). Default 2.0.
-   - bounds_min/bounds_max: overall layout footprint in meters. Must fit within ±8m X, ±7m Y.
+   - bounds_min/bounds_max: overall layout footprint in meters. Must fit within ±7m X, ±7m Y.
    - clutter_density: "low" (0-5 props), "medium" (6-12 props), "high" (13-20 props).
    - clutter_zones: optional list of area-specific clutter overrides.
      Each zone needs: area name, bounds_min, bounds_max, density, and types list.
@@ -147,6 +151,7 @@ layout_params: Optional[LayoutParams] = Field(default=None, description="Paramet
 **Conventions:**
 - Read `layouts.json` relative to the project root, not CWD
 - If `layouts.json` fails to load, fall back to hardcoded layout list (graceful degradation)
+- Do NOT remove any existing prompt rules (camera, PPE, hazard zones, behaviors)
 
 ---
 
@@ -167,8 +172,8 @@ def generate_layout(layout_name: str, layout_params: dict | None, asset_library:
 
 | Function | Purpose |
 |----------|---------|
-| `_resolve_params(layout_name, layout_params, layouts)` | Merge preset defaults with user overrides. Returns final `LayoutParams` dict. |
-| `_place(asset_id, x, y, z, rot_z, asset_library, stage, idx)` | Shared helper: creates USD reference, sets transform, applies semantics. Returns updated idx counter. |
+| `_resolve_params(layout_name, layout_params, layouts)` | Merge preset defaults with user overrides. Returns final params dict. |
+| `_place(asset_id, x, y, z, rot_z, asset_library, stage, idx)` | Shared helper: creates USD reference, sets transform, applies semantics via `apply_usd_semantics`. Returns updated idx counter. |
 | `_spawn_racks(params, asset_library, stage, idx)` | Procedural rack placement based on `rack_pattern`, `rack_rows`, `rack_cols`, `aisle_width`. |
 | `_spawn_pallets(params, asset_library, stage, idx)` | Pallet staging based on `pallet_rows`, `pallet_cols`, positioned relative to rack layout. |
 | `_spawn_clutter(params, asset_library, stage, idx)` | Scatter props based on `clutter_density` and optional `clutter_zones`. |
@@ -196,10 +201,11 @@ def generate_layout(layout_name: str, layout_params: dict | None, asset_library:
 Returns `(bounds_min, bounds_max)` from the resolved params so `main.py` can use them for geofenced entity spawning.
 
 **Conventions:**
-- All functions use the same `_place()` helper from the existing `warehouse.py` pattern
+- Use `apply_usd_semantics` from `isaac_backend.semantics` (NOT `apply_semantics` — was renamed)
+- Use `omni.kit.commands.execute("CreateReferenceCommand", ...)` for USD references (same as `warehouse.py:28-34`)
+- Use `UsdGeom.XformCommonAPI` for transforms (same as `warehouse.py:38-40`)
 - Print `[INFO]` messages for spawned counts (e.g., `[INFO] Spawned 15 racks, 8 pallets, 12 clutter props.`)
 - Use `random.uniform()` for all randomization; no hardcoded positions
-- `stage` is passed through; USD creation uses `omni.kit.commands.execute("CreateReferenceCommand", ...)`
 
 ---
 
@@ -207,9 +213,11 @@ Returns `(bounds_min, bounds_max)` from the resolved params so `main.py` can use
 
 **File:** `isaac_backend/warehouse.py`
 
+Current state (line 16-73): Single `spawn_warehouse_layout(asset_library, stage)` with hardcoded rack positions, pallet staging, and clutter scatter.
+
 ### Changes:
 
-1. Replace `spawn_warehouse_layout(asset_library, stage)` with:
+1. Replace the entire function body with a dispatcher:
    ```python
    def spawn_warehouse_layout(scene_config: dict, asset_library: dict, stage):
        layout_name = scene_config.get("layout", "standard_warehouse")
@@ -218,13 +226,16 @@ Returns `(bounds_min, bounds_max)` from the resolved params so `main.py` can use
        return bounds_min, bounds_max
    ```
 
-2. Keep `hide_driver_prims(stage)` unchanged.
+2. Keep `hide_driver_prims(stage)` unchanged (lines 76-85).
 
-3. Update imports: add `from isaac_backend.layouts import generate_layout`.
+3. Update imports: replace the inline placement logic with `from isaac_backend.layouts import generate_layout`.
+
+4. Remove the old `place()` closure and all hardcoded coordinate loops (lines 18-73).
 
 **Conventions:**
-- Function signature change is backward-compatible: `scene_config` is the dict already loaded by `config_loader.py`
-- Returns bounds tuple for downstream use
+- Function signature changes from `(asset_library, stage)` to `(scene_config, asset_library, stage)`
+- Returns `(bounds_min, bounds_max)` tuple for downstream use
+- `hide_driver_prims` signature unchanged
 
 ---
 
@@ -232,33 +243,39 @@ Returns `(bounds_min, bounds_max)` from the resolved params so `main.py` can use
 
 **File:** `isaac_backend/main.py`
 
+Current state:
+- Line 295: `spawn_warehouse_layout(asset_library, stage)` — old signature
+- Line 324: `b_min, b_max = (-5, -2), (5, 2)` — hardcoded bounds for entity spawning
+
 ### Changes:
 
-1. **Line 89:** Update `spawn_warehouse_layout` call to pass `scene_config` and capture bounds:
+1. **Line 295:** Update `spawn_warehouse_layout` call to pass `scene_config` and capture bounds:
    ```python
    spawn_bounds_min, spawn_bounds_max = spawn_warehouse_layout(scene_config, asset_library, stage)
    ```
 
-2. **Lines 119:** Replace hardcoded `b_min, b_max = (-5, -2), (5, 2)` with the returned bounds:
+2. **Line 324:** Replace hardcoded bounds with the returned values:
    ```python
-   b_min, b_max = (spawn_bounds_min[0], spawn_bounds_min[1]), (spawn_bounds_max[0], spawn_bounds_max[1])
+   b_min, b_max = spawn_bounds_min, spawn_bounds_max
    ```
 
-3. **Add layout logging:** After loading config, print which layout was selected:
+3. **Add layout logging** after line 276 (after config load):
    ```python
    layout_name = scene_config.get("layout", "standard_warehouse")
    _progress(f"Layout: {layout_name}")
    ```
 
 **Conventions:**
-- Do NOT change SimulationApp boot order, import order, or any existing logic beyond the 3 items above
-- Bounds must be tuples of floats, not lists, for downstream `rep.distribution.uniform` compatibility
+- Do NOT change SimulationApp boot order, import order, SDG settings, CocoWriter, camera trigger, teardown, or any existing logic beyond the 3 items above
+- Bounds are tuples of floats — compatible with `get_geofenced_spawner` which expects `(float, float)` tuples
 
 ---
 
 ## Task 6.7: Module Exports
 
 **File:** `isaac_backend/__init__.py`
+
+Current state (8 lines): Exports from `config_loader`, `camera`, `lighting`, `semantics`, `spawner`, `warehouse`, `workers`, `animation`.
 
 ### Changes:
 
@@ -267,7 +284,8 @@ Add export for the new module:
 from isaac_backend.layouts import generate_layout
 ```
 
-Update `spawn_warehouse_layout` import (signature changed, still from `warehouse`).
+**Conventions:**
+- `spawn_warehouse_layout` is still exported from `warehouse` (signature changed but import path unchanged)
 
 ---
 

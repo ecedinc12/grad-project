@@ -383,9 +383,9 @@ def main():
 
     _progress("Waiting for writer flush...")
     deadline = time.time() + 60
-    while len(glob.glob("/tmp/dataset/bounding_box_2d_tight_*.npy")) < num_frames:
+    while len(glob.glob("/tmp/dataset/Replicator/rgb_*.png")) < num_frames:
         if time.time() > deadline:
-            found = len(glob.glob("/tmp/dataset/bounding_box_2d_tight_*.npy"))
+            found = len(glob.glob("/tmp/dataset/Replicator/rgb_*.png"))
             print(f"[WARNING] Timed out waiting for writer flush ({found}/{num_frames} files written).")
             break
         time.sleep(0.1)
