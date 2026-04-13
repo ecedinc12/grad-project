@@ -6,6 +6,7 @@ import argparse
 import glob
 import time
 import subprocess
+import asyncio
 
 
 def _patch_fast_importer():
@@ -43,7 +44,7 @@ from isaac_backend.semantics import clear_unwanted_warehouse_semantics, apply_se
 from isaac_backend.spawner import get_geofenced_spawner, spawn_hazard_zones
 from isaac_backend.warehouse import spawn_warehouse_layout, hide_driver_prims
 from isaac_backend.workers import spawn_workers
-from isaac_backend.animation import setup_all_behaviors
+from isaac_backend.animation import enable_behavior_extensions, setup_all_behaviors_async
 
 
 def _progress(msg):
@@ -185,25 +186,22 @@ def main():
         spawned_asset_ids.append((asset_id, semantic_class))
     _progress("Non-worker entities spawned.")
 
+    if workers:
+        _progress("Enabling behavior extensions...")
+        enable_behavior_extensions(simulation_app=simulation_app)
+
     spawned_worker_names = set()
     if workers:
         _progress(f"Spawning {len(workers)} workers...")
         spawned_worker_names = spawn_workers(workers, worker_behaviors, asset_library, stage)
 
-    if workers and worker_behaviors:
+    if workers:
         _progress("Attaching IRA behavior scripts to workers...")
-        attached, failed = setup_all_behaviors(
-            spawned_worker_names, worker_behaviors, stage,
-            simulation_app=simulation_app,
+        loop = asyncio.get_event_loop()
+        attached, failed = loop.run_until_complete(
+            setup_all_behaviors_async(spawned_worker_names, worker_behaviors, stage)
         )
         _progress(f"IRA behaviors: {attached} attached, {failed} failed")
-    elif workers:
-        _progress("Attaching idle-pose behaviors to workers (no commands)...")
-        attached, failed = setup_all_behaviors(
-            spawned_worker_names, [], stage,
-            simulation_app=simulation_app,
-        )
-        _progress(f"IRA idle behaviors: {attached} attached, {failed} failed")
 
     _progress("Hiding driver prims...")
     hide_driver_prims(stage)
