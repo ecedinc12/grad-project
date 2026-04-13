@@ -32,5 +32,17 @@
     1. `python3 /workspace/llm_pipeline/generator.py --prompt "$1"`
     2. `rm -rf /tmp/dataset` (Clear old fast-disk data)
     3. `/isaac-sim/python.sh /workspace/isaac_backend/main.py` (Generate data)
-    4. `python3 /workspace/scripts/coco_to_yolo.py --dir /tmp/dataset` (Post-process)
-    5. `tar -czf /workspace/dataset_$(date +%s).tar.gz -C /tmp dataset/` (Move to slow persistent storage)
+4. `python3 /workspace/scripts/coco_to_yolo.py --dir /tmp/dataset` (Post-process)
+     5. `tar -czf /workspace/dataset_$(date +%s).tar.gz -C /tmp dataset/` (Move to slow persistent storage)
+
+#### Phase 6: IRA Behavior Script Animation (Replaces omni.anim.people)
+- [x] **Task 6.1: Behavior Script Package.** Create `isaac_backend/behaviors/` with `__init__.py`, `worker_patrol.py`, `worker_idle_pose.py`.
+    - `WorkerPatrolBehavior`: Waypoint lerping (GoTo), idle pause, look-around rotation, SkeletalAnimation blending (walk while moving, idle while stopped).
+    - `WorkerIdlePoseBehavior`: Periodic Y-rotation randomization + idle SkelAnimation for workers without commands.
+- [x] **Task 6.2: Unified Animation Module.** Create `isaac_backend/animation.py` replacing `people.py` + `animator.py`.
+    - `attach_worker_patrol()`: Attaches `worker_patrol.py` via PythonScriptingComponent with USD-exposed waypoints/speed/duration params.
+    - `attach_worker_idle_pose()`: Attaches `worker_idle_pose.py` with interval/rotation-range params.
+    - `setup_all_behaviors()`: Orchestrates attachment for all spawned workers, enables `isaacsim.replicator.behavior` extension.
+- [x] **Task 6.3: Simplify Worker Spawning.** Rewrite `workers.py` — remove `attach_character_behavior()`, `_find_skelroot()`, `_wait_for_skelroot()`, `AnimGraphSchema` dependency. Workers are now just Xform + USD ref + semantics; behavior scripts attached separately by `animation.py`.
+- [x] **Task 6.4: Simplify Pipeline Orchestrator.** Rewrite `main.py` — remove `--anim-mode` flag, `enable_extensions()`, `setup_navmesh()`, `setup_people_simulation()`, `write_command_file()`, direct-mode branch, all diagnostics. Single animation path: `spawn_workers()` → `setup_all_behaviors()` → timeline play → Replicator loop.
+- [x] **Task 6.5: Clean Up.** Delete `isaac_backend/people.py` and `isaac_backend/animator.py`. Update `__init__.py` exports.

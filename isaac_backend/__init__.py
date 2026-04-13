@@ -5,9 +5,4 @@ from isaac_backend.semantics import apply_semantics, clear_unwanted_warehouse_se
 from isaac_backend.spawner import get_geofenced_spawner, spawn_hazard_zones
 from isaac_backend.warehouse import spawn_warehouse_layout, hide_driver_prims
 from isaac_backend.workers import select_worker_usd, spawn_workers
-from isaac_backend.people import (
-    enable_extensions,
-    setup_navmesh,
-    setup_people_simulation,
-    write_command_file,
-)
+from isaac_backend.animation import attach_worker_patrol, attach_worker_idle_pose, setup_all_behaviors

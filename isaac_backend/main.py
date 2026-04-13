@@ -27,15 +27,12 @@ def _patch_fast_importer():
 
 _patch_fast_importer()
 
-# CRITICAL: Start SimulationApp BEFORE any omni/pxr imports
 from isaacsim import SimulationApp
 simulation_app = SimulationApp({"headless": True})
 
-import carb
 import omni.replicator.core as rep
-import omni.kit.app
-import omni.timeline
 import omni.usd
+import omni.timeline
 from omni.isaac.core import World
 from pxr import Usd, UsdGeom
 
@@ -46,12 +43,7 @@ from isaac_backend.semantics import clear_unwanted_warehouse_semantics, apply_se
 from isaac_backend.spawner import get_geofenced_spawner, spawn_hazard_zones
 from isaac_backend.warehouse import spawn_warehouse_layout, hide_driver_prims
 from isaac_backend.workers import spawn_workers
-from isaac_backend.people import (
-    enable_extensions,
-    setup_navmesh,
-    setup_people_simulation,
-    write_command_file,
-)
+from isaac_backend.animation import setup_all_behaviors
 
 
 def _progress(msg):
@@ -59,11 +51,6 @@ def _progress(msg):
     sys.stdout.flush()
 
 def _apply_scene_semantics(stage, spawned_asset_ids, workers):
-    """Walk the stage and apply USD-level semantics to all prims that need them.
-
-    This ensures BasicWriter can resolve semantic data and generate the JSON
-    mapping files (semantic_id_to_labels.json, instance_segmentation_colors.json).
-    """
     from pxr import Sdf
 
     def set_semantic(prim, class_name):
@@ -112,7 +99,6 @@ def _apply_scene_semantics(stage, spawned_asset_ids, workers):
     _progress(f"Applied USD-level semantics to {applied} prims.")
 
 def compute_scene_centroid(stage):
-    """Walk /World/Characters, /World/Layout, and /Replicator prims to find the average XY position."""
     xs, ys, zs = [], [], []
     for prim in stage.Traverse():
         path = str(prim.GetPath())
@@ -139,9 +125,6 @@ def main():
     parser = argparse.ArgumentParser(description="Run Isaac Sim Headless Generation")
     parser.add_argument("--config", type=str, default="configs/current_scene.json", help="Path to the SceneConfig JSON")
     parser.add_argument("--library", type=str, default="assets/library.json", help="Path to the asset library JSON")
-    parser.add_argument("--commands", type=str, default="/tmp/people_commands.txt", help="Output path for generated people_commands.txt")
-    parser.add_argument("--anim-mode", type=str, default="people", choices=["people", "direct"],
-                        help="Animation mode: 'people' uses omni.anim.people, 'direct' uses CharacterAnimator API")
     args = parser.parse_args()
 
     _progress("Loading configs...")
@@ -166,9 +149,6 @@ def main():
     for _ in range(10):
         simulation_app.update()
 
-    _progress("Setting up navmesh...")
-    navmesh_ok = setup_navmesh(bounds_min=(-10, -10), bounds_max=(10, 10))
-
     _progress("Setting up camera and lighting...")
     camera, render_product = setup_camera_and_lighting(scene_config)
     for _ in range(5):
@@ -180,16 +160,8 @@ def main():
         spawn_hazard_zones(hazard_zones, stage)
 
     workers = [e for e in scene_config.get("entities", []) if e.get("type") == "worker"]
-    others  = [e for e in scene_config.get("entities", []) if e.get("type") != "worker"]
+    others = [e for e in scene_config.get("entities", []) if e.get("type") != "worker"]
     worker_behaviors = scene_config.get("worker_behaviors", [])
-
-    anim_ok = True
-    if workers and worker_behaviors:
-        _progress("Enabling people extension BEFORE spawning workers...")
-        anim_ok = enable_extensions(simulation_app=simulation_app)
-        if args.anim_mode == "people" and not anim_ok:
-            _progress("[WARN] omni.anim.people failed to initialize — falling back to direct-mode animation")
-            args.anim_mode = "direct"
 
     _progress(f"Spawning {len(others)} non-worker entities...")
     spawned_asset_ids = []
@@ -216,13 +188,22 @@ def main():
     spawned_worker_names = set()
     if workers:
         _progress(f"Spawning {len(workers)} workers...")
-        spawned_worker_names = spawn_workers(workers, worker_behaviors, asset_library, stage, simulation_app=simulation_app)
+        spawned_worker_names = spawn_workers(workers, worker_behaviors, asset_library, stage)
 
-    if worker_behaviors:
-        _progress("Writing people command file...")
-        write_command_file(worker_behaviors, args.commands, worker_names=spawned_worker_names or None)
-    else:
-        _progress("No worker_behaviors in config.")
+    if workers and worker_behaviors:
+        _progress("Attaching IRA behavior scripts to workers...")
+        attached, failed = setup_all_behaviors(
+            spawned_worker_names, worker_behaviors, stage,
+            simulation_app=simulation_app,
+        )
+        _progress(f"IRA behaviors: {attached} attached, {failed} failed")
+    elif workers:
+        _progress("Attaching idle-pose behaviors to workers (no commands)...")
+        attached, failed = setup_all_behaviors(
+            spawned_worker_names, [], stage,
+            simulation_app=simulation_app,
+        )
+        _progress(f"IRA idle behaviors: {attached} attached, {failed} failed")
 
     _progress("Hiding driver prims...")
     hide_driver_prims(stage)
@@ -234,95 +215,10 @@ def main():
     centroid = compute_scene_centroid(stage)
     look_at_target = (centroid[0], centroid[1], 1.0)
 
-    if workers and worker_behaviors:
-        if args.anim_mode == "people":
-            _progress("Setting up people simulation (command file mode)...")
-            setup_people_simulation(args.commands, navmesh_enabled=navmesh_ok)
-
-            _progress("[DIAG] Verifying carb settings for people simulation...")
-            settings = carb.settings.get_settings()
-            diag_keys = [
-                "/persistent/exts/omni.anim.people/character_prim_path",
-                "/exts/omni.anim.people/command_settings/command_file_path",
-                "/exts/omni.anim.people/command_settings/number_of_loop",
-                "/exts/omni.anim.people/navigation_settings/navmesh_enabled",
-                "/exts/omni.anim.people/navigation_settings/dynamic_avoidance_enabled",
-                "/persistent/omni/anim/people/navmeshBasedNavigation",
-            ]
-            for key in diag_keys:
-                val = settings.get(key)
-                print(f"[DIAG]   {key} = {val}")
-
-            if os.path.exists(args.commands):
-                with open(args.commands, "r") as f:
-                    cmd_content = f.read()
-                print(f"[DIAG] Command file ({args.commands}):\n{cmd_content}")
-            else:
-                print(f"[DIAG] Command file NOT FOUND at {args.commands}")
-
-            for _ in range(15):
-                simulation_app.update()
-            _progress("Starting timeline for behavior scripts...")
-            omni.timeline.get_timeline_interface().play()
-            for _ in range(60):
-                simulation_app.update()
-
-            _progress("[DIAG] Inspecting /World/Characters after timeline play...")
-            for prim in stage.Traverse():
-                path = str(prim.GetPath())
-                if path.startswith("/World/Characters/"):
-                    type_name = prim.GetTypeName() or ""
-                    has_scripts = prim.HasAttribute("omni:scripting:scripts")
-                    scripts_val = ""
-                    if has_scripts:
-                        scripts_val = f" scripts={prim.GetAttribute('omni:scripting:scripts').Get()}"
-                    print(f"[DIAG]   {path} [{type_name}]{scripts_val}")
-
-            behavior_count = 0
-            for prim in stage.Traverse():
-                path = str(prim.GetPath())
-                if path.startswith("/World/Characters/") and prim.HasAttribute("omni:scripting:scripts"):
-                    behavior_count += 1
-            if behavior_count == 0:
-                _progress("[CRITICAL] No behavior scripts found on any character — workers will not animate!")
-            elif behavior_count < len(workers):
-                _progress(f"[WARN] Behavior scripts attached to {behavior_count}/{len(workers)} character(s). Some workers may not animate.")
-            else:
-                _progress(f"Behavior scripts attached to {behavior_count} character(s).")
-
-        elif args.anim_mode == "direct":
-            _progress("Setting up direct-mode animations...")
-            omni.timeline.get_timeline_interface().play()
-            for _ in range(15):
-                simulation_app.update()
-            from isaac_backend.animator import play_idle, wait_for_animations
-            character_paths = [f"/World/Characters/{name}" for name in sorted(spawned_worker_names)]
-            _progress(f"[DIAG] Direct-mode character_paths: {character_paths}")
-            _progress(f"Waiting for SkelAnimation on {len(character_paths)} character(s)...")
-            anim_map = wait_for_animations(character_paths, stage, simulation_app)
-            _progress(f"[DIAG] SkelAnimation resolution results: {anim_map}")
-            for char_path, _ in anim_map.items():
-                result = play_idle(char_path, stage)
-                _progress(f"[DIAG] play_idle({char_path}) returned: {result}")
-            for char_path in character_paths:
-                if char_path not in anim_map:
-                    print(f"[WARN] Skipping play_idle for {char_path} — SkelAnimation never resolved")
-            for _ in range(15):
-                simulation_app.update()
-
-            _progress("[DIAG] Inspecting /World/Characters after direct-mode setup...")
-            import omni.anim.graph.core as ag
-            for char_path in character_paths:
-                animator = ag.get_character_animator(char_path)
-                print(f"[DIAG]   get_character_animator({char_path}) = {animator}")
-                if animator:
-                    print(f"[DIAG]     type={type(animator)}")
-            _progress("Direct-mode animations active.")
-    elif workers:
-        _progress("No worker_behaviors — starting timeline for idle animations...")
-        omni.timeline.get_timeline_interface().play()
-        for _ in range(15):
-            simulation_app.update()
+    _progress("Starting timeline for behavior scripts...")
+    omni.timeline.get_timeline_interface().play()
+    for _ in range(30):
+        simulation_app.update()
 
     _progress("Initializing BasicWriter...")
     writer = rep.WriterRegistry.get("BasicWriter")
@@ -380,14 +276,14 @@ def main():
                                                mode="orbit")
         from isaac_backend.camera import orbit_distribution
         camera_pos_dist = orbit_distribution(scene_positions)
-        _progress(f"camera_mode=orbit  camera_angles={angle_hints}  →  {len(scene_positions)} positions, radius range: {min(p[0]**2+p[1]**2+p[2]**2 for p in scene_positions)**0.5:.1f}-{max(p[0]**2+p[1]**2+p[2]**2 for p in scene_positions)**0.5:.1f}m")
+        _progress(f"camera_mode=orbit  camera_angles={angle_hints}  ->  {len(scene_positions)} positions")
 
         _progress("Setting up frame trigger (orbit distribution)...")
         with rep.trigger.on_frame(num_frames=NUM_FRAMES):
             with camera:
                 rep.modify.pose(position=camera_pos_dist, look_at=look_at_target)
 
-    _progress("Running simulation loop: 1000 frames...")
+    _progress("Running simulation loop...")
     for step in range(NUM_FRAMES):
         if step % 100 == 0:
             _progress(f"Frame {step}/{NUM_FRAMES}")
@@ -413,23 +309,6 @@ def main():
     )
     _progress(f"Files written to /tmp/dataset: {len(result.stdout.strip().splitlines()) if result.stdout.strip() else 0}")
 
-    _progress("=== DATASET DEBUG ===")
-    for ftype in ["rgb_", "bounding_box_2d_tight_", "semantic_segmentation_", "instance_segmentation_"]:
-        count = len(glob.glob(f"/tmp/dataset/{ftype}*"))
-        _progress(f"  {ftype}* files: {count}")
-    sid_path = "/tmp/dataset/semantic_id_to_labels.json"
-    if os.path.exists(sid_path):
-        _progress(f"  semantic_id_to_labels.json: {json.load(open(sid_path))}")
-    else:
-        _progress("  semantic_id_to_labels.json: MISSING")
-    isc_path = "/tmp/dataset/instance_segmentation_colors.json"
-    if os.path.exists(isc_path):
-        _progress(f"  instance_segmentation_colors.json: present")
-        _progress(f"    content: {json.load(open(isc_path))}")
-    else:
-        _progress("  instance_segmentation_colors.json: MISSING")
-    _progress("=== END DATASET DEBUG ===")
-
     try:
         rep.orchestrator.stop()
     except Exception as e:
@@ -449,6 +328,7 @@ def main():
     _progress("Generation complete. Data saved to /tmp/dataset.")
     sys.stdout.flush()
     os._exit(0)
+
 
 if __name__ == "__main__":
     main()
