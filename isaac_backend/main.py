@@ -66,20 +66,20 @@ from isaac_backend.workers import spawn_workers
 from isaac_backend.animation import enable_behavior_extensions, setup_all_behaviors_async, _wait_for_async
 
 COCO_CATEGORIES = {
-    "person": {"name": "person", "id": 1, "supercategory": "worker", "color": [255, 0, 0, 255], "isthing": 1},
-    "vehicle": {"name": "vehicle", "id": 2, "supercategory": "equipment", "color": [0, 255, 0, 255], "isthing": 1},
-    "rack": {"name": "rack", "id": 3, "supercategory": "warehouse", "color": [0, 0, 255, 255], "isthing": 1},
-    "pallet": {"name": "pallet", "id": 4, "supercategory": "warehouse", "color": [255, 255, 0, 255], "isthing": 1},
-    "box": {"name": "box", "id": 5, "supercategory": "warehouse", "color": [255, 0, 255, 255], "isthing": 1},
-    "barrel": {"name": "barrel", "id": 6, "supercategory": "warehouse", "color": [0, 255, 255, 255], "isthing": 1},
-    "cone": {"name": "cone", "id": 7, "supercategory": "safety", "color": [255, 128, 0, 255], "isthing": 1},
-    "fire_extinguisher": {"name": "fire_extinguisher", "id": 8, "supercategory": "safety", "color": [255, 0, 128, 255], "isthing": 1},
-    "cart": {"name": "cart", "id": 9, "supercategory": "warehouse", "color": [128, 255, 0, 255], "isthing": 1},
-    "sign": {"name": "sign", "id": 10, "supercategory": "safety", "color": [128, 0, 255, 255], "isthing": 1},
-    "pillar": {"name": "pillar", "id": 11, "supercategory": "structure", "color": [0, 128, 255, 255], "isthing": 1},
-    "hazard_zone_warning": {"name": "hazard_zone_warning", "id": 12, "supercategory": "zone", "color": [255, 255, 0, 128], "isthing": 0},
-    "hazard_zone_restricted": {"name": "hazard_zone_restricted", "id": 13, "supercategory": "zone", "color": [255, 128, 0, 128], "isthing": 0},
-    "hazard_zone_critical": {"name": "hazard_zone_critical", "id": 14, "supercategory": "zone", "color": [255, 0, 0, 128], "isthing": 0},
+    "person": {"name": "person", "id": 1, "supercategory": "worker", "color": [255, 0, 0], "isthing": 1},
+    "vehicle": {"name": "vehicle", "id": 2, "supercategory": "equipment", "color": [0, 255, 0], "isthing": 1},
+    "rack": {"name": "rack", "id": 3, "supercategory": "warehouse", "color": [0, 0, 255], "isthing": 1},
+    "pallet": {"name": "pallet", "id": 4, "supercategory": "warehouse", "color": [255, 255, 0], "isthing": 1},
+    "box": {"name": "box", "id": 5, "supercategory": "warehouse", "color": [255, 0, 255], "isthing": 1},
+    "barrel": {"name": "barrel", "id": 6, "supercategory": "warehouse", "color": [0, 255, 255], "isthing": 1},
+    "cone": {"name": "cone", "id": 7, "supercategory": "safety", "color": [255, 128, 0], "isthing": 1},
+    "fire_extinguisher": {"name": "fire_extinguisher", "id": 8, "supercategory": "safety", "color": [255, 0, 128], "isthing": 1},
+    "cart": {"name": "cart", "id": 9, "supercategory": "warehouse", "color": [128, 255, 0], "isthing": 1},
+    "sign": {"name": "sign", "id": 10, "supercategory": "safety", "color": [128, 0, 255], "isthing": 1},
+    "pillar": {"name": "pillar", "id": 11, "supercategory": "structure", "color": [0, 128, 255], "isthing": 1},
+    "hazard_zone_warning": {"name": "hazard_zone_warning", "id": 12, "supercategory": "zone", "color": [255, 255, 0], "isthing": 0},
+    "hazard_zone_restricted": {"name": "hazard_zone_restricted", "id": 13, "supercategory": "zone", "color": [255, 128, 0], "isthing": 0},
+    "hazard_zone_critical": {"name": "hazard_zone_critical", "id": 14, "supercategory": "zone", "color": [255, 0, 0], "isthing": 0},
 }
 
 
