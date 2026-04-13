@@ -160,8 +160,9 @@ def _configure_sdg_settings():
     """Apply recommended settings for synthetic data generation."""
     settings = carb.settings.get_settings()
     settings.set("/rtx/post/dlss/execMode", 2)
+    settings.set("/exts/isaacsim.core.throttling/enable_async", False)
     rep.orchestrator.set_capture_on_play(False)
-    _progress("SDG settings configured: DLSS=Quality, capture_on_play=False")
+    _progress("SDG settings configured: DLSS=Quality, capture_on_play=False, throttling_async=False")
 
 
 def _setup_coco_writer():

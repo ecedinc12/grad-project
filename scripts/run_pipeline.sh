@@ -38,8 +38,7 @@ rm -rf /tmp/dataset
 echo "[3/8] Generating dataset via Isaac Sim..."
 /isaac-sim/python.sh "$PROJECT_ROOT/isaac_backend/main.py" \
     --config "$PROJECT_ROOT/configs/current_scene.json" \
-    --library "$PROJECT_ROOT/assets/library.json" \
-    --/exts/isaacsim.core.throttling/enable_async=false
+    --library "$PROJECT_ROOT/assets/library.json"
 
 # Step 4: Convert COCO annotations to YOLO format
 echo "[4/8] Converting COCO to YOLO..."
