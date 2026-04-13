@@ -77,6 +77,12 @@ async def _attach_patrol_async(prim, waypoints, speed=1.0, idle_duration=3.0, lo
     """Attach WorkerPatrolBehavior via IRA add_behavior_script_with_parameters_async."""
     script_path = inspect.getfile(WorkerPatrolBehavior)
     waypoints_csv = ";".join(f"{x},{y},{z},{r}" for x, y, z, r in waypoints)
+
+    _set_exposed_attr(prim, "workerPatrol", "waypoints:csv", waypoints_csv, Sdf.ValueTypeNames.String)
+    _set_exposed_attr(prim, "workerPatrol", "speed", speed, Sdf.ValueTypeNames.Float)
+    _set_exposed_attr(prim, "workerPatrol", "idleDuration", idle_duration, Sdf.ValueTypeNames.Float)
+    _set_exposed_attr(prim, "workerPatrol", "lookAroundDuration", look_around_duration, Sdf.ValueTypeNames.Float)
+
     parameters = {
         f"{EXPOSED_ATTR_NS}:workerPatrol:waypoints:csv": waypoints_csv,
         f"{EXPOSED_ATTR_NS}:workerPatrol:speed": speed,
@@ -90,6 +96,10 @@ async def _attach_patrol_async(prim, waypoints, speed=1.0, idle_duration=3.0, lo
 async def _attach_idle_pose_async(prim, interval=10, rotation_range=(-15.0, 15.0)):
     """Attach WorkerIdlePoseBehavior via IRA add_behavior_script_with_parameters_async."""
     script_path = inspect.getfile(WorkerIdlePoseBehavior)
+
+    _set_exposed_attr(prim, "workerIdlePose", "interval", interval, Sdf.ValueTypeNames.UInt)
+    _set_exposed_attr(prim, "workerIdlePose", "rotationRange:csv", f"{rotation_range[0]},{rotation_range[1]}", Sdf.ValueTypeNames.String)
+
     parameters = {
         f"{EXPOSED_ATTR_NS}:workerIdlePose:interval": interval,
         f"{EXPOSED_ATTR_NS}:workerIdlePose:rotationRange:csv": f"{rotation_range[0]},{rotation_range[1]}",
