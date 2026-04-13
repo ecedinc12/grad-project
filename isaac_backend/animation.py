@@ -161,6 +161,22 @@ async def _attach_idle_pose_fallback_async(prim, interval=10, rotation_range=(-1
     print(f"[INFO] WorkerIdlePose attached (fallback) to {prim_path} (interval={interval}, range={rotation_range})")
 
 
+async def _run_with_app_pumps(coro, simulation_app):
+    """Run a coroutine while pumping the Omniverse event loop to prevent deadlock.
+
+    IRA's add_behavior_script_with_parameters_async sends commands to
+    omni.kit.scripting which processes them on the Omniverse main event loop.
+    If we block that loop with run_until_complete(), the coroutine can never
+    complete. This wrapper alternates between pumping the app and yielding to
+    asyncio, allowing both event loops to make progress.
+    """
+    task = asyncio.ensure_future(coro)
+    while not task.done():
+        simulation_app.update()
+        await asyncio.sleep(0)
+    return task.result()
+
+
 async def setup_all_behaviors_async(spawned_worker_names, worker_behaviors, stage):
     """Orchestrate behavior attachment for all spawned workers.
 
