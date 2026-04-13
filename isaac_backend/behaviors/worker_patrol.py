@@ -5,13 +5,18 @@ Waypoint lerping with walk/idle/look_around state machine and skeletal
 animation blending. Attached to worker prims via isaacsim.replicator.behavior.
 
 Exposed attributes (set by animation.py):
-  rep:behaviors:workerPatrol:waypoints:csv  — "x,y,z,rot;x,y,z,rot;..."
-  rep:behaviors:workerPatrol:speed          — movement speed (m/s)
-  rep:behaviors:workerPatrol:idleDuration   — seconds to idle at waypoint
-  rep:behaviors:workerPatrol:lookAroundDuration — seconds to look around
+  exposedVar:workerPatrol:waypoints:csv  — "x,y,z,rot;x,y,z,rot;..."
+  exposedVar:workerPatrol:speed          — movement speed (m/s)
+  exposedVar:workerPatrol:idleDuration   — seconds to idle at waypoint
+  exposedVar:workerPatrol:lookAroundDuration — seconds to look around
 """
 
 import math
+
+try:
+    from pxr import Sdf
+except ImportError:
+    Sdf = None
 
 try:
     from omni.behavior.scripting.core import BehaviorScript
@@ -29,7 +34,7 @@ except ImportError:
             if not self.prim or not self.prim.IsValid():
                 return None
             from pxr import Sdf
-            full_name = f"rep:behaviors:{self.BEHAVIOR_NS}:{name}"
+            full_name = f"exposedVar:{self.BEHAVIOR_NS}:{name}"
             attr = self.prim.GetAttribute(full_name)
             if attr and attr.IsValid():
                 return attr.Get()
@@ -49,6 +54,13 @@ class WorkerPatrolBehavior(BehaviorScript):
     """Patrol between waypoints with walk/idle/look_around state machine."""
 
     BEHAVIOR_NS = "workerPatrol"
+
+    VARIABLES_TO_EXPOSE = [
+        {"attr_name": "waypoints:csv", "attr_type": Sdf.ValueTypeNames.String, "default_value": ""},
+        {"attr_name": "speed", "attr_type": Sdf.ValueTypeNames.Float, "default_value": 1.0},
+        {"attr_name": "idleDuration", "attr_type": Sdf.ValueTypeNames.Float, "default_value": 3.0},
+        {"attr_name": "lookAroundDuration", "attr_type": Sdf.ValueTypeNames.Float, "default_value": 2.0},
+    ]
 
     def on_init(self):
         self.waypoints = []

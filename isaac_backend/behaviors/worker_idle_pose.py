@@ -5,11 +5,16 @@ Periodic Y-rotation randomization with idle animation. Attached to workers
 that have no patrol commands.
 
 Exposed attributes (set by animation.py):
-  rep:behaviors:workerIdlePose:interval          — frames between rotation changes
-  rep:behaviors:workerIdlePose:rotationRange:csv — "min_deg,max_deg"
+  exposedVar:workerIdlePose:interval          — frames between rotation changes
+  exposedVar:workerIdlePose:rotationRange:csv — "min_deg,max_deg"
 """
 
 import random
+
+try:
+    from pxr import Sdf
+except ImportError:
+    Sdf = None
 
 try:
     from omni.behavior.scripting.core import BehaviorScript
@@ -27,7 +32,7 @@ except ImportError:
             if not self.prim or not self.prim.IsValid():
                 return None
             from pxr import Sdf
-            full_name = f"rep:behaviors:{self.BEHAVIOR_NS}:{name}"
+            full_name = f"exposedVar:{self.BEHAVIOR_NS}:{name}"
             attr = self.prim.GetAttribute(full_name)
             if attr and attr.IsValid():
                 return attr.Get()
@@ -47,6 +52,11 @@ class WorkerIdlePoseBehavior(BehaviorScript):
     """Periodically randomize Y rotation while playing idle animation."""
 
     BEHAVIOR_NS = "workerIdlePose"
+
+    VARIABLES_TO_EXPOSE = [
+        {"attr_name": "interval", "attr_type": Sdf.ValueTypeNames.UInt, "default_value": 10},
+        {"attr_name": "rotationRange:csv", "attr_type": Sdf.ValueTypeNames.String, "default_value": "-15.0,15.0"},
+    ]
 
     def on_init(self):
         self.interval = 10

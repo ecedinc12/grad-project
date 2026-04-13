@@ -27,7 +27,7 @@ except ImportError:
 try:
     from isaacsim.replicator.behavior.global_variables import EXPOSED_ATTR_NS
 except ImportError:
-    EXPOSED_ATTR_NS = "rep:behaviors"
+    EXPOSED_ATTR_NS = "exposedVar"
 
 try:
     from pxr import Sdf
