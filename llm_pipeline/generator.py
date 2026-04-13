@@ -5,7 +5,29 @@ import argparse
 import instructor
 from openai import OpenAI
 from pydantic import ValidationError
-from schemas import SceneConfig, Entity, PPEState, WorkerBehavior, BehaviorCommand
+from schemas import SceneConfig, Entity, PPEState, WorkerBehavior, BehaviorCommand, ClutterZone, LayoutParams
+
+LAYOUTS_PATH = os.path.join(os.path.dirname(__file__), "..", "assets", "layouts.json")
+_LAYOUTS_DESCRIPTION = ""
+try:
+    with open(LAYOUTS_PATH) as f:
+        _layouts_data = json.load(f)
+    _lines = []
+    for _name, _cfg in _layouts_data.items():
+        _kw = ", ".join(_cfg.get("keywords", []))
+        _lines.append(f"- {_name}: {_cfg['description']} (keywords: {_kw})")
+    _LAYOUTS_DESCRIPTION = "\n".join(_lines)
+except Exception:
+    _LAYOUTS_DESCRIPTION = (
+        "- standard_warehouse: Default 5-row warehouse with moderate aisles and scattered clutter.\n"
+        "- narrow_aisle: Cramped high-density storage with tight passages.\n"
+        "- open_floor: Sparse layout with perimeter racks and wide open areas.\n"
+        "- cross_dock: L-shaped rack arrangement with wide truck corridor.\n"
+        "- cold_storage: Dense grid layout with heavy barrel clustering.\n"
+        "- loading_dock: Minimal racks, heavy pallet staging, truck bay area.\n"
+        "- maintenance_bay: No racks, open service area with cone-marked safety zones.\n"
+        "- storage_yard: 4 rack clusters with wide lanes, outdoor-style yard."
+    )
 
 def generate_scene_config(prompt: str, output_path: str):
     # Retrieve the API key from environment variable
@@ -29,6 +51,31 @@ def generate_scene_config(prompt: str, output_path: str):
     system_prompt = """
     You are an expert industrial safety simulation configurator.
     Your job is to extract entities, PPE states, hazard zones, scene configuration, and worker behavior sequences from user prompts.
+
+    AVAILABLE LAYOUT PRESETS:
+""" + _LAYOUTS_DESCRIPTION + """
+
+    LAYOUT SELECTION RULES:
+    - If the user mentions a specific layout by name or description, choose the matching preset.
+    - If the user specifies custom dimensions (e.g. "10 rack rows", "3m aisles"), set layout="custom"
+      and populate layout_params with the exact values.
+    - You can also use a preset as a base and override specific params via layout_params.
+    - If no layout is implied, default to "standard_warehouse".
+    - Match keywords: "cramped/tight/dense" → narrow_aisle, "open/spacious" → open_floor,
+      "loading/truck/shipping" → loading_dock, "maintenance/repair" → maintenance_bay,
+      "yard/outdoor/container" → storage_yard, "cold/freezer" → cold_storage,
+      "cross-dock/transfer" → cross_dock.
+
+    LAYOUT PARAMS RULES (only set layout_params if overriding preset defaults or using layout="custom"):
+    - rack_rows: number of rack rows (1-12). Default 5.
+    - rack_cols: number of rack columns (1-3). Default 1.
+    - aisle_width: distance between rack rows in meters (1.0-5.0). Default 2.0.
+    - bounds_min/bounds_max: overall layout footprint in meters. Must fit within ±7m X, ±7m Y.
+    - clutter_density: "low" (0-5 props), "medium" (6-12 props), "high" (13-20 props).
+    - clutter_zones: optional list of area-specific clutter overrides.
+      Each zone needs: area name, bounds_min, bounds_max, density, and types list.
+      Types must be from: "box", "barrel", "cone", "pallet".
+    - pallet_rows/pallet_cols: pallet staging grid size. Default 2x1.
 
     RULES:
     - ONLY include entities the user explicitly mentions. Do NOT add background props, vehicles, or workers that were not requested.

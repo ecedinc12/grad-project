@@ -1,0 +1,27 @@
+{
+    "entities": [
+        {"type": "worker", "asset_id": "worker_with_ppe", "ppe_state": {"hardhat": true, "vest": true}},
+        {"type": "worker", "asset_id": "worker_no_ppe", "ppe_state": {"hardhat": false, "vest": false}},
+        {"type": "vehicle", "asset_id": "forklift"}
+    ],
+    "hazard_zones": [
+        {"name": "dock_bay", "bounds_min": [-6.0, -6.0], "bounds_max": [6.0, -2.0], "danger_level": "restricted"}
+    ],
+    "camera_angles": ["low_angle", "eye_level"],
+    "camera_mode": "indoor",
+    "lighting_conditions": "daylight",
+    "worker_behaviors": [
+        {"worker_id": "worker_01", "commands": [
+            {"command": "GoTo", "x": 0.0, "y": -4.0, "z": 0.0, "rotation": 0.0},
+            {"command": "Idle", "duration": 3.0},
+            {"command": "GoTo", "x": 0.0, "y": 0.0, "z": 0.0, "rotation": 180.0}
+        ]},
+        {"worker_id": "worker_02", "commands": [
+            {"command": "GoTo", "x": 3.0, "y": -3.0, "z": 0.0, "rotation": 90.0},
+            {"command": "LookAround", "duration": 2.0},
+            {"command": "GoTo", "x": -3.0, "y": -3.0, "z": 0.0, "rotation": 270.0}
+        ]}
+    ],
+    "layout": "loading_dock",
+    "layout_params": null
+}
