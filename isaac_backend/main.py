@@ -389,7 +389,6 @@ def main():
         if step % 100 == 0:
             _progress(f"Frame {step}/{num_frames}")
         world.step(render=True)
-        stage_ctx.get_stage().Update()
         rep.orchestrator.step()
 
     _progress("Waiting for orchestrator to finish...")
