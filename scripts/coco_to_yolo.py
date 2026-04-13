@@ -16,114 +16,74 @@ CLASS_MAP = {
 REVERSE_CLASS_MAP = {v: k for k, v in CLASS_MAP.items()}
 
 
-def _load_id_to_label(dataset_dir):
-    label_file = os.path.join(dataset_dir, "semantic_id_to_labels.json")
-    id_to_label = {}
-    if os.path.exists(label_file):
-        raw = json.load(open(label_file))
-        for k, v in raw.items():
-            label = v["class"] if isinstance(v, dict) else v
-            id_to_label[int(k)] = label
-    else:
-        print(f"Warning: {label_file} not found; trying instance_segmentation_colors.json fallback.")
-        colors_file = os.path.join(dataset_dir, "instance_segmentation_colors.json")
-        if os.path.exists(colors_file):
-            colors_raw = json.load(open(colors_file))
-            for entry in colors_raw:
-                class_name = entry.get("class", "")
-                color = tuple(entry.get("color", []))
-                class_id = CLASS_MAP.get(class_name.lower(), -1)
-                if class_id >= 0:
-                    id_to_label[class_id] = class_name
-            print(f"  Loaded {len(id_to_label)} class mappings from colors JSON.")
-        else:
-            print("Warning: No semantic mapping files found. Will attempt direct class name lookup from bbox data.")
-    return id_to_label
+def _coco_categories_to_id_map(categories):
+    return {cat["id"]: cat["name"] for cat in categories}
 
 
-def _colors_json_to_label_map(colors_path):
-    if not os.path.exists(colors_path):
-        return {}
-    raw = json.load(open(colors_path))
-    color_to_class_id = {}
-    for entry in raw:
-        color = tuple(entry.get("color", []))
-        class_name = entry.get("class", "")
-        class_id = CLASS_MAP.get(class_name.lower(), -1)
-        if class_id >= 0:
-            color_to_class_id[color] = class_id
-    return color_to_class_id
+def convert_coco_to_yolo(dataset_dir="/tmp/dataset"):
+    annotations_path = os.path.join(dataset_dir, "annotations.json")
 
-
-def convert_npy_to_yolo(dataset_dir="/tmp/dataset"):
-    npy_files = sorted(glob.glob(os.path.join(dataset_dir, "bounding_box_2d_tight_*.npy")))
-
-    if not npy_files:
-        print(f"Warning: No .npy files found in {dataset_dir}. Ensure BasicWriter has written output.")
+    if not os.path.exists(annotations_path):
+        print(f"Warning: No annotations.json found in {dataset_dir}. Ensure CocoWriter has written output.")
         return
 
-    id_to_label = _load_id_to_label(dataset_dir)
-    has_json_mapping = bool(id_to_label)
+    with open(annotations_path, "r") as f:
+        coco_data = json.load(f)
+
+    cat_id_to_name = _coco_categories_to_id_map(coco_data.get("categories", []))
+    images = {img["id"]: img for img in coco_data.get("images", [])}
+    annotations = coco_data.get("annotations", [])
+
+    image_annotations = {}
+    for ann in annotations:
+        img_id = ann["image_id"]
+        if img_id not in image_annotations:
+            image_annotations[img_id] = []
+        image_annotations[img_id].append(ann)
 
     converted = 0
     total_bboxes = 0
     skipped_bboxes = 0
-    for npy_path in npy_files:
-        basename = os.path.splitext(os.path.basename(npy_path))[0]
-        frame_str = basename.split("_")[-1]
 
-        rgb_path = os.path.join(dataset_dir, f"rgb_{frame_str}.png")
+    for img_id, img_info in images.items():
+        file_name = img_info["file_name"]
+        img_width = img_info["width"]
+        img_height = img_info["height"]
+
+        frame_str = os.path.splitext(file_name)[0]
+
+        rgb_path = os.path.join(dataset_dir, file_name)
         if not os.path.exists(rgb_path):
             print(f"Warning: RGB image not found for frame {frame_str}, skipping.")
             continue
 
-        with Image.open(rgb_path) as img:
-            img_width, img_height = img.size
+        txt_path = os.path.join(dataset_dir, f"{frame_str}.txt")
+        anns = image_annotations.get(img_id, [])
 
-        bboxes = np.load(npy_path, allow_pickle=True)
-
-        txt_path = os.path.join(dataset_dir, f"rgb_{frame_str}.txt")
         with open(txt_path, "w") as txt_f:
-            for row in bboxes:
+            for ann in anns:
                 total_bboxes += 1
-                x_min = float(row["x_min"])
-                y_min = float(row["y_min"])
-                x_max = float(row["x_max"])
-                y_max = float(row["y_max"])
+                cat_id = ann["category_id"]
+                class_name = cat_id_to_name.get(cat_id, "")
+                class_id = CLASS_MAP.get(class_name.lower(), -1)
 
-                label = ""
-                if has_json_mapping:
-                    semantic_id = int(row["semanticId"])
-                    label = id_to_label.get(semantic_id, "")
-                if not label and "class" in row.dtype.names:
-                    raw = row["class"]
-                    label = raw.decode() if isinstance(raw, bytes) else str(raw)
-                if not label and "semanticId" in row.dtype.names:
-                    semantic_id = int(row["semanticId"])
-                    label = id_to_label.get(semantic_id, "")
-                class_id = CLASS_MAP.get(label.lower(), -1)
                 if class_id == -1:
                     skipped_bboxes += 1
                     continue
 
-                x_center = (x_min + x_max) / 2.0 / img_width
-                y_center = (y_min + y_max) / 2.0 / img_height
-                width = (x_max - x_min) / img_width
-                height = (y_max - y_min) / img_height
+                x_min, y_min, bbox_w, bbox_h = ann["bbox"]
 
-                txt_f.write(f"{class_id} {x_center:.6f} {y_center:.6f} {width:.6f} {height:.6f}\n")
+                x_center = (x_min + bbox_w / 2.0) / img_width
+                y_center = (y_min + bbox_h / 2.0) / img_height
+                norm_w = bbox_w / img_width
+                norm_h = bbox_h / img_height
+
+                txt_f.write(f"{class_id} {x_center:.6f} {y_center:.6f} {norm_w:.6f} {norm_h:.6f}\n")
 
         converted += 1
 
     print(f"Successfully converted {converted} frames to YOLO format in {dataset_dir}")
     print(f"  Total bounding boxes: {total_bboxes}, Skipped (unresolved class): {skipped_bboxes}")
-    if skipped_bboxes > 0 and not has_json_mapping:
-        print("  Hint: Ensure semantic_id_to_labels.json is generated by BasicWriter.")
-        print("  Check that all prims have USD-level semantic:Semantics:params:semanticData attributes.")
-    print(f"  Total bounding boxes: {total_bboxes}, Skipped (unresolved class): {skipped_bboxes}")
-    if skipped_bboxes > 0 and not has_json_mapping:
-        print("  Hint: Ensure semantic_id_to_labels.json is generated by BasicWriter.")
-        print("  Check that all prims have USD-level semantic:Semantics:params:semanticData attributes.")
 
 
 def convert_instance_masks(dataset_dir="/tmp/dataset"):
@@ -201,6 +161,6 @@ if __name__ == "__main__":
     parser.add_argument("--dir", type=str, default="/tmp/dataset", help="Directory containing CocoWriter output.")
     parser.add_argument("--masks", action="store_true", help="Also convert instance segmentation to YOLO mask format.")
     args = parser.parse_args()
-    convert_npy_to_yolo(args.dir)
+    convert_coco_to_yolo(args.dir)
     if args.masks:
         convert_instance_masks(args.dir)
