@@ -308,34 +308,3 @@ class WorkerPatrolBehavior(BehaviorScript):
         except Exception:
             pass
         self.anim_id = None
-            anim = ag.load_animation(walk_anim_path, looping=True, blend_in=0.3)
-            self.walk_anim_id = animator.play_animation(anim)
-            print(f"[DEBUG][PatrolWalkAnim] Walk animation played, anim_id={self.walk_anim_id}")
-        except Exception as e:
-            print(f"[DEBUG][PatrolWalkAnim] Exception for {self.prim_path}: {e}")
-            import traceback
-            traceback.print_exc()
-
-    def _stop_walk_anim(self):
-        if not _HAS_ANIM_GRAPH or self.walk_anim_id is None:
-            return
-        skel_path = self._get_skel_root_path()
-        try:
-            animator = ag.get_character_animator(skel_path)
-            if animator:
-                animator.stop_animation(self.walk_anim_id)
-        except Exception:
-            pass
-        self.walk_anim_id = None
-
-    def _stop_idle_anim(self):
-        if not _HAS_ANIM_GRAPH or self.anim_id is None:
-            return
-        skel_path = self._get_skel_root_path()
-        try:
-            animator = ag.get_character_animator(skel_path)
-            if animator:
-                animator.stop_animation(self.anim_id)
-        except Exception:
-            pass
-        self.anim_id = None
