@@ -17,8 +17,6 @@ import omni.usd
 
 COMMAND_FILE_PATH = "/tmp/worker_commands.txt"
 
-COMMAND_FILE_PATH = "/tmp/worker_commands.txt"
-
 AgentManager = None
 BehaviorScriptPaths = None
 PrimPaths = None
@@ -159,6 +157,73 @@ def _attach_builtin_fallback(skelroot_prim):
     except Exception as e:
         print(f"[ERROR] Fallback attachment failed for {prim_path}: {e}")
         return False
+
+
+def setup_all_behaviors_async(spawned_worker_names, worker_behaviors, stage):
+    """Phase 1: Attach IRA's built-in behavior script to all worker SkelRoots.
+
+    This must be called BEFORE timeline.play(). The behavior script will
+    automatically register the agent with AgentManager when play starts.
+
+    Returns (attached, failed) counts.
+    """
+    attached = 0
+    failed = 0
+
+    print(f"[DEBUG][SetupBehaviors] _HAS_IRA_CORE={_HAS_IRA_CORE}")
+    print(f"[DEBUG][SetupBehaviors] spawned_worker_names={spawned_worker_names}")
+    print(f"[DEBUG][SetupBehaviors] worker_behaviors={worker_behaviors}")
+
+    for wb in worker_behaviors:
+        worker_id = wb.get("worker_id", "worker_01")
+        if worker_id not in spawned_worker_names:
+            print(f"[INFO] Skipping behavior for non-spawned worker: {worker_id}")
+            continue
+
+        skelroot = _find_skelroot_for_worker(worker_id, stage)
+        if skelroot is None:
+            print(f"[WARN] SkelRoot not found for {worker_id}")
+            failed += 1
+            continue
+
+        try:
+            if _HAS_IRA_CORE:
+                ok = _attach_ira_builtin_behavior(skelroot)
+            else:
+                print(f"[INFO] IRA core unavailable, using fallback for {worker_id}")
+                ok = _attach_builtin_fallback(skelroot)
+            if ok:
+                attached += 1
+            else:
+                failed += 1
+        except Exception as e:
+            print(f"[ERROR] Failed to attach behavior to {worker_id}: {e}")
+            import traceback
+            traceback.print_exc()
+            failed += 1
+
+    for worker_name in spawned_worker_names:
+        has_behavior = any(wb.get("worker_id") == worker_name for wb in worker_behaviors)
+        if not has_behavior:
+            skelroot = _find_skelroot_for_worker(worker_name, stage)
+            if skelroot:
+                try:
+                    if _HAS_IRA_CORE:
+                        ok = _attach_ira_builtin_behavior(skelroot)
+                    else:
+                        ok = _attach_builtin_fallback(skelroot)
+                    if ok:
+                        attached += 1
+                    else:
+                        failed += 1
+                except Exception as e:
+                    print(f"[ERROR] Failed to attach behavior to {worker_name}: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    failed += 1
+
+    print(f"[INFO] IRA behaviors: {attached} attached, {failed} failed")
+    return attached, failed
 
 
 def _build_command_file_lines(worker_behaviors, spawned_worker_names):
