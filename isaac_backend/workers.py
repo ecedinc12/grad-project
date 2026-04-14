@@ -71,30 +71,28 @@ def _ensure_animation_graph_prim(stage):
 
 
 def _apply_animation_graph(skelroot, simulation_app, graph_prim):
-    """Apply AnimationGraphAPI to a SkelRoot prim, link it to /World/AnimationGraph.
+    """Link SkelRoot's existing AnimationGraphAPI to /World/AnimationGraph.
 
-    Uses omni.kit.commands to set the relationship target so that Fabric
-    properly syncs the change (raw USD API does not notify Fabric).
+    The character USD already has AnimationGraphAPI applied internally.
+    We override the animationGraph relationship target via kit command
+    so Fabric properly syncs the change (raw USD API does not notify Fabric).
     """
     skelroot_path = str(skelroot.GetPath())
     graph_path = str(graph_prim.GetPath())
 
-    try:
-        omni.kit.commands.execute("ApplyAnimationGraphAPICommand", paths=[Sdf.Path(skelroot_path)])
-        print(f"[INFO] Applied AnimationGraphAPI to {skelroot_path}")
-    except Exception as e:
-        print(f"[WARN] ApplyAnimationGraphAPICommand failed for {skelroot_path}: {e}")
+    rel = skelroot.GetRelationship("animationGraph")
+    if not rel or not rel.IsValid():
+        print(f"[WARN] No animationGraph relationship on {skelroot_path}")
         return False
 
     try:
-        rel = skelroot.GetRelationship("animationGraph")
         omni.kit.commands.execute("SetRelationshipTargets", relationship=rel, targets=[Sdf.Path(graph_path)])
         print(f"[INFO] Linked AnimationGraphAPI -> {graph_path}")
     except Exception as e:
         print(f"[WARN] Failed to set animationGraph relationship for {skelroot_path}: {e}")
         return False
 
-    for _ in range(10):
+    for _ in range(30):
         simulation_app.update()
     return True
 
