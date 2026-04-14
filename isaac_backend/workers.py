@@ -78,14 +78,12 @@ def _apply_animation_graph(skelroot, simulation_app, graph_prim):
     skelroot_path = str(skelroot.GetPath())
     graph_path = str(graph_prim.GetPath())
 
-    has_api = skelroot.HasAPI(AnimGraphSchema.AnimationGraphAPI)
-    if not has_api:
-        try:
-            AnimGraphSchema.AnimationGraphAPI.Apply(skelroot)
-            print(f"[INFO] Applied AnimationGraphAPI to {skelroot_path}")
-        except Exception as e:
-            print(f"[WARN] AnimationGraphAPI.Apply failed for {skelroot_path}: {e}")
-            return False
+    try:
+        AnimGraphSchema.AnimationGraphAPI.Apply(skelroot)
+        print(f"[INFO] Applied AnimationGraphAPI to {skelroot_path}")
+    except Exception as e:
+        print(f"[WARN] AnimationGraphAPI.Apply failed for {skelroot_path}: {e}")
+        return False
 
     rel = skelroot.GetRelationship("animationGraph")
     if not rel or not rel.IsValid():
@@ -105,8 +103,6 @@ def _apply_animation_graph(skelroot, simulation_app, graph_prim):
         print(f"[WARN] Failed to change animationGraph property for {skelroot_path}: {e}")
         return False
 
-    for _ in range(120):
-        simulation_app.update()
     return True
 
 
