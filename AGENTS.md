@@ -127,21 +127,7 @@ isaac_backend/
   lighting.py     — Camera and lighting setup
   semantics.py    — USD semantic label application
   workers.py      — Worker (character) spawning
-  animation.py    — IRA behavior script manager (isaacsim.replicator.behavior)
-  behaviors/      — WorkerPatrolBehavior, WorkerIdlePoseBehavior (BehaviorScript subclasses)
-
-rag_system/
-  build_index.py  — Crawl docs, chunk, embed, store in ChromaDB
-  query.py        — Interactive or one-shot RAG queries
-  generation.py   — RAG-augmented SceneConfig generation
-  vector_store.py — ChromaDB wrapper with sentence-transformers embeddings
-
-scripts/
-  run_pipeline.sh — Main orchestrator (8 steps)
-  coco_to_yolo.py — COCO → YOLO format converter
-  gen_dataset_yaml.py — YOLO dataset.yaml generator
-  class_balance.py — Class distribution analysis
-  make_video.sh   — FFmpeg video from frames
+  animation.py    — IRA behavior manager: attaches built-in character_behavior.py + injects commands via AgentManager
 ```
 
 ## Data Flow
@@ -161,12 +147,8 @@ scripts/
 - DLSS must be set to Quality mode (`/rtx/post/dlss/execMode = 2`) to avoid rendering artifacts at low resolutions.
 - `rep.orchestrator.set_capture_on_play(False)` is required — manual `step()` controls capture.
 - Pass `--/exts/isaacsim.core.throttling/enable_async=false` to prevent frame skipping during Replicator runs.
-- Worker animation uses IRA behavior scripts (`isaacsim.replicator.behavior`). No `omni.anim.people` dependency.
-- Import `World` from `isaacsim.core.api`, NOT `omni.isaac.core`.
-- DLSS must be set to Quality mode (`/rtx/post/dlss/execMode = 2`) to avoid rendering artifacts at low resolutions.
-- `rep.orchestrator.set_capture_on_play(False)` is required — manual `step()` controls capture.
-- Pass `--/exts/isaacsim.core.throttling/enable_async=false` to prevent frame skipping during Replicator runs.
-- Worker animation uses IRA behavior scripts (`isaacsim.replicator.behavior`). No `omni.anim.people` dependency.
+- Worker animation uses IRA's built-in character_behavior.py (Omni.Anim.People). Commands injected via AgentManager.
+- IRA behavior attachment: Phase 1 (before play) = attach built-in script via CharacterUtil. Phase 2 (after play) = inject GoTo/Idle/LookAround via AgentManager.inject_command().
 - Import `World` from `isaacsim.core.api`, NOT `omni.isaac.core`.
 
 ## Validation

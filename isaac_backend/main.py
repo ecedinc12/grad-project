@@ -72,7 +72,7 @@ from isaac_backend.semantics import clear_unwanted_warehouse_semantics, apply_us
 from isaac_backend.spawner import get_geofenced_spawner, spawn_hazard_zones
 from isaac_backend.warehouse import spawn_warehouse_layout, hide_driver_prims
 from isaac_backend.workers import spawn_workers
-from isaac_backend.animation import enable_behavior_extensions, setup_all_behaviors_async, _wait_for_async
+from isaac_backend.animation import enable_behavior_extensions, setup_all_behaviors_async, _wait_for_async, inject_worker_commands, inject_worker_commands, inject_worker_commands
 
 COCO_CATEGORIES = {
     "person": {"name": "person", "id": 1, "supercategory": "worker", "color": [255, 0, 0], "isthing": 1},
@@ -377,18 +377,10 @@ def main():
     for _ in range(100):
         world.step(render=True)
 
-    import omni.anim.graph.core as ag
-    for name in spawned_worker_names:
-        worker_prim = stage.GetPrimAtPath(f"/World/Characters/{name}")
-        skel_path = f"/World/Characters/{name}"
-        if worker_prim and worker_prim.IsValid():
-            from pxr import Usd
-            for child in Usd.PrimRange(worker_prim):
-                if child.GetTypeName() == "SkelRoot":
-                    skel_path = str(child.GetPath())
-                    break
-        animator = ag.get_character_animator(skel_path)
-        print(f"[DEBUG] Post-warmup animator for {name} (skel_path={skel_path}): {animator}")
+    if workers:
+        _progress("Injecting worker commands via AgentManager...")
+        injected, cmd_failed = inject_worker_commands(worker_behaviors, simulation_app, spawned_worker_names)
+        _progress(f"Worker commands: {injected} injected, {cmd_failed} failed")
 
     _progress("Initializing CocoWriter...")
     writer = _setup_coco_writer()

@@ -68,6 +68,15 @@
 - [ ] **Task 7.18: Rebuild RAG Index.** Run `python3 -m rag_system.build_index` on the pod.
 - [ ] **Task 7.19: Syntax Validation.** Run `python3 -m py_compile` on all modified files.
 
+#### Phase 8: Switch to IRA Built-in Behavior + AgentManager Command Injection
+- [x] **Task 8.1: Delete Custom Behavior Scripts.** Removed `behaviors/worker_patrol.py` and `behaviors/worker_idle_pose.py`.
+- [x] **Task 8.2: Rewrite `animation.py`.** IRA built-in `character_behavior.py` via `CharacterUtil.setup_python_scripts_to_character()`. Phase 1: attach before play. Phase 2: inject GoTo/Idle/LookAround via `AgentManager.inject_command()`.
+- [x] **Task 8.3: Update `main.py`.** Added `inject_worker_commands()` after timeline.play() + warmup.
+- [x] **Task 8.4: Update `AGENTS.md`.** Architecture + gotchas updated.
+- [x] **Task 8.5: Write IRA Reference Guide.** `references/ira_people_animation_guide.md`.
+- [ ] **Task 8.6: Syntax Validation.** Run `python3 -m py_compile` on all modified files.
+- [ ] **Task 8.7: RunPod Test.** Execute pipeline and verify workers move via IRA navmesh.
+
 #### Phase 7: Complete Rewrite — Isaac Sim 5.1 Extension & Library Update
 - [x] **Task 7.1: Delete Deprecated Files.** Removed `people.py`, `animator.py`, `test_people_walk.py`, `references/omni_anim_people/`.
 - [x] **Task 7.2: Rewrite `main.py`.** `isaacsim.core.api.World`, CocoWriter with 14 categories (incl. hazard zones), DLSS Quality mode, capture_on_play=False, extracted helper functions.
@@ -88,3 +97,12 @@
 - [x] **Task 7.17: Update `TODO.md`.** Added Phase 7 tracking.
 - [ ] **Task 7.18: Rebuild RAG Index.** Run `python3 -m rag_system.build_index` on the pod.
 - [ ] **Task 7.19: Syntax Validation.** Run `python3 -m py_compile` on all modified files.
+
+#### Phase 8: Switch to IRA Built-in Behavior + AgentManager Command Injection
+- [x] **Task 8.1: Delete Custom Behavior Scripts.** Removed `behaviors/worker_patrol.py` and `behaviors/worker_idle_pose.py`.
+- [x] **Task 8.2: Rewrite `animation.py`.** IRA built-in `character_behavior.py` via `CharacterUtil.setup_python_scripts_to_character()`. Phase 1: attach before play. Phase 2: inject GoTo/Idle/LookAround via `AgentManager.inject_command()`.
+- [x] **Task 8.3: Update `main.py`.** Added `inject_worker_commands()` after timeline.play() + warmup.
+- [x] **Task 8.4: Update `AGENTS.md`.** Architecture + gotchas updated.
+- [x] **Task 8.5: Write IRA Reference Guide.** `references/ira_people_animation_guide.md`.
+- [ ] **Task 8.6: Syntax Validation.** Run `python3 -m py_compile` on all modified files.
+- [ ] **Task 8.7: RunPod Test.** Execute pipeline and verify workers move via IRA navmesh.

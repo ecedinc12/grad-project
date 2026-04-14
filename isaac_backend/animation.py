@@ -1,44 +1,47 @@
 """
-Isaac Sim 5.1 IRA Behavior Script Manager
+Isaac Sim 5.1 IRA Behavior Script Manager — Built-in Behavior + Command Injection
 
-Enables isaacsim.replicator.behavior extension and attaches behavior scripts
-(patrol/idle) to worker prims. Falls back to direct USD attribute manipulation
-when the IRA extension is unavailable.
+Phase 1: Attach IRA's built-in character_behavior.py to worker SkelRoots (before timeline play).
+Phase 2: Inject GoTo/Idle/LookAround commands via AgentManager (after timeline play + agent registration).
+
+Falls back to direct USD scripting attribute manipulation when IRA extensions are unavailable.
 """
 
 import asyncio
-import inspect
 import time
 
 import omni.kit.app
 import omni.usd
 
-from isaac_backend.behaviors.worker_patrol import WorkerPatrolBehavior
-from isaac_backend.behaviors.worker_idle_pose import WorkerIdlePoseBehavior
+try:
+    from isaacsim.replicator.agent.core.agent_manager import AgentManager
+    from isaacsim.replicator.agent.core.settings import BehaviorScriptPaths, PrimPaths
+    from isaacsim.replicator.agent.core.stage_util import CharacterUtil
+    _HAS_IRA_CORE = True
+except ImportError:
+    _HAS_IRA_CORE = False
+    AgentManager = None
+    BehaviorScriptPaths = None
+    PrimPaths = None
+    CharacterUtil = None
 
 try:
-    from isaacsim.replicator.behavior.utils.behavior_utils import (
-        add_behavior_script_with_parameters_async,
-    )
-    _HAS_IRA = True
+    from isaacsim.replicator.behavior.utils.behavior_utils import add_behavior_script
+    _HAS_IRA_BEHAVIOR = True
 except ImportError:
-    _HAS_IRA = False
-
-try:
-    from isaacsim.replicator.behavior.global_variables import EXPOSED_ATTR_NS
-except ImportError:
-    EXPOSED_ATTR_NS = "exposedVar"
-
-try:
-    from pxr import Sdf
-except ImportError:
-    Sdf = None
+    _HAS_IRA_BEHAVIOR = False
+    add_behavior_script = None
 
 try:
     import omni.kit.commands
     _HAS_KIT_COMMANDS = True
 except ImportError:
     _HAS_KIT_COMMANDS = False
+
+try:
+    from pxr import Sdf
+except ImportError:
+    Sdf = None
 
 
 def enable_behavior_extensions(simulation_app=None):
@@ -63,153 +66,107 @@ def enable_behavior_extensions(simulation_app=None):
             simulation_app.update()
 
 
-def _extract_waypoints(worker_behavior):
-    """Extract GoTo waypoints from a worker behavior config."""
-    waypoints = []
-    for cmd in worker_behavior.get("commands", []):
-        if cmd.get("command") == "GoTo":
-            wp = (cmd.get("x", 0.0), cmd.get("y", 0.0), cmd.get("z", 0.0), cmd.get("rotation", 0.0))
-            waypoints.append(wp)
-    return waypoints
+def _find_skelroot_for_worker(worker_name, stage):
+    """Find the SkelRoot prim for a worker spawned under /World/Characters/{name}."""
+    xform_path = f"/World/Characters/{worker_name}"
+    xform_prim = stage.GetPrimAtPath(xform_path)
+    if not xform_prim or not xform_prim.IsValid():
+        return None
+    from pxr import Usd
+    for child in Usd.PrimRange(xform_prim):
+        if child.GetTypeName() == "SkelRoot":
+            return child
+    return None
 
 
-async def _attach_patrol_async(prim, waypoints, speed=1.0, idle_duration=3.0, look_around_duration=2.0):
-    """Attach WorkerPatrolBehavior via IRA add_behavior_script_with_parameters_async."""
-    print(f"[DEBUG][AttachPatrol] Attaching patrol to {prim.GetPath()}")
-    script_path = inspect.getfile(WorkerPatrolBehavior)
-    print(f"[DEBUG][AttachPatrol] Script path: {script_path}")
-    waypoints_csv = ";".join(f"{x},{y},{z},{r}" for x, y, z, r in waypoints)
-    print(f"[DEBUG][AttachPatrol] Waypoints CSV: {waypoints_csv}")
+def _attach_ira_builtin_behavior(skelroot_prim):
+    """Attach IRA's built-in character_behavior.py to a character SkelRoot.
 
-    _set_exposed_attr(prim, "workerPatrol", "waypoints:csv", waypoints_csv, Sdf.ValueTypeNames.String)
-    _set_exposed_attr(prim, "workerPatrol", "speed", speed, Sdf.ValueTypeNames.Float)
-    _set_exposed_attr(prim, "workerPatrol", "idleDuration", idle_duration, Sdf.ValueTypeNames.Float)
-    _set_exposed_attr(prim, "workerPatrol", "lookAroundDuration", look_around_duration, Sdf.ValueTypeNames.Float)
-
-    parameters = {
-        f"{EXPOSED_ATTR_NS}:workerPatrol:waypoints:csv": waypoints_csv,
-        f"{EXPOSED_ATTR_NS}:workerPatrol:speed": speed,
-        f"{EXPOSED_ATTR_NS}:workerPatrol:idleDuration": idle_duration,
-        f"{EXPOSED_ATTR_NS}:workerPatrol:lookAroundDuration": look_around_duration,
-    }
-    print(f"[DEBUG][AttachPatrol] Calling add_behavior_script_with_parameters_async with params: {parameters}")
-    await add_behavior_script_with_parameters_async(prim, script_path, parameters)
-    print(f"[INFO] WorkerPatrol attached to {prim.GetPath()} with {len(waypoints)} waypoints")
-
-
-async def _attach_idle_pose_async(prim, interval=10, rotation_range=(-15.0, 15.0)):
-    """Attach WorkerIdlePoseBehavior via IRA add_behavior_script_with_parameters_async."""
-    print(f"[DEBUG][AttachIdle] Attaching idle pose to {prim.GetPath()}")
-    script_path = inspect.getfile(WorkerIdlePoseBehavior)
-    print(f"[DEBUG][AttachIdle] Script path: {script_path}")
-
-    _set_exposed_attr(prim, "workerIdlePose", "interval", interval, Sdf.ValueTypeNames.UInt)
-    _set_exposed_attr(prim, "workerIdlePose", "rotationRange:csv", f"{rotation_range[0]},{rotation_range[1]}", Sdf.ValueTypeNames.String)
-
-    parameters = {
-        f"{EXPOSED_ATTR_NS}:workerIdlePose:interval": interval,
-        f"{EXPOSED_ATTR_NS}:workerIdlePose:rotationRange:csv": f"{rotation_range[0]},{rotation_range[1]}",
-    }
-    print(f"[DEBUG][AttachIdle] Calling add_behavior_script_with_parameters_async with params: {parameters}")
-    await add_behavior_script_with_parameters_async(prim, script_path, parameters)
-    print(f"[INFO] WorkerIdlePose attached to {prim.GetPath()} (interval={interval}, range={rotation_range})")
-
-
-def _set_exposed_attr(prim, namespace, attr_name, value, attr_type):
-    """Set or create an exposed behavior attribute on a prim."""
-    full_name = f"{EXPOSED_ATTR_NS}:{namespace}:{attr_name}"
-    attr = prim.GetAttribute(full_name)
-    if attr and attr.IsValid():
-        attr.Set(value)
-    else:
-        prim.CreateAttribute(full_name, attr_type, True).Set(value)
-
-
-def _apply_scripting_api_fallback(prim_path):
-    """Apply ScriptingAPI to a prim via kit commands (fallback when IRA unavailable)."""
-    if not _HAS_KIT_COMMANDS or Sdf is None:
-        print(f"[WARN] Cannot apply ScriptingAPI to {prim_path} — kit commands unavailable")
+    Uses CharacterUtil.setup_python_scripts_to_character() which applies
+    ScriptingAPI and sets omni:scripting:scripts to the built-in script path.
+    """
+    if not _HAS_IRA_CORE:
+        print("[WARN] IRA core unavailable, cannot attach built-in behavior")
         return False
+
+    script_path = BehaviorScriptPaths.behavior_script_path()
+    print(f"[INFO] Attaching IRA built-in behavior to {skelroot_prim.GetPath()}")
+    print(f"[INFO] Behavior script path: {script_path}")
+
     try:
-        omni.kit.commands.execute(
-            "ApplyScriptingAPICommand",
-            paths=[Sdf.Path(prim_path)],
-        )
+        CharacterUtil.setup_python_scripts_to_character([skelroot_prim], script_path)
+        print(f"[INFO] IRA built-in behavior attached to {skelroot_prim.GetPath()}")
         return True
     except Exception as e:
-        print(f"[WARN] ApplyScriptingAPICommand failed for {prim_path}: {e}")
+        print(f"[ERROR] Failed to attach built-in behavior to {skelroot_prim.GetPath()}: {e}")
         return False
 
 
-def _attach_behavior_script_fallback(prim, script_path):
-    """Attach a behavior script via direct USD omni:scripting:scripts attribute."""
-    if not prim or not prim.IsValid():
+def _attach_builtin_fallback(skelroot_prim):
+    """Fallback: directly set omni:scripting:scripts when IRA utils unavailable."""
+    if not _HAS_KIT_COMMANDS or Sdf is None:
+        print(f"[WARN] Cannot attach behavior script — kit commands unavailable")
         return False
-    attr = prim.GetAttribute("omni:scripting:scripts")
-    if not attr or not attr.IsValid():
-        attr = prim.CreateAttribute("omni:scripting:scripts", Sdf.ValueTypeNames.StringArray, True)
-    attr.Set([script_path])
-    print(f"[INFO] Attached behavior script (fallback) to {prim.GetPath()}: {script_path}")
-    return True
+
+    try:
+        manager = omni.kit.app.get_app().get_extension_manager()
+        people_path = manager.get_extension_path_by_module("omni.anim.people")
+        script_path = f"{people_path}/omni/anim/people/scripts/character_behavior.py"
+    except Exception:
+        script_path = "/dev/null"
+
+    prim_path = str(skelroot_prim.GetPath())
+    try:
+        omni.kit.commands.execute("ApplyScriptingAPICommand", paths=[Sdf.Path(prim_path)])
+        attr = skelroot_prim.GetAttribute("omni:scripting:scripts")
+        if attr:
+            attr.Set([script_path])
+        print(f"[INFO] Fallback behavior script attached to {prim_path}: {script_path}")
+        return True
+    except Exception as e:
+        print(f"[ERROR] Fallback attachment failed for {prim_path}: {e}")
+        return False
 
 
-async def _attach_patrol_fallback_async(prim, waypoints, speed=1.0, idle_duration=3.0, look_around_duration=2.0):
-    """Attach WorkerPatrolBehavior via fallback (direct USD attributes)."""
-    prim_path = str(prim.GetPath())
-    _apply_scripting_api_fallback(prim_path)
-    script_path = inspect.getfile(WorkerPatrolBehavior)
-    _attach_behavior_script_fallback(prim, script_path)
-    waypoints_csv = ";".join(f"{x},{y},{z},{r}" for x, y, z, r in waypoints)
-    _set_exposed_attr(prim, "workerPatrol", "waypoints:csv", waypoints_csv, Sdf.ValueTypeNames.String)
-    _set_exposed_attr(prim, "workerPatrol", "speed", speed, Sdf.ValueTypeNames.Float)
-    _set_exposed_attr(prim, "workerPatrol", "idleDuration", idle_duration, Sdf.ValueTypeNames.Float)
-    _set_exposed_attr(prim, "workerPatrol", "lookAroundDuration", look_around_duration, Sdf.ValueTypeNames.Float)
-    print(f"[INFO] WorkerPatrol attached (fallback) to {prim_path} with {len(waypoints)} waypoints")
+def _build_command_string(worker_id, commands):
+    """Convert WorkerBehavior commands list to IRA command strings.
 
+    Input: [{"command": "GoTo", "x": 10, "y": 10, "z": 0, "rotation": 90},
+            {"command": "Idle", "duration": 5},
+            {"command": "LookAround", "duration": 3}]
 
-async def _attach_idle_pose_fallback_async(prim, interval=10, rotation_range=(-15.0, 15.0)):
-    """Attach WorkerIdlePoseBehavior via fallback (direct USD attributes)."""
-    prim_path = str(prim.GetPath())
-    _apply_scripting_api_fallback(prim_path)
-    script_path = inspect.getfile(WorkerIdlePoseBehavior)
-    _attach_behavior_script_fallback(prim, script_path)
-    _set_exposed_attr(prim, "workerIdlePose", "interval", interval, Sdf.ValueTypeNames.UInt)
-    range_csv = f"{rotation_range[0]},{rotation_range[1]}"
-    _set_exposed_attr(prim, "workerIdlePose", "rotationRange:csv", range_csv, Sdf.ValueTypeNames.String)
-    print(f"[INFO] WorkerIdlePose attached (fallback) to {prim_path} (interval={interval}, range={rotation_range})")
-
-
-def _wait_for_async(coro, simulation_app):
-    """Schedule coroutine on the existing Omniverse asyncio loop and poll while pumping.
-
-    IRA's add_behavior_script_with_parameters_async sends commands to
-    omni.kit.scripting which processes them on the Omniverse main event loop.
-    Using run_until_complete() creates a nested task context that blocks all
-    other Omniverse tasks (ScriptManager, PrimCaching, etc.), causing re-entry
-    errors. Instead, we schedule the coroutine cooperatively on the existing
-    loop and pump the app until it completes.
+    Output: ["worker_01 GoTo 10 10 0 90", "worker_01 Idle 5", "worker_01 LookAround 3"]
     """
-    loop = asyncio.get_event_loop()
-    task = asyncio.ensure_future(coro, loop=loop)
+    result = []
+    for cmd in commands:
+        cmd_type = cmd.get("command", "")
+        if cmd_type == "GoTo":
+            x = cmd.get("x", 0.0)
+            y = cmd.get("y", 0.0)
+            z = cmd.get("z", 0.0)
+            rot = cmd.get("rotation", 0.0)
+            result.append(f"{worker_id} GoTo {x} {y} {z} {rot}")
+        elif cmd_type == "Idle":
+            duration = cmd.get("duration", 5.0)
+            result.append(f"{worker_id} Idle {duration}")
+        elif cmd_type == "LookAround":
+            duration = cmd.get("duration", 3.0)
+            result.append(f"{worker_id} LookAround {duration}")
+    return result
 
-    while not task.done():
-        simulation_app.update()
-        time.sleep(0.01)
 
-    return task.result()
+def setup_all_behaviors_async(spawned_worker_names, worker_behaviors, stage):
+    """Phase 1: Attach IRA's built-in behavior script to all worker SkelRoots.
 
+    This must be called BEFORE timeline.play(). The behavior script will
+    automatically register the agent with AgentManager when play starts.
 
-async def setup_all_behaviors_async(spawned_worker_names, worker_behaviors, stage):
-    """Orchestrate behavior attachment for all spawned workers.
-
-    Workers with GoTo commands get WorkerPatrolBehavior.
-    Workers without commands get WorkerIdlePoseBehavior.
-    Uses IRA when available, falls back to direct USD attributes otherwise.
+    Returns (attached, failed) counts.
     """
     attached = 0
     failed = 0
 
-    print(f"[DEBUG][SetupBehaviors] _HAS_IRA={_HAS_IRA}")
+    print(f"[DEBUG][SetupBehaviors] _HAS_IRA_CORE={_HAS_IRA_CORE}")
     print(f"[DEBUG][SetupBehaviors] spawned_worker_names={spawned_worker_names}")
     print(f"[DEBUG][SetupBehaviors] worker_behaviors={worker_behaviors}")
 
@@ -219,29 +176,22 @@ async def setup_all_behaviors_async(spawned_worker_names, worker_behaviors, stag
             print(f"[INFO] Skipping behavior for non-spawned worker: {worker_id}")
             continue
 
-        prim_path = f"/World/Characters/{worker_id}"
-        prim = stage.GetPrimAtPath(prim_path)
-        if not prim or not prim.IsValid():
-            print(f"[WARN] Prim not found for {worker_id}: {prim_path}")
+        skelroot = _find_skelroot_for_worker(worker_id, stage)
+        if skelroot is None:
+            print(f"[WARN] SkelRoot not found for {worker_id}")
             failed += 1
             continue
 
-        waypoints = _extract_waypoints(wb)
-        print(f"[DEBUG][SetupBehaviors] Processing {worker_id}: waypoints={waypoints}")
-
         try:
-            if _HAS_IRA:
-                if waypoints:
-                    await _attach_patrol_async(prim, waypoints)
-                else:
-                    await _attach_idle_pose_async(prim)
+            if _HAS_IRA_CORE:
+                ok = _attach_ira_builtin_behavior(skelroot)
             else:
-                print(f"[DEBUG][SetupBehaviors] IRA not available, using fallback for {worker_id}")
-                if waypoints:
-                    await _attach_patrol_fallback_async(prim, waypoints)
-                else:
-                    await _attach_idle_pose_fallback_async(prim)
-            attached += 1
+                print(f"[INFO] IRA core unavailable, using fallback for {worker_id}")
+                ok = _attach_builtin_fallback(skelroot)
+            if ok:
+                attached += 1
+            else:
+                failed += 1
         except Exception as e:
             print(f"[ERROR] Failed to attach behavior to {worker_id}: {e}")
             import traceback
@@ -251,21 +201,122 @@ async def setup_all_behaviors_async(spawned_worker_names, worker_behaviors, stag
     for worker_name in spawned_worker_names:
         has_behavior = any(wb.get("worker_id") == worker_name for wb in worker_behaviors)
         if not has_behavior:
-            prim_path = f"/World/Characters/{worker_name}"
-            prim = stage.GetPrimAtPath(prim_path)
-            if prim and prim.IsValid():
+            skelroot = _find_skelroot_for_worker(worker_name, stage)
+            if skelroot:
                 try:
-                    if _HAS_IRA:
-                        await _attach_idle_pose_async(prim)
+                    if _HAS_IRA_CORE:
+                        ok = _attach_ira_builtin_behavior(skelroot)
                     else:
-                        print(f"[DEBUG][SetupBehaviors] IRA not available, using fallback for {worker_name}")
-                        await _attach_idle_pose_fallback_async(prim)
-                    attached += 1
+                        ok = _attach_builtin_fallback(skelroot)
+                    if ok:
+                        attached += 1
+                    else:
+                        failed += 1
                 except Exception as e:
-                    print(f"[ERROR] Failed to attach idle behavior to {worker_name}: {e}")
+                    print(f"[ERROR] Failed to attach behavior to {worker_name}: {e}")
                     import traceback
                     traceback.print_exc()
                     failed += 1
 
     print(f"[INFO] IRA behaviors: {attached} attached, {failed} failed")
     return attached, failed
+
+
+def _wait_for_agent_registration(simulation_app, max_updates=20):
+    """Wait for all spawned agents to register with AgentManager.
+
+    Agents register after timeline.play() fires the behavior script's on_play().
+    Minimum 2 update cycles required. Returns list of registered agent names.
+    """
+    if not _HAS_IRA_CORE or not AgentManager.has_instance():
+        print("[WARN] AgentManager not available, skipping registration wait")
+        return []
+
+    agent_manager = AgentManager.get_instance()
+    registered = []
+
+    for i in range(max_updates):
+        simulation_app.update()
+        registered = list(agent_manager.get_all_agent_names())
+        if len(registered) > 0:
+            print(f"[INFO] Agents registered after {i + 1} updates: {registered}")
+            break
+
+    return registered
+
+
+def inject_worker_commands(worker_behaviors, simulation_app, spawned_worker_names):
+    """Phase 2: Inject GoTo/Idle/LookAround commands via AgentManager.
+
+    Must be called AFTER timeline.play() and agent registration.
+    Workers without commands get a default Idle command.
+    """
+    if not _HAS_IRA_CORE:
+        print("[WARN] IRA core unavailable, cannot inject commands")
+        return 0, 0
+
+    if not AgentManager.has_instance():
+        print("[WARN] AgentManager not initialized, waiting for registration...")
+        _wait_for_agent_registration(simulation_app)
+
+    if not AgentManager.has_instance():
+        print("[ERROR] AgentManager still not available after wait")
+        return 0, 0
+
+    agent_manager = AgentManager.get_instance()
+    injected = 0
+    failed = 0
+
+    registered_names = set(agent_manager.get_all_agent_names())
+    print(f"[DEBUG][InjectCommands] Registered agents: {registered_names}")
+
+    for wb in worker_behaviors:
+        worker_id = wb.get("worker_id", "worker_01")
+        if worker_id not in spawned_worker_names:
+            continue
+
+        if worker_id not in registered_names:
+            print(f"[WARN] {worker_id} not registered with AgentManager, skipping")
+            failed += 1
+            continue
+
+        commands = wb.get("commands", [])
+        if not commands:
+            commands = [{"command": "Idle", "duration": 10}]
+
+        cmd_strings = _build_command_string(worker_id, commands)
+        print(f"[INFO] Injecting commands for {worker_id}: {cmd_strings}")
+
+        try:
+            agent_manager.inject_command(
+                agent_name=worker_id,
+                command_list=cmd_strings,
+                force_inject=True,
+                instant=True,
+            )
+            injected += 1
+        except Exception as e:
+            print(f"[ERROR] Failed to inject commands for {worker_id}: {e}")
+            import traceback
+            traceback.print_exc()
+            failed += 1
+
+    for worker_name in spawned_worker_names:
+        has_behavior = any(wb.get("worker_id") == worker_name for wb in worker_behaviors)
+        if not has_behavior and worker_name in registered_names:
+            default_cmds = [f"{worker_name} Idle 10"]
+            print(f"[INFO] Injecting default idle for {worker_name}: {default_cmds}")
+            try:
+                agent_manager.inject_command(
+                    agent_name=worker_name,
+                    command_list=default_cmds,
+                    force_inject=True,
+                    instant=True,
+                )
+                injected += 1
+            except Exception as e:
+                print(f"[ERROR] Failed to inject default commands for {worker_name}: {e}")
+                failed += 1
+
+    print(f"[INFO] Command injection: {injected} injected, {failed} failed")
+    return injected, failed
