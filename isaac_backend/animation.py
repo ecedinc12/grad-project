@@ -261,7 +261,31 @@ def setup_all_behaviors_async(spawned_worker_names, worker_behaviors, stage):
     return attached, failed
 
 
-def _wait_for_agent_registration(simulation_app, max_updates=20):
+def _build_skelroot_name_map(stage, spawned_worker_names):
+    """Build a mapping from worker Xform name (worker_01) to SkelRoot name.
+
+    CharacterUtil.get_characters_in_stage() returns SkelRoot prims whose
+    names come from the referenced USD (e.g. male_adult_construction_01),
+    not the Xform wrapper name (worker_01). IRA registers agents using
+    the SkelRoot name, so we need this mapping for command injection.
+    """
+    name_map = {}
+    try:
+        chars = CharacterUtil.get_characters_in_stage()
+        for char_prim in chars:
+            skel_name = char_prim.GetName()
+            skel_path = str(char_prim.GetPath())
+            for worker_name in spawned_worker_names:
+                if worker_name in skel_path:
+                    name_map[worker_name] = skel_name
+                    print(f"[INFO] Name mapping: {worker_name} -> {skel_name}")
+                    break
+    except Exception as e:
+        print(f"[WARN] Failed to build Skelroot name map: {e}")
+    return name_map
+
+
+def _wait_for_agent_registration(simulation_app, max_updates=60):
     """Wait for all spawned agents to register with AgentManager.
 
     Agents register after timeline.play() fires the behavior script's on_play().
@@ -284,15 +308,20 @@ def _wait_for_agent_registration(simulation_app, max_updates=20):
     return registered
 
 
-def inject_worker_commands(worker_behaviors, simulation_app, spawned_worker_names):
+def inject_worker_commands(worker_behaviors, simulation_app, spawned_worker_names, stage):
     """Phase 2: Inject GoTo/Idle/LookAround commands via AgentManager.
 
     Must be called AFTER timeline.play() and agent registration.
     Workers without commands get a default Idle command.
+
+    Uses CharacterUtil.get_characters_in_stage() to map worker Xform names
+    to actual SkelRoot names for agent injection.
     """
     if not _HAS_IRA_CORE:
         print("[WARN] IRA core unavailable, cannot inject commands")
         return 0, 0
+
+    name_map = _build_skelroot_name_map(stage, spawned_worker_names)
 
     if not AgentManager.has_instance():
         print("[WARN] AgentManager not initialized, waiting for registration...")
@@ -308,14 +337,17 @@ def inject_worker_commands(worker_behaviors, simulation_app, spawned_worker_name
 
     registered_names = set(agent_manager.get_all_agent_names())
     print(f"[DEBUG][InjectCommands] Registered agents: {registered_names}")
+    print(f"[DEBUG][InjectCommands] Name map: {name_map}")
 
     for wb in worker_behaviors:
         worker_id = wb.get("worker_id", "worker_01")
         if worker_id not in spawned_worker_names:
             continue
 
-        if worker_id not in registered_names:
-            print(f"[WARN] {worker_id} not registered with AgentManager, skipping")
+        agent_name = name_map.get(worker_id, worker_id)
+
+        if agent_name not in registered_names:
+            print(f"[WARN] {agent_name} (mapped from {worker_id}) not registered with AgentManager, skipping")
             failed += 1
             continue
 
@@ -323,39 +355,41 @@ def inject_worker_commands(worker_behaviors, simulation_app, spawned_worker_name
         if not commands:
             commands = [{"command": "Idle", "duration": 10}]
 
-        cmd_strings = _build_command_string(worker_id, commands)
-        print(f"[INFO] Injecting commands for {worker_id}: {cmd_strings}")
+        cmd_strings = _build_command_string(agent_name, commands)
+        print(f"[INFO] Injecting commands for {agent_name}: {cmd_strings}")
 
         try:
             agent_manager.inject_command(
-                agent_name=worker_id,
+                agent_name=agent_name,
                 command_list=cmd_strings,
                 force_inject=True,
                 instant=True,
             )
             injected += 1
         except Exception as e:
-            print(f"[ERROR] Failed to inject commands for {worker_id}: {e}")
+            print(f"[ERROR] Failed to inject commands for {agent_name}: {e}")
             import traceback
             traceback.print_exc()
             failed += 1
 
     for worker_name in spawned_worker_names:
         has_behavior = any(wb.get("worker_id") == worker_name for wb in worker_behaviors)
-        if not has_behavior and worker_name in registered_names:
-            default_cmds = [f"{worker_name} Idle 10"]
-            print(f"[INFO] Injecting default idle for {worker_name}: {default_cmds}")
-            try:
-                agent_manager.inject_command(
-                    agent_name=worker_name,
-                    command_list=default_cmds,
-                    force_inject=True,
-                    instant=True,
-                )
-                injected += 1
-            except Exception as e:
-                print(f"[ERROR] Failed to inject default commands for {worker_name}: {e}")
-                failed += 1
+        if not has_behavior:
+            agent_name = name_map.get(worker_name, worker_name)
+            if agent_name in registered_names:
+                default_cmds = [f"{agent_name} Idle 10"]
+                print(f"[INFO] Injecting default idle for {agent_name}: {default_cmds}")
+                try:
+                    agent_manager.inject_command(
+                        agent_name=agent_name,
+                        command_list=default_cmds,
+                        force_inject=True,
+                        instant=True,
+                    )
+                    injected += 1
+                except Exception as e:
+                    print(f"[ERROR] Failed to inject default commands for {agent_name}: {e}")
+                    failed += 1
 
     print(f"[INFO] Command injection: {injected} injected, {failed} failed")
     return injected, failed

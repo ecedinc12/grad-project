@@ -417,7 +417,7 @@ def main():
 
     if workers:
         _progress("Injecting worker commands via AgentManager...")
-        injected, cmd_failed = inject_worker_commands(worker_behaviors, simulation_app, spawned_worker_names)
+        injected, cmd_failed = inject_worker_commands(worker_behaviors, simulation_app, spawned_worker_names, stage)
         _progress(f"Worker commands: {injected} injected, {cmd_failed} failed")
 
     _progress("Initializing CocoWriter...")

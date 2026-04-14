@@ -11,6 +11,7 @@ import time
 import AnimGraphSchema
 from pxr import Gf, Sdf, Usd, UsdGeom
 import omni.usd
+import omni.kit.commands
 from isaac_backend.semantics import apply_usd_semantics
 
 _PPE_KEYS = ["worker_with_ppe", "worker_with_ppe_alt"]
@@ -70,17 +71,28 @@ def _ensure_animation_graph_prim(stage):
 
 
 def _apply_animation_graph(skelroot, simulation_app, graph_prim):
-    """Apply AnimationGraphAPI to a SkelRoot prim, link it to /World/AnimationGraph."""
+    """Apply AnimationGraphAPI to a SkelRoot prim, link it to /World/AnimationGraph.
+
+    Uses omni.kit.commands to set the relationship target so that Fabric
+    properly syncs the change (raw USD API does not notify Fabric).
+    """
+    skelroot_path = str(skelroot.GetPath())
+    graph_path = str(graph_prim.GetPath())
+
     try:
-        anim_api = AnimGraphSchema.AnimationGraphAPI.Apply(skelroot)
-        print(f"[INFO] Applied AnimationGraphAPI to {skelroot.GetPath()}")
+        omni.kit.commands.execute("ApplyAnimationGraphAPICommand", paths=[Sdf.Path(skelroot_path)])
+        print(f"[INFO] Applied AnimationGraphAPI to {skelroot_path}")
     except Exception as e:
-        print(f"[WARN] AnimationGraphAPI.Apply failed for {skelroot.GetPath()}: {e}")
+        print(f"[WARN] ApplyAnimationGraphAPICommand failed for {skelroot_path}: {e}")
         return False
 
-    graph_path = str(graph_prim.GetPath())
-    anim_api.GetAnimationGraphRel().SetTargets([Sdf.Path(graph_path)])
-    print(f"[INFO] Linked AnimationGraphAPI -> {graph_path}")
+    try:
+        rel = skelroot.GetRelationship("animationGraph")
+        omni.kit.commands.execute("SetRelationshipTargets", relationship=rel, targets=[Sdf.Path(graph_path)])
+        print(f"[INFO] Linked AnimationGraphAPI -> {graph_path}")
+    except Exception as e:
+        print(f"[WARN] Failed to set animationGraph relationship for {skelroot_path}: {e}")
+        return False
 
     for _ in range(10):
         simulation_app.update()
