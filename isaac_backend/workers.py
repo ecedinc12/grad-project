@@ -47,31 +47,57 @@ def _wait_for_skelroot(prim_path, stage, simulation_app, max_ticks=240):
     return None
 
 
-def _ensure_animation_graph_prim(stage):
-    """Create /World/AnimationGraph prim at stage root if it doesn't exist.
+def _ensure_animation_graph_container(stage):
+    """Create /World/AnimationGraph container Xform if it doesn't exist."""
+    container_path = "/World/AnimationGraph"
+    existing = stage.GetPrimAtPath(container_path)
+    if existing and existing.IsValid():
+        return existing
+    stage.DefinePrim(container_path, "Xform")
+    print(f"[INFO] Created AnimationGraph container at {container_path}")
+    return stage.GetPrimAtPath(container_path)
 
-    Character USDs contain an animationGraph relationship that points to
-    /World/AnimationGraph. This prim must exist at the stage level.
+
+def _create_per_character_animation_graph(skelroot, worker_name, stage):
+    """Create a per-character AnimationGraph prim with skeleton reference.
+
+    Each character needs its own AnimationGraph prim that references its
+    specific skeleton. A shared AnimationGraph cannot drive multiple
+    different skeletons.
     """
-    graph_path = "/World/AnimationGraph"
+    skelroot_path = str(skelroot.GetPath())
+    graph_path = f"/World/AnimationGraph/{worker_name}_Graph"
+
     existing = stage.GetPrimAtPath(graph_path)
     if existing and existing.IsValid():
-        print(f"[INFO] AnimationGraph prim already exists at {graph_path}")
-        return existing
+        print(f"[INFO] AnimationGraph already exists at {graph_path}")
+        return stage.GetPrimAtPath(graph_path)
 
     graph_prim = AnimGraphSchema.AnimationGraph.Define(stage, graph_path)
-    print(f"[INFO] Created AnimationGraph prim at {graph_path} (typed schema)")
+    print(f"[INFO] Created AnimationGraph prim at {graph_path}")
+
+    try:
+        skel_rel = graph_prim.GetRelationship("skeleton")
+        if not skel_rel:
+            skel_rel = graph_prim.CreateRelationship("skeleton", False)
+        omni.kit.commands.execute("SetRelationshipTargets",
+                                  relationship=skel_rel,
+                                  targets=[Sdf.Path(skelroot_path)])
+        print(f"[INFO] Set skeleton reference on {graph_path} -> {skelroot_path}")
+    except Exception as e:
+        print(f"[WARN] Failed to set skeleton reference on {graph_path}: {e}")
+
     return graph_prim
 
 
-def _apply_animation_graph(skelroot, simulation_app, graph_prim):
-    """Forcefully link SkelRoot's AnimationGraphAPI to /World/AnimationGraph.
+def _apply_animation_graph(skelroot, worker_name, stage):
+    """Link SkelRoot to its per-character AnimationGraph prim.
 
-    The character USD might have a broken relationship due to reference scope.
-    We forcefully set the target using ChangeProperty to override it at the top layer.
+    Creates a dedicated AnimationGraph prim for this character with the
+    correct skeleton reference, then links the SkelRoot's AnimationGraphAPI
+    relationship to it.
     """
     skelroot_path = str(skelroot.GetPath())
-    graph_path = str(graph_prim.GetPath())
 
     try:
         AnimGraphSchema.AnimationGraphAPI.Apply(skelroot)
@@ -79,6 +105,9 @@ def _apply_animation_graph(skelroot, simulation_app, graph_prim):
     except Exception as e:
         print(f"[WARN] AnimationGraphAPI.Apply failed for {skelroot_path}: {e}")
         return False
+
+    graph_prim = _create_per_character_animation_graph(skelroot, worker_name, stage)
+    graph_path = str(graph_prim.GetPath())
 
     rel = skelroot.GetRelationship("animationGraph")
     if not rel or not rel.IsValid():
@@ -125,7 +154,7 @@ def spawn_workers(workers, worker_behaviors, asset_library, stage, simulation_ap
 
     if workers:
         stage.DefinePrim("/World/Characters", "Xform")
-        graph_prim = _ensure_animation_graph_prim(stage)
+        _ensure_animation_graph_container(stage)
 
     spawned_names = set()
     spawned_prims = []
@@ -157,7 +186,7 @@ def spawn_workers(workers, worker_behaviors, asset_library, stage, simulation_ap
             name = prim_path.rsplit("/", 1)[-1]
             skelroot = _wait_for_skelroot(prim_path, stage, simulation_app)
             if skelroot is not None:
-                ok = _apply_animation_graph(skelroot, simulation_app, graph_prim)
+                ok = _apply_animation_graph(skelroot, name, stage)
                 if not ok:
                     print(f"[WARN] AnimationGraphAPI not applied to {name}; character may not animate.")
             else:
@@ -168,7 +197,7 @@ def spawn_workers(workers, worker_behaviors, asset_library, stage, simulation_ap
             prim = stage.GetPrimAtPath(prim_path)
             skelroot = _find_skelroot(prim) if prim and prim.IsValid() else None
             if skelroot is not None:
-                ok = _apply_animation_graph(skelroot, simulation_app, graph_prim)
+                ok = _apply_animation_graph(skelroot, name, stage)
                 if not ok:
                     print(f"[WARN] AnimationGraphAPI not applied to {name}; character may not animate.")
             else:

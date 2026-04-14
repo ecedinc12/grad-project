@@ -155,14 +155,17 @@ def _attach_builtin_fallback(skelroot_prim):
         return False
 
 
-def _build_command_string(worker_id, commands):
+def _build_command_string(commands):
     """Convert WorkerBehavior commands list to IRA command strings.
 
     Input: [{"command": "GoTo", "x": 10, "y": 10, "z": 0, "rotation": 90},
             {"command": "Idle", "duration": 5},
             {"command": "LookAround", "duration": 3}]
 
-    Output: ["worker_01 GoTo 10 10 0 90", "worker_01 Idle 5", "worker_01 LookAround 3"]
+    Output: ["GoTo 10 10 0 90", "Idle 5", "LookAround 3"]
+
+    NOTE: Agent name is NOT included — it is passed separately to
+    AgentManager.inject_command(agent_name=..., command_list=...).
     """
     result = []
     for cmd in commands:
@@ -172,13 +175,13 @@ def _build_command_string(worker_id, commands):
             y = cmd.get("y", 0.0)
             z = cmd.get("z", 0.0)
             rot = cmd.get("rotation", 0.0)
-            result.append(f"{worker_id} GoTo {x} {y} {z} {rot}")
+            result.append(f"GoTo {x} {y} {z} {rot}")
         elif cmd_type == "Idle":
             duration = cmd.get("duration", 5.0)
-            result.append(f"{worker_id} Idle {duration}")
+            result.append(f"Idle {duration}")
         elif cmd_type == "LookAround":
             duration = cmd.get("duration", 3.0)
-            result.append(f"{worker_id} LookAround {duration}")
+            result.append(f"LookAround {duration}")
     return result
 
 
@@ -343,7 +346,7 @@ def inject_worker_commands(worker_behaviors, simulation_app, spawned_worker_name
         if not commands:
             commands = [{"command": "Idle", "duration": 10}]
 
-        cmd_strings = _build_command_string(agent_name, commands)
+        cmd_strings = _build_command_string(commands)
         print(f"[INFO] Injecting commands for {agent_name}: {cmd_strings}")
 
         try:
@@ -365,7 +368,7 @@ def inject_worker_commands(worker_behaviors, simulation_app, spawned_worker_name
         if not has_behavior:
             agent_name = name_map.get(worker_name, worker_name)
             if agent_name in registered_names:
-                default_cmds = [f"{agent_name} Idle 10"]
+                default_cmds = ["Idle 10"]
                 print(f"[INFO] Injecting default idle for {agent_name}: {default_cmds}")
                 try:
                     agent_manager.inject_command(
