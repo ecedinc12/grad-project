@@ -357,22 +357,56 @@ def main():
         _progress(f"Spawning {len(workers)} workers...")
         spawned_worker_names = spawn_workers(workers, worker_behaviors, asset_library, stage, simulation_app)
 
-    # DEBUG: Check AnimationGraph relationship targets
-    import AnimGraphSchema
-    print("[DEBUG][PostSpawn] Checking AnimationGraph relationships...")
-    for prim in stage.Traverse():
-        if prim.GetTypeName() == "SkelRoot":
-            path = str(prim.GetPath())
-            has_api = prim.HasAPI(AnimGraphSchema.AnimationGraphAPI)
-            print(f"[DEBUG] SkelRoot: {path}, HasAPI={has_api}")
-            if has_api:
-                api = AnimGraphSchema.AnimationGraphAPI(prim)
-                rel = api.GetAnimationGraphRel()
-                targets = rel.GetTargets()
-                print(f"[DEBUG]   AnimationGraphRel targets: {targets}")
-                for t in targets:
-                    target_prim = stage.GetPrimAtPath(t)
-                    print(f"[DEBUG]   Target prim {t}: valid={target_prim.IsValid()}, type={target_prim.GetTypeName()}")
+    if workers:
+        _progress("Attaching IRA behavior scripts to workers...")
+        attached, failed = setup_all_behaviors_async(spawned_worker_names, worker_behaviors, stage)
+        _progress(f"IRA behaviors: {attached} attached, {failed} failed")
+
+        _progress("Writing command file for character_behavior.py...")
+        write_command_file(worker_behaviors, spawned_worker_names)
+        setup_command_file_path()
+
+        _progress("Warming up simulation to apply Scripting API...")
+        for _ in range(120):
+            simulation_app.update()
+
+    _progress("Hiding driver prims...")
+    hide_driver_prims(stage)
+
+    _progress("Applying USD-level semantics to all scene prims...")
+    _apply_scene_semantics(stage, spawned_asset_ids, workers)
+
+    _progress("Computing scene centroid for camera framing...")
+    centroid = compute_scene_centroid(stage)
+    look_at_target = (centroid[0], centroid[1], 1.0)
+
+    _progress("Starting timeline for behavior scripts...")
+    omni.timeline.get_timeline_interface().play()
+
+    for _ in range(100):
+        world.step(render=True)
+
+    # DEBUG: Check what IRA sees after timeline play
+    print("[DEBUG][PostPlay] Checking IRA state...")
+    try:
+        from isaacsim.replicator.agent.core.stage_util import CharacterUtil
+        chars = CharacterUtil.get_characters_in_stage()
+        print(f"[DEBUG] CharacterUtil.get_characters_in_stage() returned {len(chars)} characters:")
+        for c in chars:
+            print(f"[DEBUG]   SkelRoot: {c.GetPath()}, name={c.GetName()}")
+    except Exception as e:
+        print(f"[DEBUG] CharacterUtil check failed: {e}")
+
+    try:
+        from isaacsim.replicator.agent.core.agent_manager import AgentManager
+        if AgentManager.has_instance():
+            am = AgentManager.get_instance()
+            names = am.get_all_agent_names()
+            print(f"[DEBUG] Registered agent names: {names}")
+        else:
+            print("[DEBUG] AgentManager: no instance")
+    except Exception as e:
+        print(f"[DEBUG] AgentManager check failed: {e}")
 
     _progress("Initializing CocoWriter...")
     writer = _setup_coco_writer()
