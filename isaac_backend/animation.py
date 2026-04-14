@@ -71,7 +71,9 @@ def enable_behavior_extensions(simulation_app=None):
         "isaacsim.replicator.behavior",
         "isaacsim.replicator.agent.core",
         "omni.anim.graph.core",
+        "omni.anim.graph.schema",
         "omni.anim.people",
+        "omni.anim.navigation.schema",
     ]
     for ext in extensions:
         try:
