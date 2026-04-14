@@ -97,10 +97,9 @@ def _apply_animation_graph(skelroot, simulation_app, graph_prim):
             return False
 
     try:
-        omni.kit.commands.execute("ChangeProperty",
-                                  prop_path=f"{skelroot_path}.animationGraph",
-                                  value=[Sdf.Path(graph_path)],
-                                  prev=None)
+        omni.kit.commands.execute("SetRelationshipTargets",
+                                  relationship=rel,
+                                  targets=[Sdf.Path(graph_path)])
         print(f"[INFO] Force-linked AnimationGraphAPI -> {graph_path}")
     except Exception as e:
         print(f"[WARN] Failed to change animationGraph property for {skelroot_path}: {e}")
