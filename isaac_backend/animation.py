@@ -253,26 +253,15 @@ def setup_all_behaviors_async(spawned_worker_names, worker_behaviors, stage):
 
 
 def _build_skelroot_name_map(stage, spawned_worker_names):
-    """Build a mapping from worker Xform name (worker_01) to SkelRoot name.
+    """Build identity mapping: worker Xform name → agent name.
 
-    CharacterUtil.get_characters_in_stage() returns SkelRoot prims whose
-    names come from the referenced USD (e.g. male_adult_construction_01),
-    not the Xform wrapper name (worker_01). IRA registers agents using
-    the SkelRoot name, so we need this mapping for command injection.
+    IRA's AgentManager registers agents with the Xform wrapper name
+    (e.g. worker_01), not the deep SkelRoot name from the referenced USD.
     """
     name_map = {}
-    try:
-        chars = CharacterUtil.get_characters_in_stage()
-        for char_prim in chars:
-            skel_name = char_prim.GetName()
-            skel_path = str(char_prim.GetPath())
-            for worker_name in spawned_worker_names:
-                if worker_name in skel_path:
-                    name_map[worker_name] = skel_name
-                    print(f"[INFO] Name mapping: {worker_name} -> {skel_name}")
-                    break
-    except Exception as e:
-        print(f"[WARN] Failed to build Skelroot name map: {e}")
+    for worker_name in spawned_worker_names:
+        name_map[worker_name] = worker_name
+        print(f"[INFO] Name mapping: {worker_name} -> {worker_name}")
     return name_map
 
 
