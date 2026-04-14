@@ -72,7 +72,7 @@ from isaac_backend.semantics import clear_unwanted_warehouse_semantics, apply_us
 from isaac_backend.spawner import get_geofenced_spawner, spawn_hazard_zones
 from isaac_backend.warehouse import spawn_warehouse_layout, hide_driver_prims
 from isaac_backend.workers import spawn_workers
-from isaac_backend.animation import enable_behavior_extensions, setup_all_behaviors_async, _wait_for_async, inject_worker_commands, inject_worker_commands, inject_worker_commands
+from isaac_backend.animation import enable_behavior_extensions, setup_all_behaviors_async, inject_worker_commands, inject_worker_commands, inject_worker_commands
 
 COCO_CATEGORIES = {
     "person": {"name": "person", "id": 1, "supercategory": "worker", "color": [255, 0, 0], "isthing": 1},
@@ -355,10 +355,7 @@ def main():
 
     if workers:
         _progress("Attaching IRA behavior scripts to workers...")
-        attached, failed = _wait_for_async(
-            setup_all_behaviors_async(spawned_worker_names, worker_behaviors, stage),
-            simulation_app,
-        )
+        attached, failed = setup_all_behaviors_async(spawned_worker_names, worker_behaviors, stage)
         _progress(f"IRA behaviors: {attached} attached, {failed} failed")
 
     _progress("Hiding driver prims...")
