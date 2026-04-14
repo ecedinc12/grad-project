@@ -377,6 +377,10 @@ def main():
         attached, failed = setup_all_behaviors_async(spawned_worker_names, worker_behaviors, stage)
         _progress(f"IRA behaviors: {attached} attached, {failed} failed")
 
+        _progress("Warming up simulation to apply Scripting API...")
+        for _ in range(120):
+            simulation_app.update()
+
     _progress("Hiding driver prims...")
     hide_driver_prims(stage)
 
