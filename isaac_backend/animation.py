@@ -50,7 +50,9 @@ def enable_behavior_extensions(simulation_app=None):
     extensions = [
         "omni.kit.scripting",
         "isaacsim.replicator.behavior",
+        "isaacsim.replicator.agent.core",
         "omni.anim.graph.core",
+        "omni.anim.people",
     ]
     for ext in extensions:
         try:
