@@ -2,16 +2,22 @@
 Isaac Sim 5.1 IRA Behavior Script Manager — Built-in Behavior + Command Injection
 
 Phase 1: Attach IRA's built-in character_behavior.py to worker SkelRoots (before timeline play).
-Phase 2: Inject GoTo/Idle/LookAround commands via AgentManager (after timeline play + agent registration).
+Phase 2: Write command file for character_behavior.py to consume natively.
 
 Falls back to direct USD scripting attribute manipulation when IRA extensions are unavailable.
 """
 
 import asyncio
+import os
 import time
 
+import carb
 import omni.kit.app
 import omni.usd
+
+COMMAND_FILE_PATH = "/tmp/worker_commands.txt"
+
+COMMAND_FILE_PATH = "/tmp/worker_commands.txt"
 
 AgentManager = None
 BehaviorScriptPaths = None
@@ -155,221 +161,64 @@ def _attach_builtin_fallback(skelroot_prim):
         return False
 
 
-def _build_command_string(commands):
-    """Convert WorkerBehavior commands list to IRA command strings.
+def _build_command_file_lines(worker_behaviors, spawned_worker_names):
+    """Build command file lines for character_behavior.py.
 
-    Input: [{"command": "GoTo", "x": 10, "y": 10, "z": 0, "rotation": 90},
-            {"command": "Idle", "duration": 5},
-            {"command": "LookAround", "duration": 3}]
-
-    Output: ["GoTo 10 10 0 90", "Idle 5", "LookAround 3"]
-
-    NOTE: Agent name is NOT included — it is passed separately to
-    AgentManager.inject_command(agent_name=..., command_list=...).
+    Format: "agent_name Command arg1 arg2 ..."
+    Example:
+        worker_01 GoTo -4.0 -5.0 0.0 90.0
+        worker_01 Idle 3.0
+        worker_02 GoTo -3.0 5.0 0.0 0.0
     """
-    result = []
-    for cmd in commands:
-        cmd_type = cmd.get("command", "")
-        if cmd_type == "GoTo":
-            x = cmd.get("x", 0.0)
-            y = cmd.get("y", 0.0)
-            z = cmd.get("z", 0.0)
-            rot = cmd.get("rotation", 0.0)
-            result.append(f"GoTo {x} {y} {z} {rot}")
-        elif cmd_type == "Idle":
-            duration = cmd.get("duration", 5.0)
-            result.append(f"Idle {duration}")
-        elif cmd_type == "LookAround":
-            duration = cmd.get("duration", 3.0)
-            result.append(f"LookAround {duration}")
-    return result
-
-
-def setup_all_behaviors_async(spawned_worker_names, worker_behaviors, stage):
-    """Phase 1: Attach IRA's built-in behavior script to all worker SkelRoots.
-
-    This must be called BEFORE timeline.play(). The behavior script will
-    automatically register the agent with AgentManager when play starts.
-
-    Returns (attached, failed) counts.
-    """
-    attached = 0
-    failed = 0
-
-    print(f"[DEBUG][SetupBehaviors] _HAS_IRA_CORE={_HAS_IRA_CORE}")
-    print(f"[DEBUG][SetupBehaviors] spawned_worker_names={spawned_worker_names}")
-    print(f"[DEBUG][SetupBehaviors] worker_behaviors={worker_behaviors}")
-
-    for wb in worker_behaviors:
-        worker_id = wb.get("worker_id", "worker_01")
-        if worker_id not in spawned_worker_names:
-            print(f"[INFO] Skipping behavior for non-spawned worker: {worker_id}")
-            continue
-
-        skelroot = _find_skelroot_for_worker(worker_id, stage)
-        if skelroot is None:
-            print(f"[WARN] SkelRoot not found for {worker_id}")
-            failed += 1
-            continue
-
-        try:
-            if _HAS_IRA_CORE:
-                ok = _attach_ira_builtin_behavior(skelroot)
-            else:
-                print(f"[INFO] IRA core unavailable, using fallback for {worker_id}")
-                ok = _attach_builtin_fallback(skelroot)
-            if ok:
-                attached += 1
-            else:
-                failed += 1
-        except Exception as e:
-            print(f"[ERROR] Failed to attach behavior to {worker_id}: {e}")
-            import traceback
-            traceback.print_exc()
-            failed += 1
-
-    for worker_name in spawned_worker_names:
-        has_behavior = any(wb.get("worker_id") == worker_name for wb in worker_behaviors)
-        if not has_behavior:
-            skelroot = _find_skelroot_for_worker(worker_name, stage)
-            if skelroot:
-                try:
-                    if _HAS_IRA_CORE:
-                        ok = _attach_ira_builtin_behavior(skelroot)
-                    else:
-                        ok = _attach_builtin_fallback(skelroot)
-                    if ok:
-                        attached += 1
-                    else:
-                        failed += 1
-                except Exception as e:
-                    print(f"[ERROR] Failed to attach behavior to {worker_name}: {e}")
-                    import traceback
-                    traceback.print_exc()
-                    failed += 1
-
-    print(f"[INFO] IRA behaviors: {attached} attached, {failed} failed")
-    return attached, failed
-
-
-def _build_skelroot_name_map(stage, spawned_worker_names):
-    """Build identity mapping: worker Xform name → agent name.
-
-    IRA's AgentManager registers agents with the Xform wrapper name
-    (e.g. worker_01), not the deep SkelRoot name from the referenced USD.
-    """
-    name_map = {}
-    for worker_name in spawned_worker_names:
-        name_map[worker_name] = worker_name
-        print(f"[INFO] Name mapping: {worker_name} -> {worker_name}")
-    return name_map
-
-
-def _wait_for_agent_registration(simulation_app, max_updates=60):
-    """Wait for all spawned agents to register with AgentManager.
-
-    Agents register after timeline.play() fires the behavior script's on_play().
-    Minimum 2 update cycles required. Returns list of registered agent names.
-    """
-    if not _HAS_IRA_CORE or not AgentManager.has_instance():
-        print("[WARN] AgentManager not available, skipping registration wait")
-        return []
-
-    agent_manager = AgentManager.get_instance()
-    registered = []
-
-    for i in range(max_updates):
-        simulation_app.update()
-        registered = list(agent_manager.get_all_agent_names())
-        if len(registered) > 0:
-            print(f"[INFO] Agents registered after {i + 1} updates: {registered}")
-            break
-
-    return registered
-
-
-def inject_worker_commands(worker_behaviors, simulation_app, spawned_worker_names, stage):
-    """Phase 2: Inject GoTo/Idle/LookAround commands via AgentManager.
-
-    Must be called AFTER timeline.play() and agent registration.
-    Workers without commands get a default Idle command.
-
-    Uses CharacterUtil.get_characters_in_stage() to map worker Xform names
-    to actual SkelRoot names for agent injection.
-    """
-    if not _HAS_IRA_CORE:
-        print("[WARN] IRA core unavailable, cannot inject commands")
-        return 0, 0
-
-    name_map = _build_skelroot_name_map(stage, spawned_worker_names)
-
-    if not AgentManager.has_instance():
-        print("[WARN] AgentManager not initialized, waiting for registration...")
-        _wait_for_agent_registration(simulation_app)
-
-    if not AgentManager.has_instance():
-        print("[ERROR] AgentManager still not available after wait")
-        return 0, 0
-
-    agent_manager = AgentManager.get_instance()
-    injected = 0
-    failed = 0
-
-    registered_names = set(agent_manager.get_all_agent_names())
-    print(f"[DEBUG][InjectCommands] Registered agents: {registered_names}")
-    print(f"[DEBUG][InjectCommands] Name map: {name_map}")
-
+    lines = []
     for wb in worker_behaviors:
         worker_id = wb.get("worker_id", "worker_01")
         if worker_id not in spawned_worker_names:
             continue
-
-        agent_name = name_map.get(worker_id, worker_id)
-
-        if agent_name not in registered_names:
-            print(f"[WARN] {agent_name} (mapped from {worker_id}) not registered with AgentManager, skipping")
-            failed += 1
-            continue
-
         commands = wb.get("commands", [])
         if not commands:
             commands = [{"command": "Idle", "duration": 10}]
-
-        cmd_strings = _build_command_string(commands)
-        print(f"[INFO] Injecting commands for {agent_name}: {cmd_strings}")
-
-        try:
-            agent_manager.inject_command(
-                agent_name=agent_name,
-                command_list=cmd_strings,
-                force_inject=True,
-                instant=True,
-            )
-            injected += 1
-        except Exception as e:
-            print(f"[ERROR] Failed to inject commands for {agent_name}: {e}")
-            import traceback
-            traceback.print_exc()
-            failed += 1
+        for cmd in commands:
+            cmd_type = cmd.get("command", "")
+            if cmd_type == "GoTo":
+                x = cmd.get("x", 0.0)
+                y = cmd.get("y", 0.0)
+                z = cmd.get("z", 0.0)
+                rot = cmd.get("rotation", 0.0)
+                lines.append(f"{worker_id} GoTo {x} {y} {z} {rot}")
+            elif cmd_type == "Idle":
+                duration = cmd.get("duration", 5.0)
+                lines.append(f"{worker_id} Idle {duration}")
+            elif cmd_type == "LookAround":
+                duration = cmd.get("duration", 3.0)
+                lines.append(f"{worker_id} LookAround {duration}")
 
     for worker_name in spawned_worker_names:
         has_behavior = any(wb.get("worker_id") == worker_name for wb in worker_behaviors)
         if not has_behavior:
-            agent_name = name_map.get(worker_name, worker_name)
-            if agent_name in registered_names:
-                default_cmds = ["Idle 10"]
-                print(f"[INFO] Injecting default idle for {agent_name}: {default_cmds}")
-                try:
-                    agent_manager.inject_command(
-                        agent_name=agent_name,
-                        command_list=default_cmds,
-                        force_inject=True,
-                        instant=True,
-                    )
-                    injected += 1
-                except Exception as e:
-                    print(f"[ERROR] Failed to inject default commands for {agent_name}: {e}")
-                    failed += 1
+            lines.append(f"{worker_name} Idle 10")
 
-    print(f"[INFO] Command injection: {injected} injected, {failed} failed")
-    return injected, failed
+    return lines
+
+
+def write_command_file(worker_behaviors, spawned_worker_names, path=COMMAND_FILE_PATH):
+    """Write worker commands to a file for character_behavior.py to consume.
+
+    Returns the number of command lines written.
+    """
+    lines = _build_command_file_lines(worker_behaviors, spawned_worker_names)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
+        f.write("\n".join(lines) + "\n")
+    print(f"[INFO] Wrote {len(lines)} command lines to {path}")
+    for line in lines:
+        print(f"[INFO]   {line}")
+    return len(lines)
+
+
+def setup_command_file_path(path=COMMAND_FILE_PATH):
+    """Configure omni.anim.people to read commands from the written file."""
+    settings = carb.settings.get_settings()
+    settings.set("/exts/omni.anim.people/command_settings/command_file_path", path)
+    settings.set("/exts/omni.anim.people/command_settings/number_of_loop", "1")
+    print(f"[INFO] Command file path set to: {path}")

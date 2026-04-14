@@ -76,7 +76,7 @@ from isaac_backend.semantics import clear_unwanted_warehouse_semantics, apply_us
 from isaac_backend.spawner import get_geofenced_spawner, spawn_hazard_zones
 from isaac_backend.warehouse import spawn_warehouse_layout, hide_driver_prims
 from isaac_backend.workers import spawn_workers
-from isaac_backend.animation import enable_behavior_extensions, setup_all_behaviors_async, inject_worker_commands
+from isaac_backend.animation import enable_behavior_extensions, setup_all_behaviors_async, write_command_file, setup_command_file_path
 
 COCO_CATEGORIES = {
     "person": {"name": "person", "id": 1, "supercategory": "worker", "color": [255, 0, 0], "isthing": 1},
@@ -373,58 +373,6 @@ def main():
                 for t in targets:
                     target_prim = stage.GetPrimAtPath(t)
                     print(f"[DEBUG]   Target prim {t}: valid={target_prim.IsValid()}, type={target_prim.GetTypeName()}")
-
-    if workers:
-        _progress("Attaching IRA behavior scripts to workers...")
-        attached, failed = setup_all_behaviors_async(spawned_worker_names, worker_behaviors, stage)
-        _progress(f"IRA behaviors: {attached} attached, {failed} failed")
-
-        _progress("Warming up simulation to apply Scripting API...")
-        for _ in range(120):
-            simulation_app.update()
-
-    _progress("Hiding driver prims...")
-    hide_driver_prims(stage)
-
-    _progress("Applying USD-level semantics to all scene prims...")
-    _apply_scene_semantics(stage, spawned_asset_ids, workers)
-
-    _progress("Computing scene centroid for camera framing...")
-    centroid = compute_scene_centroid(stage)
-    look_at_target = (centroid[0], centroid[1], 1.0)
-
-    _progress("Starting timeline for behavior scripts...")
-    omni.timeline.get_timeline_interface().play()
-
-    for _ in range(100):
-        world.step(render=True)
-
-    # DEBUG: Check what IRA sees after timeline play
-    print("[DEBUG][PostPlay] Checking IRA state...")
-    try:
-        from isaacsim.replicator.agent.core.stage_util import CharacterUtil
-        chars = CharacterUtil.get_characters_in_stage()
-        print(f"[DEBUG] CharacterUtil.get_characters_in_stage() returned {len(chars)} characters:")
-        for c in chars:
-            print(f"[DEBUG]   SkelRoot: {c.GetPath()}, name={c.GetName()}")
-    except Exception as e:
-        print(f"[DEBUG] CharacterUtil check failed: {e}")
-
-    try:
-        from isaacsim.replicator.agent.core.agent_manager import AgentManager
-        if AgentManager.has_instance():
-            am = AgentManager.get_instance()
-            names = am.get_all_agent_names()
-            print(f"[DEBUG] Registered agent names: {names}")
-        else:
-            print("[DEBUG] AgentManager: no instance")
-    except Exception as e:
-        print(f"[DEBUG] AgentManager check failed: {e}")
-
-    if workers:
-        _progress("Injecting worker commands via AgentManager...")
-        injected, cmd_failed = inject_worker_commands(worker_behaviors, simulation_app, spawned_worker_names, stage)
-        _progress(f"Worker commands: {injected} injected, {cmd_failed} failed")
 
     _progress("Initializing CocoWriter...")
     writer = _setup_coco_writer()
