@@ -1,21 +1,26 @@
 """
-Isaac Sim 5.1 IRA Behavior Script Manager — Built-in Behavior + Command Injection
+Isaac Sim 5.1 IRA Animation Setup
 
-Phase 1: Attach IRA's built-in character_behavior.py to worker SkelRoots (before timeline play).
-Phase 2: Write command file for character_behavior.py to consume natively.
+Phase 1 (before timeline play):
+  - Load Biped_Setup.usd (provides shared AnimationGraph + walk animations)
+  - Attach ScriptingAPI + behavior script to all worker SkelRoots
+  - Link each SkelRoot to the AnimationGraph via AnimationGraphAPI
 
-Falls back to direct USD scripting attribute manipulation when IRA extensions are unavailable.
+Phase 2 (after timeline play + agent registration):
+  - Inject commands via AgentManager.inject_command()
+
+Reference: isaacsim.replicator.agent.core.stage_util.CharacterUtil
+  - setup_python_scripts_to_character() — applies ScriptingAPI
+  - setup_animation_graph_to_character() — applies AnimationGraphAPI + links graph
+  - load_default_biped_to_stage() — loads Biped_Setup.usd invisibly
 """
 
-import asyncio
 import os
 import time
 
 import carb
 import omni.kit.app
 import omni.usd
-
-COMMAND_FILE_PATH = "/tmp/worker_commands.txt"
 
 AgentManager = None
 BehaviorScriptPaths = None
@@ -29,7 +34,6 @@ Sdf = None
 
 
 def _refresh_ira_state():
-    """Re-evaluate IRA imports after extensions are enabled at runtime."""
     global AgentManager, BehaviorScriptPaths, PrimPaths, CharacterUtil
     global add_behavior_script, _HAS_IRA_CORE, _HAS_IRA_BEHAVIOR, _HAS_KIT_COMMANDS, Sdf
 
@@ -95,6 +99,46 @@ def enable_behavior_extensions(simulation_app=None):
     _refresh_ira_state()
 
 
+def ensure_biped_setup(simulation_app=None):
+    """Load Biped_Setup.usd invisibly to provide shared AnimationGraph + animations.
+
+    Uses CharacterUtil.load_default_biped_to_stage() which creates
+    /World/Characters/Biped_Setup with walk/sit/idle animations and an
+    AnimationGraph prim. This is required before linking workers to the graph.
+
+    Returns the Biped_Setup Xform prim, or None on failure.
+    """
+    if not _HAS_IRA_CORE:
+        print("[WARN] IRA core unavailable — cannot load Biped_Setup")
+        return None
+
+    try:
+        biped_prim = CharacterUtil.load_default_biped_to_stage()
+        print(f"[INFO] Biped_Setup loaded at {biped_prim.GetPath()}")
+    except Exception as e:
+        print(f"[WARN] CharacterUtil.load_default_biped_to_stage() failed: {e}")
+        try:
+            from isaacsim.replicator.agent.core.settings import AssetPaths
+            biped_path = AssetPaths.default_biped_asset_path()
+            from pxr import Usd
+            stage = omni.usd.get_context().get_stage()
+            stage.DefinePrim("/World/Characters/Biped_Setup", "Xform")
+            prim = stage.GetPrimAtPath("/World/Characters/Biped_Setup")
+            prim.GetReferences().AddReference(biped_path)
+            prim.GetAttribute("visibility").Set("invisible")
+            print(f"[INFO] Biped_Setup loaded manually at /World/Characters/Biped_Setup")
+            biped_prim = prim
+        except Exception as e2:
+            print(f"[ERROR] Failed to load Biped_Setup: {e2}")
+            return None
+
+    if simulation_app:
+        for _ in range(30):
+            simulation_app.update()
+
+    return biped_prim
+
+
 def _find_skelroot_for_worker(worker_name, stage):
     """Find the SkelRoot prim for a worker spawned under /World/Characters/{name}."""
     xform_path = f"/World/Characters/{worker_name}"
@@ -108,12 +152,20 @@ def _find_skelroot_for_worker(worker_name, stage):
     return None
 
 
-def _attach_ira_builtin_behavior(skelroot_prim):
-    """Attach IRA's built-in character_behavior.py to a character SkelRoot.
+def _find_animation_graph(biped_prim, stage):
+    """Find the AnimationGraph prim under the Biped_Setup hierarchy."""
+    from pxr import Usd
+    for prim in Usd.PrimRange(biped_prim):
+        if prim.GetTypeName() == "AnimationGraph":
+            return prim
+    for prim in stage.Traverse():
+        if prim.GetTypeName() == "AnimationGraph":
+            return prim
+    return None
 
-    Uses CharacterUtil.setup_python_scripts_to_character() which applies
-    ScriptingAPI and sets omni:scripting:scripts to the built-in script path.
-    """
+
+def _attach_ira_builtin_behavior(skelroot_prim):
+    """Attach IRA's built-in character_behavior.py to a character SkelRoot."""
     global _HAS_IRA_CORE, BehaviorScriptPaths, CharacterUtil
 
     if not _HAS_IRA_CORE:
@@ -122,7 +174,6 @@ def _attach_ira_builtin_behavior(skelroot_prim):
 
     script_path = BehaviorScriptPaths.behavior_script_path()
     print(f"[INFO] Attaching IRA built-in behavior to {skelroot_prim.GetPath()}")
-    print(f"[INFO] Behavior script path: {script_path}")
 
     try:
         CharacterUtil.setup_python_scripts_to_character([skelroot_prim], script_path)
@@ -136,7 +187,7 @@ def _attach_ira_builtin_behavior(skelroot_prim):
 def _attach_builtin_fallback(skelroot_prim):
     """Fallback: directly set omni:scripting:scripts when IRA utils unavailable."""
     if not _HAS_KIT_COMMANDS or Sdf is None:
-        print(f"[WARN] Cannot attach behavior script — kit commands unavailable")
+        print("[WARN] Cannot attach behavior script — kit commands unavailable")
         return False
 
     try:
@@ -159,10 +210,96 @@ def _attach_builtin_fallback(skelroot_prim):
         return False
 
 
-def setup_all_behaviors_async(spawned_worker_names, worker_behaviors, stage):
-    """Phase 1: Attach IRA's built-in behavior script to all worker SkelRoots.
+def link_workers_to_animation_graph(spawned_worker_names, stage, simulation_app=None):
+    """Apply AnimationGraphAPI to each worker SkelRoot and link to AnimationGraph.
 
-    This must be called BEFORE timeline.play(). The behavior script will
+    Uses CharacterUtil.setup_animation_graph_to_character() which:
+    1. Removes any existing AnimationGraphAPI
+    2. Applies fresh AnimationGraphAPI to each SkelRoot
+    3. Sets the animationGraph relationship to point at the shared AnimationGraph
+
+    Returns (linked, failed) counts.
+    """
+    linked = 0
+    failed = 0
+
+    skelroots = []
+    for name in sorted(spawned_worker_names):
+        skelroot = _find_skelroot_for_worker(name, stage)
+        if skelroot is None:
+            print(f"[WARN] SkelRoot not found for {name}, skipping animation graph link")
+            failed += 1
+            continue
+        skelroots.append(skelroot)
+
+    if not skelroots:
+        print("[WARN] No SkelRoots found to link to AnimationGraph")
+        return 0, failed
+
+    anim_graph_prim = None
+    biped_prim = stage.GetPrimAtPath("/World/Characters/Biped_Setup")
+    if biped_prim and biped_prim.IsValid():
+        anim_graph_prim = _find_animation_graph(biped_prim, stage)
+
+    if anim_graph_prim is None:
+        for prim in stage.Traverse():
+            if prim.GetTypeName() == "AnimationGraph":
+                anim_graph_prim = prim
+                break
+
+    if anim_graph_prim is None:
+        print("[ERROR] No AnimationGraph prim found on stage — cannot link workers")
+        return 0, len(skelroots)
+
+    print(f"[INFO] Found AnimationGraph at {anim_graph_prim.GetPath()}")
+
+    if _HAS_IRA_CORE and CharacterUtil is not None:
+        try:
+            CharacterUtil.setup_animation_graph_to_character(skelroots, anim_graph_prim)
+            linked = len(skelroots)
+            print(f"[INFO] AnimationGraphAPI applied to {linked} SkelRoots via CharacterUtil")
+        except Exception as e:
+            print(f"[WARN] CharacterUtil.setup_animation_graph_to_character() failed: {e}")
+            linked, failed = _link_animation_graph_fallback(skelroots, anim_graph_prim, stage)
+    else:
+        linked, failed = _link_animation_graph_fallback(skelroots, anim_graph_prim, stage)
+
+    if simulation_app:
+        for _ in range(10):
+            simulation_app.update()
+
+    return linked, failed
+
+
+def _link_animation_graph_fallback(skelroots, anim_graph_prim, stage):
+    """Fallback: apply AnimationGraphAPI manually using omni.kit.commands."""
+    if not _HAS_KIT_COMMANDS or Sdf is None:
+        print("[WARN] Cannot link animation graph — kit commands unavailable")
+        return 0, len(skelroots)
+
+    linked = 0
+    failed = 0
+    paths = [Sdf.Path(str(sr.GetPath())) for sr in skelroots]
+    anim_graph_path = Sdf.Path(str(anim_graph_prim.GetPath()))
+
+    try:
+        omni.kit.commands.execute("RemoveAnimationGraphAPICommand", paths=paths)
+        omni.kit.commands.execute(
+            "ApplyAnimationGraphAPICommand", paths=paths, animation_graph_path=anim_graph_path
+        )
+        linked = len(skelroots)
+        print(f"[INFO] AnimationGraphAPI applied to {linked} SkelRoots via kit commands")
+    except Exception as e:
+        print(f"[ERROR] kit command animation graph linking failed: {e}")
+        failed = len(skelroots)
+
+    return linked, failed
+
+
+def setup_all_behaviors_async(spawned_worker_names, worker_behaviors, stage):
+    """Attach IRA's built-in behavior script to all worker SkelRoots.
+
+    Must be called BEFORE timeline.play(). The behavior script will
     automatically register the agent with AgentManager when play starts.
 
     Returns (attached, failed) counts.
@@ -172,17 +309,18 @@ def setup_all_behaviors_async(spawned_worker_names, worker_behaviors, stage):
 
     print(f"[DEBUG][SetupBehaviors] _HAS_IRA_CORE={_HAS_IRA_CORE}")
     print(f"[DEBUG][SetupBehaviors] spawned_worker_names={spawned_worker_names}")
-    print(f"[DEBUG][SetupBehaviors] worker_behaviors={worker_behaviors}")
 
+    all_workers = set(spawned_worker_names)
     for wb in worker_behaviors:
         worker_id = wb.get("worker_id", "worker_01")
-        if worker_id not in spawned_worker_names:
+        if worker_id not in all_workers:
             print(f"[INFO] Skipping behavior for non-spawned worker: {worker_id}")
             continue
 
-        skelroot = _find_skelroot_for_worker(worker_id, stage)
+    for worker_name in sorted(all_workers):
+        skelroot = _find_skelroot_for_worker(worker_name, stage)
         if skelroot is None:
-            print(f"[WARN] SkelRoot not found for {worker_id}")
+            print(f"[WARN] SkelRoot not found for {worker_name}")
             failed += 1
             continue
 
@@ -190,100 +328,101 @@ def setup_all_behaviors_async(spawned_worker_names, worker_behaviors, stage):
             if _HAS_IRA_CORE:
                 ok = _attach_ira_builtin_behavior(skelroot)
             else:
-                print(f"[INFO] IRA core unavailable, using fallback for {worker_id}")
                 ok = _attach_builtin_fallback(skelroot)
             if ok:
                 attached += 1
             else:
                 failed += 1
         except Exception as e:
-            print(f"[ERROR] Failed to attach behavior to {worker_id}: {e}")
+            print(f"[ERROR] Failed to attach behavior to {worker_name}: {e}")
             import traceback
             traceback.print_exc()
             failed += 1
-
-    for worker_name in spawned_worker_names:
-        has_behavior = any(wb.get("worker_id") == worker_name for wb in worker_behaviors)
-        if not has_behavior:
-            skelroot = _find_skelroot_for_worker(worker_name, stage)
-            if skelroot:
-                try:
-                    if _HAS_IRA_CORE:
-                        ok = _attach_ira_builtin_behavior(skelroot)
-                    else:
-                        ok = _attach_builtin_fallback(skelroot)
-                    if ok:
-                        attached += 1
-                    else:
-                        failed += 1
-                except Exception as e:
-                    print(f"[ERROR] Failed to attach behavior to {worker_name}: {e}")
-                    import traceback
-                    traceback.print_exc()
-                    failed += 1
 
     print(f"[INFO] IRA behaviors: {attached} attached, {failed} failed")
     return attached, failed
 
 
-def _build_command_file_lines(worker_behaviors, spawned_worker_names):
-    """Build command file lines for character_behavior.py.
+def _build_command_list(worker_behaviors, worker_name):
+    """Build a command list for a single worker from behavior config.
 
-    Format: "agent_name Command arg1 arg2 ..."
-    Example:
-        worker_01 GoTo -4.0 -5.0 0.0 90.0
-        worker_01 Idle 3.0
-        worker_02 GoTo -3.0 5.0 0.0 0.0
+    Returns a list of command strings like:
+        ["GoTo -4.0 -5.0 0.0 90.0", "Idle 5.0", "LookAround 3.0"]
     """
-    lines = []
     for wb in worker_behaviors:
-        worker_id = wb.get("worker_id", "worker_01")
-        if worker_id not in spawned_worker_names:
-            continue
-        commands = wb.get("commands", [])
-        if not commands:
-            commands = [{"command": "Idle", "duration": 10}]
-        for cmd in commands:
-            cmd_type = cmd.get("command", "")
-            if cmd_type == "GoTo":
-                x = cmd.get("x", 0.0)
-                y = cmd.get("y", 0.0)
-                z = cmd.get("z", 0.0)
-                rot = cmd.get("rotation", 0.0)
-                lines.append(f"{worker_id} GoTo {x} {y} {z} {rot}")
-            elif cmd_type == "Idle":
-                duration = cmd.get("duration", 5.0)
-                lines.append(f"{worker_id} Idle {duration}")
-            elif cmd_type == "LookAround":
-                duration = cmd.get("duration", 3.0)
-                lines.append(f"{worker_id} LookAround {duration}")
-
-    for worker_name in spawned_worker_names:
-        has_behavior = any(wb.get("worker_id") == worker_name for wb in worker_behaviors)
-        if not has_behavior:
-            lines.append(f"{worker_name} Idle 10")
-
-    return lines
+        if wb.get("worker_id") == worker_name:
+            commands = wb.get("commands", [])
+            if not commands:
+                return ["Idle 10"]
+            result = []
+            for cmd in commands:
+                cmd_type = cmd.get("command", "")
+                if cmd_type == "GoTo":
+                    x = cmd.get("x", 0.0)
+                    y = cmd.get("y", 0.0)
+                    z = cmd.get("z", 0.0)
+                    rot = cmd.get("rotation", 0.0)
+                    result.append(f"GoTo {x} {y} {z} {rot}")
+                elif cmd_type == "Idle":
+                    duration = cmd.get("duration", 5.0)
+                    result.append(f"Idle {duration}")
+                elif cmd_type == "LookAround":
+                    duration = cmd.get("duration", 3.0)
+                    result.append(f"LookAround {duration}")
+            return result if result else ["Idle 10"]
+    return ["Idle 10"]
 
 
-def write_command_file(worker_behaviors, spawned_worker_names, path=COMMAND_FILE_PATH):
-    """Write worker commands to a file for character_behavior.py to consume.
+def inject_commands_after_play(spawned_worker_names, worker_behaviors, simulation_app=None):
+    """Inject commands to all registered agents via AgentManager.
 
-    Returns the number of command lines written.
+    Must be called AFTER timeline.play() and after waiting for agent registration.
+    Uses AgentManager.inject_command() which properly sets animation graph
+    variables through the registered behavior script instances.
+
+    Returns (injected, failed) counts.
     """
-    lines = _build_command_file_lines(worker_behaviors, spawned_worker_names)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w") as f:
-        f.write("\n".join(lines) + "\n")
-    print(f"[INFO] Wrote {len(lines)} command lines to {path}")
-    for line in lines:
-        print(f"[INFO]   {line}")
-    return len(lines)
+    global AgentManager
 
+    if not _HAS_IRA_CORE or AgentManager is None:
+        print("[WARN] AgentManager unavailable — cannot inject commands")
+        return 0, len(spawned_worker_names)
 
-def setup_command_file_path(path=COMMAND_FILE_PATH):
-    """Configure omni.anim.people to read commands from the written file."""
-    settings = carb.settings.get_settings()
-    settings.set("/exts/omni.anim.people/command_settings/command_file_path", path)
-    settings.set("/exts/omni.anim.people/command_settings/number_of_loop", "1")
-    print(f"[INFO] Command file path set to: {path}")
+    if simulation_app:
+        for _ in range(10):
+            simulation_app.update()
+
+    if not AgentManager.has_instance():
+        print("[WARN] AgentManager has no instance — no agents registered yet")
+        return 0, len(spawned_worker_names)
+
+    agent_manager = AgentManager.get_instance()
+    registered = agent_manager.get_all_agent_names()
+    print(f"[INFO] AgentManager registered agents: {list(registered)}")
+
+    injected = 0
+    failed = 0
+
+    for worker_name in sorted(spawned_worker_names):
+        if not agent_manager.agent_registered(worker_name):
+            print(f"[WARN] Agent '{worker_name}' not registered — skipping command injection")
+            failed += 1
+            continue
+
+        command_list = _build_command_list(worker_behaviors, worker_name)
+        print(f"[INFO] Injecting commands for {worker_name}: {command_list}")
+
+        try:
+            agent_manager.inject_command(
+                agent_name=worker_name,
+                command_list=command_list,
+                force_inject=True,
+                instant=True,
+            )
+            injected += 1
+        except Exception as e:
+            print(f"[ERROR] Failed to inject commands for {worker_name}: {e}")
+            failed += 1
+
+    print(f"[INFO] Command injection: {injected} succeeded, {failed} failed")
+    return injected, failed

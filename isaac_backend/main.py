@@ -76,7 +76,13 @@ from isaac_backend.semantics import clear_unwanted_warehouse_semantics, apply_us
 from isaac_backend.spawner import get_geofenced_spawner, spawn_hazard_zones
 from isaac_backend.warehouse import spawn_warehouse_layout, hide_driver_prims
 from isaac_backend.workers import spawn_workers
-from isaac_backend.animation import enable_behavior_extensions, setup_all_behaviors_async, write_command_file, setup_command_file_path
+from isaac_backend.animation import (
+    enable_behavior_extensions,
+    setup_all_behaviors_async,
+    ensure_biped_setup,
+    link_workers_to_animation_graph,
+    inject_commands_after_play,
+)
 
 COCO_CATEGORIES = {
     "person": {"name": "person", "id": 1, "supercategory": "worker", "color": [255, 0, 0], "isthing": 1},
@@ -358,15 +364,18 @@ def main():
         spawned_worker_names = spawn_workers(workers, worker_behaviors, asset_library, stage, simulation_app)
 
     if workers:
+        _progress("Loading Biped_Setup for AnimationGraph...")
+        ensure_biped_setup(simulation_app=simulation_app)
+
         _progress("Attaching IRA behavior scripts to workers...")
         attached, failed = setup_all_behaviors_async(spawned_worker_names, worker_behaviors, stage)
         _progress(f"IRA behaviors: {attached} attached, {failed} failed")
 
-        _progress("Writing command file for character_behavior.py...")
-        write_command_file(worker_behaviors, spawned_worker_names)
-        setup_command_file_path()
+        _progress("Linking workers to AnimationGraph...")
+        linked, link_failed = link_workers_to_animation_graph(spawned_worker_names, stage, simulation_app)
+        _progress(f"AnimationGraph linking: {linked} linked, {link_failed} failed")
 
-        _progress("Warming up simulation to apply Scripting API...")
+        _progress("Warming up simulation to apply ScriptingAPI + AnimationGraphAPI...")
         for _ in range(120):
             simulation_app.update()
 
@@ -386,27 +395,11 @@ def main():
     for _ in range(100):
         world.step(render=True)
 
-    # DEBUG: Check what IRA sees after timeline play
-    print("[DEBUG][PostPlay] Checking IRA state...")
-    try:
-        from isaacsim.replicator.agent.core.stage_util import CharacterUtil
-        chars = CharacterUtil.get_characters_in_stage()
-        print(f"[DEBUG] CharacterUtil.get_characters_in_stage() returned {len(chars)} characters:")
-        for c in chars:
-            print(f"[DEBUG]   SkelRoot: {c.GetPath()}, name={c.GetName()}")
-    except Exception as e:
-        print(f"[DEBUG] CharacterUtil check failed: {e}")
-
-    try:
-        from isaacsim.replicator.agent.core.agent_manager import AgentManager
-        if AgentManager.has_instance():
-            am = AgentManager.get_instance()
-            names = am.get_all_agent_names()
-            print(f"[DEBUG] Registered agent names: {names}")
-        else:
-            print("[DEBUG] AgentManager: no instance")
-    except Exception as e:
-        print(f"[DEBUG] AgentManager check failed: {e}")
+    _progress("Injecting commands via AgentManager...")
+    injected, inj_failed = inject_commands_after_play(
+        spawned_worker_names, worker_behaviors, simulation_app=simulation_app
+    )
+    _progress(f"Command injection: {injected} succeeded, {inj_failed} failed")
 
     _progress("Initializing CocoWriter...")
     writer = _setup_coco_writer()
