@@ -88,8 +88,6 @@ def enable_behavior_extensions(simulation_app=None):
 
     _refresh_ira_state()
 
-    _refresh_ira_state()
-
 
 def _find_skelroot_for_worker(worker_name, stage):
     """Find the SkelRoot prim for a worker spawned under /World/Characters/{name}."""
@@ -114,18 +112,6 @@ def _attach_ira_builtin_behavior(skelroot_prim):
 
     if not _HAS_IRA_CORE:
         print("[WARN] IRA core unavailable, cannot attach built-in behavior")
-        return False
-
-    script_path = BehaviorScriptPaths.behavior_script_path()
-    print(f"[INFO] Attaching IRA built-in behavior to {skelroot_prim.GetPath()}")
-    print(f"[INFO] Behavior script path: {script_path}")
-
-    try:
-        CharacterUtil.setup_python_scripts_to_character([skelroot_prim], script_path)
-        print(f"[INFO] IRA built-in behavior attached to {skelroot_prim.GetPath()}")
-        return True
-    except Exception as e:
-        print(f"[ERROR] Failed to attach built-in behavior to {skelroot_prim.GetPath()}: {e}")
         return False
 
     script_path = BehaviorScriptPaths.behavior_script_path()

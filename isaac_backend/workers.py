@@ -59,13 +59,8 @@ def _ensure_animation_graph_prim(stage):
         print(f"[INFO] AnimationGraph prim already exists at {graph_path}")
         return existing
 
-    stage.DefinePrim(graph_path, "AnimationGraph")
-    graph_prim = stage.GetPrimAtPath(graph_path)
-    enabled_attr = graph_prim.GetAttribute("enabled")
-    if not enabled_attr or not enabled_attr.IsValid():
-        enabled_attr = graph_prim.CreateAttribute("enabled", Sdf.ValueTypeNames.Bool, True)
-    enabled_attr.Set(True)
-    print(f"[INFO] Created AnimationGraph prim at {graph_path} (enabled=True)")
+    graph_prim = AnimGraphSchema.AnimationGraph.Define(stage, graph_path)
+    print(f"[INFO] Created AnimationGraph prim at {graph_path} (typed schema)")
     return graph_prim
 
 
