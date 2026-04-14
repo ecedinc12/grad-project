@@ -13,35 +13,54 @@ import time
 import omni.kit.app
 import omni.usd
 
-try:
-    from isaacsim.replicator.agent.core.agent_manager import AgentManager
-    from isaacsim.replicator.agent.core.settings import BehaviorScriptPaths, PrimPaths
-    from isaacsim.replicator.agent.core.stage_util import CharacterUtil
-    _HAS_IRA_CORE = True
-except ImportError:
-    _HAS_IRA_CORE = False
-    AgentManager = None
-    BehaviorScriptPaths = None
-    PrimPaths = None
-    CharacterUtil = None
+AgentManager = None
+BehaviorScriptPaths = None
+PrimPaths = None
+CharacterUtil = None
+add_behavior_script = None
+_HAS_IRA_CORE = False
+_HAS_IRA_BEHAVIOR = False
+_HAS_KIT_COMMANDS = False
+Sdf = None
 
-try:
-    from isaacsim.replicator.behavior.utils.behavior_utils import add_behavior_script
-    _HAS_IRA_BEHAVIOR = True
-except ImportError:
-    _HAS_IRA_BEHAVIOR = False
-    add_behavior_script = None
 
-try:
-    import omni.kit.commands
-    _HAS_KIT_COMMANDS = True
-except ImportError:
-    _HAS_KIT_COMMANDS = False
+def _refresh_ira_state():
+    """Re-evaluate IRA imports after extensions are enabled at runtime."""
+    global AgentManager, BehaviorScriptPaths, PrimPaths, CharacterUtil
+    global add_behavior_script, _HAS_IRA_CORE, _HAS_IRA_BEHAVIOR, _HAS_KIT_COMMANDS, Sdf
 
-try:
-    from pxr import Sdf
-except ImportError:
-    Sdf = None
+    try:
+        from isaacsim.replicator.agent.core.agent_manager import AgentManager as _AM
+        from isaacsim.replicator.agent.core.settings import BehaviorScriptPaths as _BSP, PrimPaths as _PP
+        from isaacsim.replicator.agent.core.stage_util import CharacterUtil as _CU
+        AgentManager = _AM
+        BehaviorScriptPaths = _BSP
+        PrimPaths = _PP
+        CharacterUtil = _CU
+        _HAS_IRA_CORE = True
+        print("[INFO] IRA core imports loaded successfully")
+    except ImportError as e:
+        print(f"[WARN] IRA core imports failed: {e}")
+        _HAS_IRA_CORE = False
+
+    try:
+        from isaacsim.replicator.behavior.utils.behavior_utils import add_behavior_script as _abs
+        add_behavior_script = _abs
+        _HAS_IRA_BEHAVIOR = True
+    except ImportError:
+        _HAS_IRA_BEHAVIOR = False
+
+    try:
+        import omni.kit.commands
+        _HAS_KIT_COMMANDS = True
+    except ImportError:
+        _HAS_KIT_COMMANDS = False
+
+    try:
+        from pxr import Sdf as _Sdf
+        Sdf = _Sdf
+    except ImportError:
+        Sdf = None
 
 
 def enable_behavior_extensions(simulation_app=None):
@@ -67,6 +86,10 @@ def enable_behavior_extensions(simulation_app=None):
         for _ in range(30):
             simulation_app.update()
 
+    _refresh_ira_state()
+
+    _refresh_ira_state()
+
 
 def _find_skelroot_for_worker(worker_name, stage):
     """Find the SkelRoot prim for a worker spawned under /World/Characters/{name}."""
@@ -87,8 +110,22 @@ def _attach_ira_builtin_behavior(skelroot_prim):
     Uses CharacterUtil.setup_python_scripts_to_character() which applies
     ScriptingAPI and sets omni:scripting:scripts to the built-in script path.
     """
+    global _HAS_IRA_CORE, BehaviorScriptPaths, CharacterUtil
+
     if not _HAS_IRA_CORE:
         print("[WARN] IRA core unavailable, cannot attach built-in behavior")
+        return False
+
+    script_path = BehaviorScriptPaths.behavior_script_path()
+    print(f"[INFO] Attaching IRA built-in behavior to {skelroot_prim.GetPath()}")
+    print(f"[INFO] Behavior script path: {script_path}")
+
+    try:
+        CharacterUtil.setup_python_scripts_to_character([skelroot_prim], script_path)
+        print(f"[INFO] IRA built-in behavior attached to {skelroot_prim.GetPath()}")
+        return True
+    except Exception as e:
+        print(f"[ERROR] Failed to attach built-in behavior to {skelroot_prim.GetPath()}: {e}")
         return False
 
     script_path = BehaviorScriptPaths.behavior_script_path()

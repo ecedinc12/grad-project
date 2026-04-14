@@ -46,9 +46,31 @@ def _wait_for_skelroot(prim_path, stage, simulation_app, max_ticks=240):
     return None
 
 
-def _apply_animation_graph(skelroot, simulation_app):
-    """Apply AnimationGraphAPI to a SkelRoot prim, link it to the AnimationGraph
-    prim inside the referenced USD, and force the graph enabled."""
+def _ensure_animation_graph_prim(stage):
+    """Create /World/AnimationGraph prim at stage root if it doesn't exist.
+
+    Character USDs contain an animationGraph relationship that points to
+    /World/AnimationGraph. This prim must exist at the stage level, not
+    nested under each SkelRoot.
+    """
+    graph_path = "/World/AnimationGraph"
+    existing = stage.GetPrimAtPath(graph_path)
+    if existing and existing.IsValid():
+        print(f"[INFO] AnimationGraph prim already exists at {graph_path}")
+        return existing
+
+    stage.DefinePrim(graph_path, "AnimationGraph")
+    graph_prim = stage.GetPrimAtPath(graph_path)
+    enabled_attr = graph_prim.GetAttribute("enabled")
+    if not enabled_attr or not enabled_attr.IsValid():
+        enabled_attr = graph_prim.CreateAttribute("enabled", Sdf.ValueTypeNames.Bool, True)
+    enabled_attr.Set(True)
+    print(f"[INFO] Created AnimationGraph prim at {graph_path} (enabled=True)")
+    return graph_prim
+
+
+def _apply_animation_graph(skelroot, simulation_app, graph_prim):
+    """Apply AnimationGraphAPI to a SkelRoot prim, link it to /World/AnimationGraph."""
     try:
         anim_api = AnimGraphSchema.AnimationGraphAPI.Apply(skelroot)
         print(f"[INFO] Applied AnimationGraphAPI to {skelroot.GetPath()}")
@@ -56,24 +78,9 @@ def _apply_animation_graph(skelroot, simulation_app):
         print(f"[WARN] AnimationGraphAPI.Apply failed for {skelroot.GetPath()}: {e}")
         return False
 
-    graph_prim = None
-    for child in Usd.PrimRange(skelroot):
-        if child.GetTypeName() == "AnimationGraph":
-            graph_prim = child
-            break
-
-    if graph_prim is not None:
-        graph_path = str(graph_prim.GetPath())
-        anim_api.GetAnimationGraphRel().SetTargets([Sdf.Path(graph_path)])
-        print(f"[INFO] Linked AnimationGraphAPI -> {graph_path}")
-
-        enabled_attr = graph_prim.GetAttribute("enabled")
-        if not enabled_attr or not enabled_attr.IsValid():
-            enabled_attr = graph_prim.CreateAttribute("enabled", Sdf.ValueTypeNames.Bool, True)
-        enabled_attr.Set(True)
-        print(f"[INFO] AnimationGraph enabled=True at {graph_path}")
-    else:
-        print(f"[WARN] No AnimationGraph prim found under {skelroot.GetPath()}")
+    graph_path = str(graph_prim.GetPath())
+    anim_api.GetAnimationGraphRel().SetTargets([Sdf.Path(graph_path)])
+    print(f"[INFO] Linked AnimationGraphAPI -> {graph_path}")
 
     for _ in range(10):
         simulation_app.update()
@@ -104,6 +111,7 @@ def spawn_workers(workers, worker_behaviors, asset_library, stage, simulation_ap
 
     if workers:
         stage.DefinePrim("/World/Characters", "Xform")
+        graph_prim = _ensure_animation_graph_prim(stage)
 
     spawned_names = set()
     spawned_prims = []
@@ -130,12 +138,12 @@ def spawn_workers(workers, worker_behaviors, asset_library, stage, simulation_ap
 
         print(f"[INFO] Spawned {name} @ ({spawn_x:.2f}, {spawn_y:.2f}, 0.0) ppe={ppe_state}")
 
-    if simulation_app is not None:
+    if simulation_app is not None and workers:
         for prim_path in spawned_prims:
             name = prim_path.rsplit("/", 1)[-1]
             skelroot = _wait_for_skelroot(prim_path, stage, simulation_app)
             if skelroot is not None:
-                ok = _apply_animation_graph(skelroot, simulation_app)
+                ok = _apply_animation_graph(skelroot, simulation_app, graph_prim)
                 if not ok:
                     print(f"[WARN] AnimationGraphAPI not applied to {name}; character may not animate.")
             else:
@@ -146,7 +154,7 @@ def spawn_workers(workers, worker_behaviors, asset_library, stage, simulation_ap
             prim = stage.GetPrimAtPath(prim_path)
             skelroot = _find_skelroot(prim) if prim and prim.IsValid() else None
             if skelroot is not None:
-                ok = _apply_animation_graph(skelroot, simulation_app)
+                ok = _apply_animation_graph(skelroot, simulation_app, graph_prim)
                 if not ok:
                     print(f"[WARN] AnimationGraphAPI not applied to {name}; character may not animate.")
             else:
