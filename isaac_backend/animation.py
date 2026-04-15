@@ -72,7 +72,13 @@ def _refresh_ira_state():
 
 
 def enable_behavior_extensions(simulation_app=None):
-    """Enable extensions required for IRA behavior scripts."""
+    """Enable extensions required for IRA behavior scripts and configure navmesh settings."""
+    settings = carb.settings.get_settings()
+    settings.set("/persistent/omni/anim/people/navmeshBasedNavigation", False)
+    settings.set("/exts/omni.anim.people/navigation_settings/navmesh_enabled", False)
+    settings.set("/exts/omni.anim.people/navigation_settings/dynamic_avoidance_enabled", True)
+    print("[INFO] Navmesh disabled — GoTo uses direct navigation with dynamic avoidance")
+
     manager = omni.kit.app.get_app().get_extension_manager()
     extensions = [
         "omni.kit.scripting",
