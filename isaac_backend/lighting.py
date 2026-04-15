@@ -1,12 +1,11 @@
 """
-Lighting Setup
+Camera and Lighting Setup
 
 Creates dome/distant/sphere lights based on lighting condition and
-delegates camera + render product creation to camera.py.
+returns a camera + render product for Replicator SDG.
 """
 
 import omni.replicator.core as rep
-from isaac_backend.camera import create_camera_and_render_product
 
 LIGHTING_MAP = {
     "daylight": {"intensity": 800, "color": (0.85, 0.90, 1.0)},
@@ -65,5 +64,8 @@ def setup_camera_and_lighting(config):
                 scale=0.15,
             )
 
-    camera, render_product = create_camera_and_render_product(config)
+    camera = rep.create.camera(position=(0, 0, 3), look_at=(0, 0, 1))
+    width = config.get("resolution_width", 1920)
+    height = config.get("resolution_height", 1080)
+    render_product = rep.create.render_product(camera, (width, height))
     return camera, render_product

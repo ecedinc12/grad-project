@@ -21,11 +21,11 @@ FLOOR_Z = 0.3
 
 ANGLE_HEIGHT_MAP = {
     "overhead":   (5.0, 6.0),
-    "high_angle": (3.0, 4.5),
+    "high_angle": (4.0, 6.0),
     "eye_level":  (1.4, 2.0),
     "low_angle":  (0.3, 1.0),
 }
-DEFAULT_HEIGHT_RANGE = (1.4, 4.5)
+DEFAULT_HEIGHT_RANGE = (1.4, 6.0)
 
 ANGLE_ELEVATION_MAP = {
     "overhead":   (55, 70),
@@ -163,19 +163,6 @@ def positions_for_angles(angle_hints, hazard_zones=None,
         ),
         key=lambda p: p[2], reverse=True,
     )
-
-
-def create_camera_and_render_product(config):
-    """Create a camera and render product with resolution from config.
-
-    resolution_width / resolution_height keys in config control output size.
-    Defaults to 1920x1080 (16:9 landscape).
-    """
-    width = config.get("resolution_width", 1920)
-    height = config.get("resolution_height", 1080)
-    camera = rep.create.camera(position=(0, 0, 3), look_at=(0, 0, 1))
-    render_product = rep.create.render_product(camera, (width, height))
-    return camera, render_product
 
 
 def orbit_distribution(scene_positions):
