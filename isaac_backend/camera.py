@@ -165,6 +165,19 @@ def positions_for_angles(angle_hints, hazard_zones=None,
     )
 
 
+def create_camera_and_render_product(config):
+    """Create a camera and render product with resolution from config.
+
+    resolution_width / resolution_height keys in config control output size.
+    Defaults to 1920x1080 (16:9 landscape).
+    """
+    width = config.get("resolution_width", 1920)
+    height = config.get("resolution_height", 1080)
+    camera = rep.create.camera(position=(0, 0, 3), look_at=(0, 0, 1))
+    render_product = rep.create.render_product(camera, (width, height))
+    return camera, render_product
+
+
 def orbit_distribution(scene_positions):
     """Return a rep.distribution.uniform over the bounding box of scene_positions."""
     xs = [p[0] for p in scene_positions]
