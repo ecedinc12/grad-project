@@ -85,6 +85,9 @@ simulation_app = SimulationApp({
         "isaacsim.replicator.agent.core",
         "isaacsim.replicator.behavior",
     ],
+    "disabled_extensions": [
+        "omni.kit.window.property",
+    ],
 })
 
 import carb
@@ -109,26 +112,38 @@ from isaac_backend.animation import (
     inject_commands_after_play,
 )
 
-COCO_CATEGORIES = {
-    "person": {"name": "person", "id": 1, "supercategory": "worker", "color": [255, 0, 0], "isthing": 1},
-    "vehicle": {"name": "vehicle", "id": 2, "supercategory": "equipment", "color": [0, 255, 0], "isthing": 1},
-    "rack": {"name": "rack", "id": 3, "supercategory": "warehouse", "color": [0, 0, 255], "isthing": 1},
-    "pallet": {"name": "pallet", "id": 4, "supercategory": "warehouse", "color": [255, 255, 0], "isthing": 1},
-    "box": {"name": "box", "id": 5, "supercategory": "warehouse", "color": [255, 0, 255], "isthing": 1},
-    "barrel": {"name": "barrel", "id": 6, "supercategory": "warehouse", "color": [0, 255, 255], "isthing": 1},
-    "cone": {"name": "cone", "id": 7, "supercategory": "safety", "color": [255, 128, 0], "isthing": 1},
-    "fire_extinguisher": {"name": "fire_extinguisher", "id": 8, "supercategory": "safety", "color": [255, 0, 128], "isthing": 1},
-    "cart": {"name": "cart", "id": 9, "supercategory": "warehouse", "color": [128, 255, 0], "isthing": 1},
-    "sign": {"name": "sign", "id": 10, "supercategory": "safety", "color": [128, 0, 255], "isthing": 1},
-    "pillar": {"name": "pillar", "id": 11, "supercategory": "structure", "color": [0, 128, 255], "isthing": 1},
-    "hazard_zone_warning": {"name": "hazard_zone_warning", "id": 12, "supercategory": "zone", "color": [255, 255, 0], "isthing": 0},
-    "hazard_zone_restricted": {"name": "hazard_zone_restricted", "id": 13, "supercategory": "zone", "color": [255, 128, 0], "isthing": 0},
-    "hazard_zone_critical": {"name": "hazard_zone_critical", "id": 14, "supercategory": "zone", "color": [255, 0, 0], "isthing": 0},
-}
+COCO_CATEGORIES = [
+    {"name": "person", "id": 1, "supercategory": "worker"},
+    {"name": "vehicle", "id": 2, "supercategory": "equipment"},
+    {"name": "rack", "id": 3, "supercategory": "warehouse"},
+    {"name": "pallet", "id": 4, "supercategory": "warehouse"},
+    {"name": "box", "id": 5, "supercategory": "warehouse"},
+    {"name": "barrel", "id": 6, "supercategory": "warehouse"},
+    {"name": "cone", "id": 7, "supercategory": "safety"},
+    {"name": "fire_extinguisher", "id": 8, "supercategory": "safety"},
+    {"name": "cart", "id": 9, "supercategory": "warehouse"},
+    {"name": "sign", "id": 10, "supercategory": "safety"},
+    {"name": "pillar", "id": 11, "supercategory": "structure"},
+    {"name": "hazard_zone_warning", "id": 12, "supercategory": "zone"},
+    {"name": "hazard_zone_restricted", "id": 13, "supercategory": "zone"},
+    {"name": "hazard_zone_critical", "id": 14, "supercategory": "zone"},
+]
 
 
 def _apply_scene_semantics(stage, spawned_asset_ids, workers):
-    """Walk the stage and apply USD-level semantics to all prims that need them."""
+    """Walk the stage and apply/correct USD-level semantics.
+
+    1. Force-set semantics on spawned assets (vehicles, equipment) by path match.
+    2. Force-set 'person' on all worker Xform and SkelRoot prims.
+    3. Force-set hazard zone semantics from /World/HazardZones/.
+    4. Strip any semantic labels not in our allowed set to prevent 'other' category.
+    """
+
+    VALID_CLASSES = {
+        "person", "vehicle", "rack", "pallet", "box", "barrel",
+        "cone", "fire_extinguisher", "cart", "sign", "pillar",
+        "hazard_zone_warning", "hazard_zone_restricted", "hazard_zone_critical",
+    }
 
     def set_semantic(prim, class_name):
         data_attr = "semantic:Semantics:params:semanticData"
@@ -142,7 +157,14 @@ def _apply_scene_semantics(stage, spawned_asset_ids, workers):
         else:
             prim.GetAttribute(type_attr).Set("class")
 
+    def clear_semantic(prim):
+        for attr_name in ["semantic:Semantics:params:semanticData", "semantic:Semantics:params:semanticType"]:
+            attr = prim.GetAttribute(attr_name)
+            if attr and attr.HasAuthoredValue():
+                attr.Clear()
+
     applied = 0
+    cleared = 0
 
     for asset_id, semantic_class in spawned_asset_ids:
         target_name = os.path.basename(asset_id)
@@ -151,29 +173,41 @@ def _apply_scene_semantics(stage, spawned_asset_ids, workers):
             if not prim.IsValid():
                 continue
             if target_name in path:
-                parent = prim
-                found = False
-                while parent and parent.IsValid():
-                    if parent.HasAttribute("semantic:Semantics:params:semanticData"):
-                        found = True
-                        break
-                    parent = parent.GetParent()
-                if not found and not prim.HasAttribute("semantic:Semantics:params:semanticData"):
-                    set_semantic(prim, semantic_class)
-                    applied += 1
-                    print(f"[INFO] Applied USD semantics '{semantic_class}' to {path}")
-                    break
+                set_semantic(prim, semantic_class)
+                applied += 1
+                print(f"[INFO] Applied USD semantics '{semantic_class}' to {path}")
+                break
 
     if workers:
         for prim in stage.Traverse():
             path = str(prim.GetPath())
-            if path.startswith("/World/Characters/") and prim.GetTypeName() == "Xform":
-                if not prim.HasAttribute("semantic:Semantics:params:semanticData"):
+            if path.startswith("/World/Characters/"):
+                if prim.GetTypeName() in ("Xform", "SkelRoot"):
                     set_semantic(prim, "person")
                     applied += 1
                     print(f"[INFO] Applied USD semantics 'person' to {path}")
 
-    _progress(f"Applied USD-level semantics to {applied} prims.")
+    hazard_labels = {"hazard_zone_warning", "hazard_zone_restricted", "hazard_zone_critical"}
+    for prim in stage.Traverse():
+        path = str(prim.GetPath())
+        if path.startswith("/World/HazardZones/"):
+            data_attr = prim.GetAttribute("semantic:Semantics:params:semanticData")
+            if data_attr and data_attr.HasAuthoredValue():
+                label = str(data_attr.Get())
+                if label in hazard_labels:
+                    set_semantic(prim, label)
+                    applied += 1
+
+    for prim in stage.Traverse():
+        data_attr = prim.GetAttribute("semantic:Semantics:params:semanticData")
+        if not data_attr or not data_attr.HasAuthoredValue():
+            continue
+        label = data_attr.Get()
+        if label and str(label).lower() not in VALID_CLASSES:
+            cleared += 1
+            clear_semantic(prim)
+
+    _progress(f"Applied {applied} semantics, cleared {cleared} unwanted labels.")
 
 
 def compute_scene_centroid(stage):

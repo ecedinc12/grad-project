@@ -3,6 +3,7 @@ import os
 import glob
 import shutil
 import argparse
+from collections import Counter
 from PIL import Image
 
 CLASS_MAP = {
@@ -13,11 +14,55 @@ CLASS_MAP = {
     "hazard_zone_warning": 13, "hazard_zone_restricted": 14, "hazard_zone_critical": 15,
 }
 
+ALIAS_MAP = {
+    "worker": "person",
+    "human": "person",
+    "man": "person",
+    "woman": "person",
+    "forklift": "vehicle",
+    "truck": "vehicle",
+    "cart_trolley": "cart",
+    "trolley": "cart",
+    "safety_cone": "cone",
+    "traffic_cone": "cone",
+    "extinguisher": "fire_extinguisher",
+    "fire_ext": "fire_extinguisher",
+    "column": "pillar",
+    "post": "pillar",
+    "rack_shelf": "rack",
+    "shelf": "rack",
+    "storage_rack": "rack",
+    "pallet_box": "box",
+    "other": None,
+    "wall": None,
+    "floor": None,
+    "ceiling": None,
+    "roof": None,
+    "ground": None,
+    "light": None,
+    "door": None,
+    "window": None,
+}
+
 REVERSE_CLASS_MAP = {v: k for k, v in CLASS_MAP.items()}
+
+
+def _resolve_class(raw_name):
+    name = raw_name.lower().strip()
+    if name in CLASS_MAP:
+        return CLASS_MAP[name]
+    if name in ALIAS_MAP:
+        mapped = ALIAS_MAP[name]
+        if mapped is None:
+            return -1
+        return CLASS_MAP.get(mapped, -1)
+    return -1
 
 
 def _find_annotations(dataset_dir):
     matches = glob.glob(os.path.join(dataset_dir, "coco_annotations_*.json"))
+    if not matches:
+        matches = glob.glob(os.path.join(dataset_dir, "Replicator", "coco_annotations_*.json"))
     if not matches:
         matches = glob.glob(os.path.join(dataset_dir, "annotations.json"))
     return matches[0] if matches else None
@@ -37,11 +82,15 @@ def convert_coco_to_yolo(dataset_dir="/tmp/dataset"):
         return
 
     session_dir = _find_session_dir(dataset_dir)
+    print(f"[INFO] COCO annotations: {annotations_path}")
+    print(f"[INFO] Session dir: {session_dir}")
 
     with open(annotations_path, "r") as f:
         coco_data = json.load(f)
 
     cat_id_to_name = {cat["id"]: cat["name"] for cat in coco_data.get("categories", [])}
+    print(f"[INFO] COCO categories: {cat_id_to_name}")
+
     images = {img["id"]: img for img in coco_data.get("images", [])}
     annotations = coco_data.get("annotations", [])
 
@@ -55,6 +104,7 @@ def convert_coco_to_yolo(dataset_dir="/tmp/dataset"):
     converted = 0
     total_bboxes = 0
     skipped_bboxes = 0
+    skipped_names = Counter()
 
     for img_id, img_info in images.items():
         file_name = img_info["file_name"]
@@ -82,10 +132,11 @@ def convert_coco_to_yolo(dataset_dir="/tmp/dataset"):
                 total_bboxes += 1
                 cat_id = ann["category_id"]
                 class_name = cat_id_to_name.get(cat_id, "")
-                class_id = CLASS_MAP.get(class_name.lower(), -1)
+                class_id = _resolve_class(class_name)
 
                 if class_id == -1:
                     skipped_bboxes += 1
+                    skipped_names[class_name] += 1
                     continue
 
                 x_min, y_min, bbox_w, bbox_h = ann["bbox"]
@@ -101,10 +152,16 @@ def convert_coco_to_yolo(dataset_dir="/tmp/dataset"):
 
     print(f"Successfully converted {converted} frames to YOLO format in {dataset_dir}")
     print(f"  Total bounding boxes: {total_bboxes}, Skipped (unresolved class): {skipped_bboxes}")
+    if skipped_names:
+        print(f"  Skipped class breakdown:")
+        for name, count in skipped_names.most_common():
+            print(f"    '{name}': {count}")
 
 
 def convert_instance_masks(dataset_dir="/tmp/dataset"):
     seg_files = sorted(glob.glob(os.path.join(dataset_dir, "panoptic_*.png")))
+    if not seg_files:
+        seg_files = sorted(glob.glob(os.path.join(dataset_dir, "Replicator", "panoptic_*.png")))
     if not seg_files:
         print("Warning: No panoptic segmentation files found. Skipping mask conversion.")
         return 0

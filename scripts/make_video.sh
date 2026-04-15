@@ -1,5 +1,4 @@
 #!/bin/bash
-set -e
 
 DATASET_DIR=${1:-/tmp/dataset}
 OUTPUT_FILE=${2:-$DATASET_DIR/output.mp4}
@@ -17,8 +16,13 @@ if [ ! -d "$DATASET_DIR" ]; then
     exit 1
 fi
 
-# Check if there are any png files first
-count=$(find "$DATASET_DIR" -maxdepth 1 -name 'rgb_*.png' | wc -l)
+if ! command -v ffmpeg &> /dev/null; then
+    echo "Warning: ffmpeg not found. Skipping video generation."
+    echo "  Install ffmpeg with: apt-get install -y ffmpeg"
+    exit 0
+fi
+
+count=$(find "$DATASET_DIR" -maxdepth 2 -name 'rgb_*.png' | wc -l)
 if [ "$count" -eq 0 ]; then
     echo "Warning: No rgb_*.png files found in $DATASET_DIR. Skipping video generation."
     exit 0
@@ -32,7 +36,7 @@ i=0
 while read f; do
     ln -s "$f" "$FRAMES_DIR/$(printf 'frame_%04d.png' $i)"
     i=$((i + 1))
-done < <(find "$DATASET_DIR" -maxdepth 1 -name 'rgb_*.png' | sort -V)
+done < <(find "$DATASET_DIR" -maxdepth 2 -name 'rgb_*.png' | sort -V)
 
 if [ "$i" -lt 2 ]; then
     echo "Error: Need at least 2 frames to create a video, but found $i."

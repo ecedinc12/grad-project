@@ -12,10 +12,10 @@ Attributes written:
 import omni.usd
 from pxr import Sdf
 
-KEEP_SEMANTICS = {
-    "rack", "pallet",
-    "pillar", "cone", "sign",
-    "fire_extinguisher", "cart",
+VALID_SEMANTICS = {
+    "person", "vehicle", "rack", "pallet", "box", "barrel",
+    "cone", "fire_extinguisher", "cart", "sign", "pillar",
+    "hazard_zone_warning", "hazard_zone_restricted", "hazard_zone_critical",
 }
 
 
@@ -42,33 +42,23 @@ def apply_usd_semantics(prim_path, class_name):
 
 
 def clear_unwanted_warehouse_semantics(stage):
-    """Strip pre-existing semantics from warehouse USD structural prims,
-    keeping only rack/pallet so their bounding boxes are preserved."""
-    warehouse_root = stage.GetPrimAtPath("/Replicator/Ref_Xform")
-    if not warehouse_root.IsValid():
-        print("[WARN] Warehouse root /Replicator/Ref_Xform not found — skipping semantic cleanup.")
-        return
+    """Strip ALL semantics from prims that are not in our valid set.
 
+    Traverses the entire stage to clear labels like 'wall', 'floor',
+    'ceiling', 'other', etc. that would create unwanted categories
+    in CocoWriter. Only preserves labels in VALID_SEMANTICS.
+    """
     cleared = 0
-    for prim in warehouse_root.GetChildren():
-        for child in prim.GetAllChildren():
-            cleared += _clear_semantics_if_needed(child)
+    for prim in stage.Traverse():
+        semantic_data_attr = prim.GetAttribute("semantic:Semantics:params:semanticData")
+        if not semantic_data_attr or not semantic_data_attr.HasAuthoredValue():
+            continue
+        label = str(semantic_data_attr.Get()).lower()
+        if label not in VALID_SEMANTICS:
+            semantic_data_attr.Clear()
+            semantic_type_attr = prim.GetAttribute("semantic:Semantics:params:semanticType")
+            if semantic_type_attr and semantic_type_attr.HasAuthoredValue():
+                semantic_type_attr.Clear()
+            cleared += 1
 
-    print(f"[INFO] Cleared unwanted semantics from {cleared} warehouse prims (kept rack/pallet).")
-
-
-def _clear_semantics_if_needed(prim):
-    """Remove semantics from a prim if its label is not in KEEP_SEMANTICS."""
-    semantic_data_attr = prim.GetAttribute("semantic:Semantics:params:semanticData")
-    if not semantic_data_attr or not semantic_data_attr.HasAuthoredValue():
-        return 0
-
-    label = semantic_data_attr.Get()
-    if label.lower() in KEEP_SEMANTICS:
-        return 0
-
-    semantic_data_attr.Clear()
-    semantic_type_attr = prim.GetAttribute("semantic:Semantics:params:semanticType")
-    if semantic_type_attr and semantic_type_attr.HasAuthoredValue():
-        semantic_type_attr.Clear()
-    return 1
+    print(f"[INFO] Cleared unwanted semantics from {cleared} prims (kept: {VALID_SEMANTICS}).")

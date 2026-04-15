@@ -32,6 +32,8 @@ def gen_yaml(dataset_dir, output_path):
     class_names = [REVERSE_CLASS_MAP.get(cid, f"unknown_{cid}") for cid in present_ids]
 
     images = sorted(glob.glob(os.path.join(dataset_dir, "rgb_*.png")))
+    if not images:
+        images = sorted(glob.glob(os.path.join(dataset_dir, "Replicator", "rgb_*.png")))
     split = int(len(images) * 0.8)
     train_imgs = images[:split]
     val_imgs = images[split:]

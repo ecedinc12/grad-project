@@ -20,7 +20,6 @@ PALETTE = [
 
 
 def extract_tar_to_tmp(tar_path):
-    """Extract a dataset tar.gz to a temp directory and return the path."""
     tmp = tempfile.mkdtemp(prefix="ds_view_")
     with tarfile.open(tar_path, "r:gz") as tf:
         tf.extractall(tmp)
@@ -28,20 +27,40 @@ def extract_tar_to_tmp(tar_path):
     return candidate if os.path.isdir(candidate) else tmp
 
 
+def _resolve_dir(dataset_dir):
+    replicator = os.path.join(dataset_dir, "Replicator")
+    if os.path.isdir(replicator):
+        return dataset_dir, replicator
+    return dataset_dir, dataset_dir
+
+
+def _find_file(dataset_dir, pattern):
+    top_dir, session_dir = _resolve_dir(dataset_dir)
+    for d in [top_dir, session_dir]:
+        p = os.path.join(d, pattern)
+        if os.path.exists(p):
+            return p
+    return None
+
+
 def find_frames(dataset_dir):
-    npy_files = glob.glob(os.path.join(dataset_dir, "bounding_box_2d_tight_*.npy"))
+    top_dir, session_dir = _resolve_dir(dataset_dir)
+
+    npy_files = sorted(glob.glob(os.path.join(session_dir, "bounding_box_2d_tight_*.npy")))
+    if not npy_files:
+        npy_files = sorted(glob.glob(os.path.join(top_dir, "bounding_box_2d_tight_*.npy")))
+
     frames = []
-    for p in sorted(npy_files):
+    for p in npy_files:
         frame_str = os.path.splitext(os.path.basename(p))[0].split("_")[-1]
-        rgb_path = os.path.join(dataset_dir, f"rgb_{frame_str}.png")
-        if os.path.exists(rgb_path):
+        if _find_file(dataset_dir, f"rgb_{frame_str}.png"):
             frames.append(frame_str)
     return frames
 
 
 def draw_frame(dataset_dir, frame_str, max_width=None):
-    rgb_path = os.path.join(dataset_dir, f"rgb_{frame_str}.png")
-    npy_path = os.path.join(dataset_dir, f"bounding_box_2d_tight_{frame_str}.npy")
+    rgb_path = _find_file(dataset_dir, f"rgb_{frame_str}.png")
+    npy_path = _find_file(dataset_dir, f"bounding_box_2d_tight_{frame_str}.npy")
     img = Image.open(rgb_path).convert("RGB")
     if max_width and img.width > max_width:
         scale = max_width / img.width
@@ -66,7 +85,7 @@ def draw_frame(dataset_dir, frame_str, max_width=None):
 def make_handler(dataset_dir, frames):
     class GalleryHandler(BaseHTTPRequestHandler):
         def log_message(self, fmt, *args):
-            pass  # silence access log
+            pass
 
         def send_png(self, data):
             self.send_response(200)
@@ -143,6 +162,9 @@ def main():
     frames = find_frames(dataset_dir)
     if not frames:
         print(f"No frames found in {dataset_dir}")
+        top, sess = _resolve_dir(dataset_dir)
+        print(f"  .npy in top: {len(glob.glob(os.path.join(top, 'bounding_box_2d_tight_*.npy')))}")
+        print(f"  .npy in session: {len(glob.glob(os.path.join(sess, 'bounding_box_2d_tight_*.npy')))}")
         return
 
     print(f"Found {len(frames)} frames in {dataset_dir}")
