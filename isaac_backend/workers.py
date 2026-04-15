@@ -7,7 +7,7 @@ omni.anim.people handles animation internally — no AnimationGraph setup needed
 import random
 from pxr import Gf, Usd, UsdGeom
 import omni.usd
-from isaac_backend.semantics import apply_usd_semantics
+from isaac_backend.semantics import apply_usd_semantics, _set_semantic
 
 _PPE_KEYS = ["worker_with_ppe", "worker_with_ppe_alt"]
 _NO_PPE_KEYS = ["worker_no_ppe"]
@@ -86,6 +86,8 @@ def spawn_workers(workers, worker_behaviors, asset_library, stage, simulation_ap
         xf.AddTranslateOp().Set(Gf.Vec3d(spawn_x, spawn_y, 0.0))
 
         apply_usd_semantics(prim_path, "person")
+        for child in Usd.PrimRange(prim):
+            _set_semantic(child, "person")
         spawned_names.add(name)
 
         print(f"[INFO] Spawned {name} @ ({spawn_x:.2f}, {spawn_y:.2f}, 0.0) ppe={ppe_state}")

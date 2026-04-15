@@ -101,10 +101,9 @@ def apply_scene_semantics(stage, spawned_asset_ids, workers):
     if workers:
         for prim in stage.Traverse():
             path = str(prim.GetPath())
-            if path.startswith("/World/Characters/") and prim.GetTypeName() in ("Xform", "SkelRoot"):
+            if path.startswith("/World/Characters/"):
                 _set_semantic(prim, "person")
                 applied += 1
-                print(f"[INFO] Applied semantics 'person' to {path}")
 
     for prim in stage.Traverse():
         path = str(prim.GetPath())
