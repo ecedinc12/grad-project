@@ -90,10 +90,10 @@ from isaacsim.core.api import World
 from pxr import Usd, UsdGeom, Sdf
 
 from isaac_backend.config_loader import load_config
-from isaac_backend.camera import positions_for_angles, pick_indoor_position, clamp_to_warehouse
+from isaac_backend.camera import positions_for_angles, pick_indoor_position, clamp_to_warehouse, pick_look_at_target
 from isaac_backend.lighting import setup_camera_and_lighting
 from isaac_backend.semantics import clear_unwanted_warehouse_semantics, apply_scene_semantics
-from isaac_backend.spawner import get_geofenced_spawner, spawn_hazard_zones
+from isaac_backend.spawner import get_geofenced_spawner, spawn_hazard_zones, spawn_at_fixed_position, resolve_anchor_zone_bounds
 from isaac_backend.warehouse import spawn_warehouse_layout, hide_driver_prims
 from isaac_backend.workers import spawn_workers
 from isaac_backend.animation import (
@@ -132,13 +132,24 @@ def _tick(n):
         simulation_app.update()
 
 
-def compute_scene_centroid(stage):
+def compute_scene_centroid(stage, known_positions=None):
     """Compute average position of scene entities and collect positions for camera framing.
+
+    known_positions is an optional list of (x, y) tuples for entities whose
+    USD positions may not be resolved yet (e.g. Replicator-randomized prims).
 
     Returns ((cx, cy, cz), entity_positions, worker_positions).
     """
+    known_positions = known_positions or []
     xs, ys, zs = [], [], []
     entity_positions, worker_positions = [], []
+
+    for px, py in known_positions:
+        xs.append(px)
+        ys.append(py)
+        zs.append(0.0)
+        entity_positions.append((px, py))
+
     for prim in stage.Traverse():
         path = str(prim.GetPath())
         if not (path.startswith("/World/Characters/") or path.startswith("/World/Layout/") or path.startswith("/Replicator/")):
@@ -148,12 +159,16 @@ def compute_scene_centroid(stage):
             continue
         mat = xf.ComputeLocalToWorldTransform(Usd.TimeCode.Default())
         pos = mat.ExtractTranslation()
+        dup = any(abs(pos[0] - ex) < 0.1 and abs(pos[1] - ey) < 0.1 for ex, ey in known_positions)
+        if dup:
+            continue
         xs.append(pos[0])
         ys.append(pos[1])
         zs.append(pos[2])
         entity_positions.append((pos[0], pos[1]))
         if path.startswith("/World/Characters/"):
             worker_positions.append((pos[0], pos[1]))
+
     if not xs:
         _progress("[WARN] No entities for centroid, defaulting to (0, 0, 1.2)")
         return (0.0, 0.0, 1.2), entity_positions, worker_positions
@@ -205,7 +220,7 @@ def _configure_camera_trigger(camera, scene_config, look_at_target, entity_posit
                 worker_positions=worker_positions or None,
             )
         camera_pos = (cam_x, cam_y, cam_z)
-        _progress(f"Camera indoor: ({cam_x:.2f}, {cam_y:.2f}, {cam_z:.2f})")
+        _progress(f"Camera indoor: ({cam_x:.2f}, {cam_y:.2f}, {cam_z:.2f}), look_at=({look_at_target[0]:.2f}, {look_at_target[1]:.2f}, {look_at_target[2]:.2f})")
 
         with rep.trigger.on_frame(num_frames=NUM_FRAMES):
             with camera:
@@ -247,9 +262,16 @@ def _teardown(rep, writer, world, simulation_app):
 # --- Pipeline phases ---
 
 def _spawn_entities(scene_config, asset_library, stage, spawn_bounds_min, spawn_bounds_max):
-    """Spawn non-worker entities and return spawned_asset_ids."""
+    """Spawn non-worker entities and return (spawned_asset_ids, known_positions).
+
+    Entities with an anchor_zone are placed at the center of the matching
+    hazard zone using fixed-position spawning (no per-frame randomization).
+    Entities without anchor_zone use Replicator random spawning.
+    """
     others = [e for e in scene_config.get("entities", []) if e.get("type") != "worker"]
+    hazard_zones = scene_config.get("hazard_zones", [])
     spawned_asset_ids = []
+    known_positions = []
 
     for entity in others:
         asset_id = entity.get("asset_id", "")
@@ -260,20 +282,37 @@ def _spawn_entities(scene_config, asset_library, stage, spawn_bounds_min, spawn_
             print(f"[WARNING] Unknown asset_id '{asset_id}'. Skipping.")
             continue
 
-        spawner = get_geofenced_spawner(
-            usd_path, num_instances=1,
-            bounds_min=spawn_bounds_min, bounds_max=spawn_bounds_max,
-        )
-        prims = spawner()
         asset_type = entity.get("type", "")
         semantic_class = "vehicle" if asset_type == "vehicle" else asset_id
-        print(f"[INFO] Spawning {asset_id} with semantic class '{semantic_class}'")
-        with prims:
-            rep.modify.semantics([("class", semantic_class)])
+        anchor_zone = entity.get("anchor_zone")
+
+        zone_bounds = resolve_anchor_zone_bounds(anchor_zone, hazard_zones)
+
+        if zone_bounds is not None:
+            bmin, bmax = zone_bounds
+            cx = (bmin[0] + bmax[0]) / 2.0
+            cy = (bmin[1] + bmax[1]) / 2.0
+            cx += random.uniform(-0.5, 0.5)
+            cy += random.uniform(-0.5, 0.5)
+            prim_path, spawn_pos = spawn_at_fixed_position(
+                usd_path, position=(cx, cy, 0.0), semantic_class=semantic_class
+            )
+            known_positions.append(spawn_pos)
+            print(f"[INFO] Anchored {asset_id} to zone '{anchor_zone}' at ({cx:.2f}, {cy:.2f})")
+        else:
+            print(f"[INFO] Spawning {asset_id} with semantic class '{semantic_class}' (random placement)")
+            spawner = get_geofenced_spawner(
+                usd_path, num_instances=1,
+                bounds_min=spawn_bounds_min, bounds_max=spawn_bounds_max,
+            )
+            prims = spawner()
+            with prims:
+                rep.modify.semantics([("class", semantic_class)])
+
         spawned_asset_ids.append((asset_id, semantic_class))
 
-    _progress(f"Spawned {len(spawned_asset_ids)} non-worker entities")
-    return spawned_asset_ids
+    _progress(f"Spawned {len(spawned_asset_ids)} non-worker entities ({len(known_positions)} anchored)")
+    return spawned_asset_ids, known_positions
 
 
 def _setup_workers(scene_config, asset_library, stage):
@@ -345,10 +384,20 @@ def main():
         _progress("Spawning hazard zones...")
         spawn_hazard_zones(hazard_zones, stage)
 
-    spawned_asset_ids = _spawn_entities(scene_config, asset_library, stage, spawn_bounds_min, spawn_bounds_max)
+    spawned_asset_ids, entity_known_positions = _spawn_entities(scene_config, asset_library, stage, spawn_bounds_min, spawn_bounds_max)
 
     spawned_worker_names, worker_behaviors = _setup_workers(scene_config, asset_library, stage)
     workers = [e for e in scene_config.get("entities", []) if e.get("type") == "worker"]
+
+    worker_known_positions = []
+    for wb in worker_behaviors:
+        wid = wb.get("worker_id", "")
+        for cmd in wb.get("commands", []):
+            if cmd.get("command") == "GoTo":
+                wx = cmd.get("x", 0.0)
+                wy = cmd.get("y", 0.0)
+                worker_known_positions.append((wx, wy))
+                break
 
     _progress("Hiding driver prims...")
     hide_driver_prims(stage)
@@ -357,8 +406,12 @@ def main():
     apply_scene_semantics(stage, spawned_asset_ids, workers)
 
     _progress("Computing scene centroid for camera framing...")
-    centroid, entity_positions, worker_positions = compute_scene_centroid(stage)
-    look_at_target = (centroid[0], centroid[1], 1.0)
+    all_known_positions = entity_known_positions + worker_known_positions
+    centroid, entity_positions, worker_positions = compute_scene_centroid(stage, known_positions=all_known_positions)
+
+    look_at_target = pick_look_at_target(entity_positions, worker_positions, hazard_zones)
+
+    _progress(f"Camera look_at target: ({look_at_target[0]:.2f}, {look_at_target[1]:.2f}, {look_at_target[2]:.2f})")
 
     _progress("Starting timeline for behavior scripts...")
     omni.timeline.get_timeline_interface().play()

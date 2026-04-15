@@ -86,6 +86,7 @@ def generate_scene_config(prompt: str, output_path: str):
     - camera_angles values MUST each be exactly one of: 'overhead', 'high_angle', 'eye_level', 'low_angle'. Choose based on the user's description; default to ['eye_level'] if unspecified.
     - camera_mode MUST be 'indoor' for all warehouse scenes. This places the camera at a fixed position inside the warehouse at realistic surveillance heights. Do NOT use 'orbit'.
     - camera_position is optional. If omitted, it is auto-derived from worker and hazard zone positions. Only set it if the user specifies an exact viewpoint.
+    - focal_length is optional. Default is 14.0 (wide indoor FOV ~90deg). Use 10-12 for very wide shots showing the entire warehouse, 18-24 for narrower focus on specific areas. Do NOT set it unless the user specifies a field of view preference.
     - lighting_conditions MUST be exactly one of: 'daylight', 'overcast', 'dusk', 'night'. Choose based on the user's description; default to 'daylight' if unspecified.
 
     HAZARD ZONE RULES:

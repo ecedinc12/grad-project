@@ -5,6 +5,10 @@ Provides indoor fixed-position placement and orbit distribution for
 camera viewpoints in warehouse SDG. Pure Python — no Isaac Sim imports
 except rep.distribution in orbit_distribution().
 
+The indoor camera is placed at an OFFSET from the scene centroid,
+looking toward the centroid. This ensures the camera frames the entire
+scene rather than hovering directly above it.
+
 Constants define warehouse interior bounds, angle-to-height mappings,
 and angle-to-elevation mappings.
 """
@@ -47,17 +51,14 @@ def clamp_to_warehouse(x, y, z):
     return (x, y, z)
 
 
-def pick_indoor_position(angle_hints, hazard_zones=None,
-                          entity_positions=None, worker_positions=None):
-    """Compute a centroid-based indoor camera position with angle-aware height."""
+def _compute_scene_bbox(entity_positions, worker_positions, hazard_zones):
+    """Compute the bounding box and centroid of all scene elements."""
     points = []
 
     if worker_positions:
-        for wx, wy in worker_positions:
-            points.append((wx, wy))
+        points.extend(worker_positions)
     elif entity_positions:
-        for ex, ey in entity_positions:
-            points.append((ex, ey))
+        points.extend(entity_positions)
 
     if hazard_zones:
         for zone in hazard_zones:
@@ -67,26 +68,92 @@ def pick_indoor_position(angle_hints, hazard_zones=None,
             cy = (bmin[1] + bmax[1]) / 2.0
             points.append((cx, cy))
 
-    if points:
-        cx = sum(p[0] for p in points) / len(points)
-        cy = sum(p[1] for p in points) / len(points)
-    else:
-        cx, cy = 0.0, 0.0
+    if not points:
+        return None
 
-    cx, cy, _ = clamp_to_warehouse(cx, cy, 0.0)
+    xs = [p[0] for p in points]
+    ys = [p[1] for p in points]
+    cx = sum(xs) / len(xs)
+    cy = sum(ys) / len(ys)
+    x_span = max(xs) - min(xs)
+    y_span = max(ys) - min(ys)
+
+    return {
+        "centroid": (cx, cy),
+        "min_x": min(xs), "max_x": max(xs),
+        "min_y": min(ys), "max_y": max(ys),
+        "x_span": x_span, "y_span": y_span,
+    }
+
+
+def pick_indoor_position(angle_hints, hazard_zones=None,
+                          entity_positions=None, worker_positions=None):
+    """Compute an offset indoor camera position that frames the entire scene.
+
+    Places the camera at a corner/side offset from the scene centroid,
+    looking toward the centroid. This ensures the camera sees all entities
+    rather than hovering directly above them.
+
+    For 'high_angle': camera is placed at a diagonal corner offset.
+    For 'overhead': camera is placed directly above centroid (traditional).
+    For 'eye_level'/'low_angle': camera is offset to one side at low height.
+    """
+    bbox = _compute_scene_bbox(entity_positions, worker_positions, hazard_zones)
+    if bbox is None:
+        return clamp_to_warehouse(0.0, 0.0, 3.0)
+
+    cx, cy = bbox["centroid"]
+    x_span = max(bbox["x_span"], 2.0)
+    y_span = max(bbox["y_span"], 2.0)
 
     if angle_hints:
         first_known = next((h for h in angle_hints if h in ANGLE_HEIGHT_MAP), None)
-        if first_known:
-            z_lo, z_hi = ANGLE_HEIGHT_MAP[first_known]
-        else:
-            z_lo, z_hi = DEFAULT_HEIGHT_RANGE
+    else:
+        first_known = None
+
+    if first_known == "overhead":
+        z_lo, z_hi = ANGLE_HEIGHT_MAP["overhead"]
+        z = (z_lo + z_hi) / 2.0
+        cam_x, cam_y, cam_z = cx, cy, z
+    elif first_known == "high_angle":
+        z_lo, z_hi = ANGLE_HEIGHT_MAP["high_angle"]
+        z = (z_lo + z_hi) / 2.0
+        offset_x = max(x_span * 0.6, 3.0)
+        offset_y = max(y_span * 0.4, 2.0)
+        best_x, best_y = cx, cy
+        best_dist = -1
+        for sx in (1, -1):
+            for sy in (1, -1):
+                try_x = cx + sx * offset_x
+                try_y = cy + sy * offset_y
+                clamped = clamp_to_warehouse(try_x, try_y, z)
+                dist = math.sqrt((try_x - clamped[0])**2 + (try_y - clamped[1])**2)
+                if dist < abs(sx) * offset_x * 0.1:
+                    corner_dist = math.sqrt((clamped[0] - cx)**2 + (clamped[1] - cy)**2)
+                    if corner_dist > best_dist:
+                        best_dist = corner_dist
+                        best_x, best_y = clamped[0], clamped[1]
+        if best_dist <= 0:
+            best_x = clamp_to_warehouse(cx + offset_x, cy + offset_y, z)[0]
+            best_y = clamp_to_warehouse(cx + offset_x, cy + offset_y, z)[1]
+        cam_x, cam_y, cam_z = best_x, best_y, z
+    elif first_known in ("eye_level", "low_angle"):
+        z_lo, z_hi = ANGLE_HEIGHT_MAP.get(first_known, DEFAULT_HEIGHT_RANGE)
+        z = (z_lo + z_hi) / 2.0
+        offset_x = max(x_span * 0.8, 4.0)
+        try_x = cx + offset_x
+        clamped = clamp_to_warehouse(try_x, cy, z)
+        cam_x, cam_y, cam_z = clamped
     else:
         z_lo, z_hi = DEFAULT_HEIGHT_RANGE
+        z = (z_lo + z_hi) / 2.0
+        offset_x = max(x_span * 0.7, 3.5)
+        offset_y = max(y_span * 0.5, 2.0)
+        best_x, best_y = cx + offset_x, cy - offset_y
+        clamped = clamp_to_warehouse(best_x, best_y, z)
+        cam_x, cam_y, cam_z = clamped
 
-    z = (z_lo + z_hi) / 2.0
-
-    return (cx, cy, z)
+    return (cam_x, cam_y, cam_z)
 
 
 def _build_orbit_positions(n=30, radius_min=4, radius_max=9,
@@ -175,3 +242,30 @@ def orbit_distribution(scene_positions):
         (min(xs), min(ys), min(zs)),
         (max(xs), max(ys), max(zs))
     )
+
+
+def pick_look_at_target(entity_positions, worker_positions, hazard_zones):
+    """Compute the look_at target as the centroid of all scene elements.
+
+    Uses worker positions primarily (since they move), falls back to
+    entity positions, then hazard zone centers.
+    """
+    points = []
+    if worker_positions:
+        points.extend(worker_positions)
+    if entity_positions:
+        for p in entity_positions:
+            if p not in points:
+                points.append(p)
+    if hazard_zones:
+        for zone in hazard_zones:
+            bmin = zone.get("bounds_min", (-2, -2))
+            bmax = zone.get("bounds_max", (2, 2))
+            points.append(((bmin[0] + bmax[0]) / 2.0, (bmin[1] + bmax[1]) / 2.0))
+
+    if not points:
+        return (0.0, 0.0, 1.0)
+
+    cx = sum(p[0] for p in points) / len(points)
+    cy = sum(p[1] for p in points) / len(points)
+    return (cx, cy, 1.0)

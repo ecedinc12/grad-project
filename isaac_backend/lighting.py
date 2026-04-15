@@ -64,7 +64,9 @@ def setup_camera_and_lighting(config):
                 scale=0.15,
             )
 
-    camera = rep.create.camera(position=(0, 0, 3), look_at=(0, 0, 1))
+    focal_length = config.get("focal_length", 14.0)
+    camera = rep.create.camera(position=(0, 0, 3), look_at=(0, 0, 1), focal_length=focal_length)
+    print(f"[INFO] Camera focal_length={focal_length}mm")
     width = config.get("resolution_width", 1920)
     height = config.get("resolution_height", 1080)
     render_product = rep.create.render_product(camera, (width, height))

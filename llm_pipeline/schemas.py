@@ -75,6 +75,10 @@ class SceneConfig(BaseModel):
         default=None,
         description="Explicit camera (x, y, z) in meters. If None, auto-derived from scene. x,y clamped to warehouse interior."
     )
+    focal_length: Optional[float] = Field(
+        default=None,
+        description="Camera focal length in mm. Lower values = wider FOV. Default 14.0 for indoor warehouse (captures ~90deg FOV). Use 10-12 for very wide, 18-24 for narrower."
+    )
     lighting_conditions: Literal["daylight", "overcast", "dusk", "night"] = Field(
         default="daylight",
         description="Lighting condition. Must be one of: daylight, overcast, dusk, night"
