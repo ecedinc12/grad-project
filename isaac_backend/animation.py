@@ -346,14 +346,17 @@ def setup_all_behaviors_async(spawned_worker_names, worker_behaviors, stage):
 def _build_command_list(worker_behaviors, worker_name):
     """Build a command list for a single worker from behavior config.
 
-    Returns a list of command strings like:
-        ["GoTo -4.0 -5.0 0.0 90.0", "Idle 5.0", "LookAround 3.0"]
+    character_behavior.py requires the character name as the first word in each
+    command string (see convert_str_to_command). Format:
+        "worker_01 GoTo -4.0 -5.0 0.0 90.0"
+        "worker_01 Idle 5.0"
+        "worker_01 LookAround 3.0"
     """
     for wb in worker_behaviors:
         if wb.get("worker_id") == worker_name:
             commands = wb.get("commands", [])
             if not commands:
-                return ["Idle 10"]
+                return [f"{worker_name} Idle 10"]
             result = []
             for cmd in commands:
                 cmd_type = cmd.get("command", "")
@@ -362,15 +365,15 @@ def _build_command_list(worker_behaviors, worker_name):
                     y = cmd.get("y", 0.0)
                     z = cmd.get("z", 0.0)
                     rot = cmd.get("rotation", 0.0)
-                    result.append(f"GoTo {x} {y} {z} {rot}")
+                    result.append(f"{worker_name} GoTo {x} {y} {z} {rot}")
                 elif cmd_type == "Idle":
                     duration = cmd.get("duration", 5.0)
-                    result.append(f"Idle {duration}")
+                    result.append(f"{worker_name} Idle {duration}")
                 elif cmd_type == "LookAround":
                     duration = cmd.get("duration", 3.0)
-                    result.append(f"LookAround {duration}")
-            return result if result else ["Idle 10"]
-    return ["Idle 10"]
+                    result.append(f"{worker_name} LookAround {duration}")
+            return result if result else [f"{worker_name} Idle 10"]
+    return [f"{worker_name} Idle 10"]
 
 
 def inject_commands_after_play(spawned_worker_names, worker_behaviors, simulation_app=None):
