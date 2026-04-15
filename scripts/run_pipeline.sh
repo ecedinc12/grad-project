@@ -23,14 +23,14 @@ else
     echo "[WARN] fast_importer.py not found at $FAST_IMPORTER, skipping patch"
 fi
 
-echo "[1/8] Running LLM Config Generator..."
+echo "[1/9] Running LLM Config Generator..."
 python3 "$PROJECT_ROOT/llm_pipeline/generator.py" --prompt "$PROMPT" --output "$PROJECT_ROOT/configs/current_scene.json"
 if [ $? -ne 0 ]; then echo "[ERROR] Step 1 failed"; FAILED=1; fi
 
-echo "[2/8] Cleaning up old dataset..."
+echo "[2/9] Cleaning up old dataset..."
 rm -rf /tmp/dataset
 
-echo "[3/8] Generating dataset via Isaac Sim..."
+echo "[3/9] Generating dataset via Isaac Sim..."
 /isaac-sim/python.sh "$PROJECT_ROOT/isaac_backend/main.py" \
     --config "$PROJECT_ROOT/configs/current_scene.json" \
     --library "$PROJECT_ROOT/assets/library.json"
@@ -40,23 +40,26 @@ if [ $ISAAC_EXIT -ne 0 ]; then
     FAILED=1
 fi
 
-echo "[4/8] Converting COCO to YOLO..."
+echo "[4/9] Converting COCO to YOLO..."
 python3 "$PROJECT_ROOT/scripts/coco_to_yolo.py" --dir /tmp/dataset --masks
 if [ $? -ne 0 ]; then echo "[ERROR] Step 4 failed"; FAILED=1; fi
 
-echo "[5/8] Generating dataset.yaml..."
+echo "[5/9] Generating dataset.yaml..."
 python3 "$PROJECT_ROOT/scripts/gen_dataset_yaml.py" \
     --dir /tmp/dataset \
     --output /tmp/dataset/dataset.yaml
 if [ $? -ne 0 ]; then echo "[ERROR] Step 5 failed"; FAILED=1; fi
 
-echo "[6/8] Analyzing class balance..."
+echo "[6/9] Analyzing class balance..."
 python3 "$PROJECT_ROOT/scripts/class_balance.py" --dir /tmp/dataset
 
-echo "[7/8] Generating video from frames..."
+echo "[7/9] Generating video from frames..."
 "$PROJECT_ROOT/scripts/make_video.sh" /tmp/dataset /tmp/dataset/output.mp4
 
-echo "[8/8] Archiving output to persistent storage..."
+echo "[8/9] Generating annotated video with worker labels..."
+python3 "$PROJECT_ROOT/scripts/annotate_video.py" --dir /tmp/dataset --output /tmp/dataset/output_annotated.mp4
+
+echo "[9/9] Archiving output to persistent storage..."
 TIMESTAMP=$(date +%s)
 ARCHIVE_NAME="$PROJECT_ROOT/dataset_${TIMESTAMP}.tar.gz"
 tar -czf "$ARCHIVE_NAME" -C /tmp dataset/
