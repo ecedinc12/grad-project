@@ -9,10 +9,8 @@ CRITICAL: SimulationApp MUST be created BEFORE any omni.* or pxr.* imports.
 
 import os
 import sys
-import json
 import glob
 import time
-import asyncio
 import argparse
 import subprocess
 
@@ -36,19 +34,13 @@ def _patch_fast_importer():
 
 
 def _patch_kit_anim_schema():
-    """Patch isaacsim.exp.base.python.kit to include animation graph schema extensions.
-
-    Without omni.anim.graph.schema and omni.anim.graph.core in the kit dependencies,
-    character USDs fail to resolve AnimationGraphAPI and workers remain in T-pose.
-    """
+    """Patch kit to include animation graph schema for character USD resolution."""
     KIT_FILE = "/isaac-sim/apps/isaacsim.exp.base.python.kit"
     if not os.path.isfile(KIT_FILE):
-        _progress(f"Kit file not found at {KIT_FILE}, skipping anim schema patch")
         return
     with open(KIT_FILE, "r") as f:
         src = f.read()
     if '"omni.anim.graph.schema"' in src:
-        _progress("Kit file already contains anim graph schema, skipping patch")
         return
     patched = src.replace(
         '"isaacsim.exp.base" = {}',
@@ -100,7 +92,7 @@ from pxr import Usd, UsdGeom, Sdf
 from isaac_backend.config_loader import load_config
 from isaac_backend.camera import positions_for_angles, pick_indoor_position, clamp_to_warehouse
 from isaac_backend.lighting import setup_camera_and_lighting
-from isaac_backend.semantics import clear_unwanted_warehouse_semantics, apply_usd_semantics
+from isaac_backend.semantics import clear_unwanted_warehouse_semantics, apply_scene_semantics
 from isaac_backend.spawner import get_geofenced_spawner, spawn_hazard_zones
 from isaac_backend.warehouse import spawn_warehouse_layout, hide_driver_prims
 from isaac_backend.workers import spawn_workers
@@ -129,109 +121,45 @@ COCO_CATEGORIES = {
     "hazard_zone_critical": {"name": "hazard_zone_critical", "id": 14, "supercategory": "zone"},
 }
 
+NUM_FRAMES = 200
 
-def _apply_scene_semantics(stage, spawned_asset_ids, workers):
-    """Walk the stage and apply/correct USD-level semantics.
 
-    1. Force-set semantics on spawned assets (vehicles, equipment) by path match.
-    2. Force-set 'person' on all worker Xform and SkelRoot prims.
-    3. Force-set hazard zone semantics from /World/HazardZones/.
-    4. Strip any semantic labels not in our allowed set to prevent 'other' category.
-    """
+# --- Helpers ---
 
-    VALID_CLASSES = {
-        "person", "vehicle", "rack", "pallet", "box", "barrel",
-        "cone", "fire_extinguisher", "cart", "sign", "pillar",
-        "hazard_zone_warning", "hazard_zone_restricted", "hazard_zone_critical",
-    }
-
-    def set_semantic(prim, class_name):
-        data_attr = "semantic:Semantics:params:semanticData"
-        type_attr = "semantic:Semantics:params:semanticType"
-        if not prim.HasAttribute(data_attr):
-            prim.CreateAttribute(data_attr, Sdf.ValueTypeNames.Token, True).Set(class_name)
-        else:
-            prim.GetAttribute(data_attr).Set(class_name)
-        if not prim.HasAttribute(type_attr):
-            prim.CreateAttribute(type_attr, Sdf.ValueTypeNames.Token, True).Set("class")
-        else:
-            prim.GetAttribute(type_attr).Set("class")
-
-    def clear_semantic(prim):
-        for attr_name in ["semantic:Semantics:params:semanticData", "semantic:Semantics:params:semanticType"]:
-            attr = prim.GetAttribute(attr_name)
-            if attr and attr.HasAuthoredValue():
-                attr.Clear()
-
-    applied = 0
-    cleared = 0
-
-    for asset_id, semantic_class in spawned_asset_ids:
-        target_name = os.path.basename(asset_id)
-        for prim in stage.Traverse():
-            path = str(prim.GetPath())
-            if not prim.IsValid():
-                continue
-            if target_name in path:
-                set_semantic(prim, semantic_class)
-                applied += 1
-                print(f"[INFO] Applied USD semantics '{semantic_class}' to {path}")
-                break
-
-    if workers:
-        for prim in stage.Traverse():
-            path = str(prim.GetPath())
-            if path.startswith("/World/Characters/"):
-                if prim.GetTypeName() in ("Xform", "SkelRoot"):
-                    set_semantic(prim, "person")
-                    applied += 1
-                    print(f"[INFO] Applied USD semantics 'person' to {path}")
-
-    hazard_labels = {"hazard_zone_warning", "hazard_zone_restricted", "hazard_zone_critical"}
-    for prim in stage.Traverse():
-        path = str(prim.GetPath())
-        if path.startswith("/World/HazardZones/"):
-            data_attr = prim.GetAttribute("semantic:Semantics:params:semanticData")
-            if data_attr and data_attr.HasAuthoredValue():
-                label = str(data_attr.Get())
-                if label in hazard_labels:
-                    set_semantic(prim, label)
-                    applied += 1
-
-    for prim in stage.Traverse():
-        data_attr = prim.GetAttribute("semantic:Semantics:params:semanticData")
-        if not data_attr or not data_attr.HasAuthoredValue():
-            continue
-        label = data_attr.Get()
-        if label and str(label).lower() not in VALID_CLASSES:
-            cleared += 1
-            clear_semantic(prim)
-
-    _progress(f"Applied {applied} semantics, cleared {cleared} unwanted labels.")
+def _tick(n):
+    """Process n simulation app updates (loads assets, resolves references, no physics)."""
+    for _ in range(n):
+        simulation_app.update()
 
 
 def compute_scene_centroid(stage):
-    """Walk /World/Characters, /World/Layout, and /Replicator prims to find average position."""
+    """Compute average position of scene entities and collect positions for camera framing.
+
+    Returns ((cx, cy, cz), entity_positions, worker_positions).
+    """
     xs, ys, zs = [], [], []
+    entity_positions, worker_positions = [], []
     for prim in stage.Traverse():
         path = str(prim.GetPath())
         if not (path.startswith("/World/Characters/") or path.startswith("/World/Layout/") or path.startswith("/Replicator/")):
             continue
         xf = UsdGeom.Xformable(prim)
-        if xf:
-            mat = xf.ComputeLocalToWorldTransform(Usd.TimeCode.Default())
-            pos = mat.ExtractTranslation()
-            xs.append(pos[0])
-            ys.append(pos[1])
-            zs.append(pos[2])
+        if not xf:
+            continue
+        mat = xf.ComputeLocalToWorldTransform(Usd.TimeCode.Default())
+        pos = mat.ExtractTranslation()
+        xs.append(pos[0])
+        ys.append(pos[1])
+        zs.append(pos[2])
+        entity_positions.append((pos[0], pos[1]))
+        if path.startswith("/World/Characters/"):
+            worker_positions.append((pos[0], pos[1]))
     if not xs:
-        _progress("[WARN] No entities found for centroid calculation, defaulting to (0, 0, 1.2)")
-        return (0.0, 0.0, 1.2)
-    cx = sum(xs) / len(xs)
-    cy = sum(ys) / len(ys)
-    cz = sum(zs) / len(zs)
-    _progress(f"Scene centroid computed: ({cx:.2f}, {cy:.2f}, {cz:.2f}) from {len(xs)} entities")
-    return (cx, cy, cz)
+        _progress("[WARN] No entities for centroid, defaulting to (0, 0, 1.2)")
+        return (0.0, 0.0, 1.2), entity_positions, worker_positions
+    cx, cy, cz = sum(xs) / len(xs), sum(ys) / len(ys), sum(zs) / len(zs)
+    _progress(f"Scene centroid: ({cx:.2f}, {cy:.2f}, {cz:.2f}) from {len(xs)} entities")
+    return (cx, cy, cz), entity_positions, worker_positions
 
 
 def _configure_sdg_settings():
@@ -241,7 +169,7 @@ def _configure_sdg_settings():
     settings.set("/exts/isaacsim.core.throttling/enable_async", False)
     settings.set("/app/animation/update_all_animations", True)
     rep.orchestrator.set_capture_on_play(False)
-    _progress("SDG settings configured: DLSS=Quality, capture_on_play=False, throttling_async=False, update_all_animations=True")
+    _progress("SDG settings configured: DLSS=Quality, capture_on_play=False, async=False")
 
 
 def _setup_coco_writer():
@@ -255,43 +183,21 @@ def _setup_coco_writer():
         instance_segmentation=True,
         coco_categories=COCO_CATEGORIES,
     )
-    _progress("CocoWriter initialized with 14 categories (including hazard zones)")
+    _progress("CocoWriter initialized with 14 categories")
     return writer
 
 
-def _collect_entity_positions(stage):
-    """Gather all entity and worker positions for camera framing."""
-    entity_positions = []
-    worker_positions = []
-    for prim in stage.Traverse():
-        path = str(prim.GetPath())
-        if not (path.startswith("/World/Characters/") or path.startswith("/World/Layout/") or path.startswith("/Replicator/")):
-            continue
-        xf = UsdGeom.Xformable(prim)
-        if xf:
-            mat = xf.ComputeLocalToWorldTransform(Usd.TimeCode.Default())
-            pos = mat.ExtractTranslation()
-            entity_positions.append((pos[0], pos[1]))
-            if path.startswith("/World/Characters/"):
-                worker_positions.append((pos[0], pos[1]))
-    return entity_positions, worker_positions
-
-
-def _configure_camera_trigger(camera, scene_config, look_at_target):
+def _configure_camera_trigger(camera, scene_config, look_at_target, entity_positions, worker_positions):
     """Set up the frame trigger with either fixed indoor position or orbit distribution."""
-    num_frames = 200
     angle_hints = scene_config.get("camera_angles", [])
     hazard_zones = scene_config.get("hazard_zones", [])
     camera_mode = scene_config.get("camera_mode", "indoor")
     camera_position_override = scene_config.get("camera_position")
 
-    stage = omni.usd.get_context().get_stage()
-    entity_positions, worker_positions = _collect_entity_positions(stage)
-
     if camera_mode == "indoor":
         if camera_position_override:
             cam_x, cam_y, cam_z = clamp_to_warehouse(*camera_position_override)
-            _progress(f"camera_position_override={camera_position_override} clamped to ({cam_x:.2f}, {cam_y:.2f}, {cam_z:.2f})")
+            _progress(f"Camera override clamped to ({cam_x:.2f}, {cam_y:.2f}, {cam_z:.2f})")
         else:
             cam_x, cam_y, cam_z = pick_indoor_position(
                 angle_hints, hazard_zones=hazard_zones,
@@ -299,9 +205,9 @@ def _configure_camera_trigger(camera, scene_config, look_at_target):
                 worker_positions=worker_positions or None,
             )
         camera_pos = (cam_x, cam_y, cam_z)
-        _progress(f"camera_mode=indoor  camera_angles={angle_hints}  camera=({cam_x:.2f}, {cam_y:.2f}, {cam_z:.2f})  look_at=({look_at_target[0]:.2f}, {look_at_target[1]:.2f}, {look_at_target[2]:.2f})")
+        _progress(f"Camera indoor: ({cam_x:.2f}, {cam_y:.2f}, {cam_z:.2f})")
 
-        with rep.trigger.on_frame(num_frames=num_frames):
+        with rep.trigger.on_frame(num_frames=NUM_FRAMES):
             with camera:
                 rep.modify.pose(position=camera_pos, look_at=look_at_target)
     else:
@@ -313,31 +219,24 @@ def _configure_camera_trigger(camera, scene_config, look_at_target):
         )
         from isaac_backend.camera import orbit_distribution
         camera_pos_dist = orbit_distribution(scene_positions)
-        _progress(f"camera_mode=orbit  camera_angles={angle_hints}  ->  {len(scene_positions)} positions")
+        _progress(f"Camera orbit: {len(scene_positions)} positions")
 
-        with rep.trigger.on_frame(num_frames=num_frames):
+        with rep.trigger.on_frame(num_frames=NUM_FRAMES):
             with camera:
                 rep.modify.pose(position=camera_pos_dist, look_at=look_at_target)
-
-    return num_frames
 
 
 def _teardown(rep, writer, world, simulation_app):
     """Clean teardown in the correct order to avoid crashes."""
-    try:
-        rep.orchestrator.stop()
-    except Exception as e:
-        print(f"[WARN] teardown step failed: {e}", file=sys.stderr)
-
-    try:
-        writer.detach()
-    except Exception as e:
-        print(f"[WARN] teardown step failed: {e}", file=sys.stderr)
-
-    try:
-        world.clear()
-    except Exception as e:
-        print(f"[WARN] teardown step failed: {e}", file=sys.stderr)
+    for step in [
+        lambda: rep.orchestrator.stop(),
+        lambda: writer.detach(),
+        lambda: world.clear(),
+    ]:
+        try:
+            step()
+        except Exception as e:
+            print(f"[WARN] teardown step failed: {e}", file=sys.stderr)
 
     simulation_app.close()
     _progress("Generation complete. Data saved to /tmp/dataset.")
@@ -345,54 +244,13 @@ def _teardown(rep, writer, world, simulation_app):
     os._exit(0)
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Run Isaac Sim Headless Generation")
-    parser.add_argument("--config", type=str, default="configs/current_scene.json", help="Path to the SceneConfig JSON")
-    parser.add_argument("--library", type=str, default="assets/library.json", help="Path to the asset library JSON")
-    args = parser.parse_args()
+# --- Pipeline phases ---
 
-    _progress("Loading configs...")
-    scene_config, asset_library = load_config(args.config, args.library)
-    layout_name = scene_config.get("layout", "standard_warehouse")
-    _progress(f"Layout: {layout_name}")
-
-    _progress("Creating World...")
-    world = World(stage_units_in_meters=1.0)
-    for _ in range(5):
-        simulation_app.update()
-
-    stage = omni.usd.get_context().get_stage()
-
-    _progress("Configuring SDG settings...")
-    _configure_sdg_settings()
-
-    _progress("Loading warehouse zone...")
-    rep.create.from_usd(asset_library["zone"])
-    for _ in range(5):
-        simulation_app.update()
-
-    _progress("Clearing semantics and spawning warehouse layout...")
-    clear_unwanted_warehouse_semantics(stage)
-    spawn_bounds_min, spawn_bounds_max = spawn_warehouse_layout(scene_config, asset_library, stage)
-    for _ in range(10):
-        simulation_app.update()
-
-    _progress("Setting up camera and lighting...")
-    camera, render_product = setup_camera_and_lighting(scene_config)
-    for _ in range(5):
-        simulation_app.update()
-
-    hazard_zones = scene_config.get("hazard_zones", [])
-    if hazard_zones:
-        _progress("Spawning hazard zones...")
-        spawn_hazard_zones(hazard_zones, stage)
-
-    workers = [e for e in scene_config.get("entities", []) if e.get("type") == "worker"]
+def _spawn_entities(scene_config, asset_library, stage, spawn_bounds_min, spawn_bounds_max):
+    """Spawn non-worker entities and return spawned_asset_ids."""
     others = [e for e in scene_config.get("entities", []) if e.get("type") != "worker"]
-    worker_behaviors = scene_config.get("worker_behaviors", [])
-
-    _progress(f"Spawning {len(others)} non-worker entities...")
     spawned_asset_ids = []
+
     for entity in others:
         asset_id = entity.get("asset_id", "")
         if asset_id == "zone":
@@ -402,8 +260,10 @@ def main():
             print(f"[WARNING] Unknown asset_id '{asset_id}'. Skipping.")
             continue
 
-        b_min, b_max = spawn_bounds_min, spawn_bounds_max
-        spawner = get_geofenced_spawner(usd_path, num_instances=1, bounds_min=b_min, bounds_max=b_max)
+        spawner = get_geofenced_spawner(
+            usd_path, num_instances=1,
+            bounds_min=spawn_bounds_min, bounds_max=spawn_bounds_max,
+        )
         prims = spawner()
         asset_type = entity.get("type", "")
         semantic_class = "vehicle" if asset_type == "vehicle" else asset_id
@@ -411,46 +271,97 @@ def main():
         with prims:
             rep.modify.semantics([("class", semantic_class)])
         spawned_asset_ids.append((asset_id, semantic_class))
-    _progress("Non-worker entities spawned.")
 
-    if workers:
-        _progress("Enabling behavior extensions...")
-        enable_behavior_extensions(simulation_app=simulation_app)
+    _progress(f"Spawned {len(spawned_asset_ids)} non-worker entities")
+    return spawned_asset_ids
 
-    spawned_worker_names = set()
-    if workers:
-        _progress(f"Spawning {len(workers)} workers...")
-        spawned_worker_names = spawn_workers(workers, worker_behaviors, asset_library, stage, simulation_app)
 
-    if workers:
-        _progress("Loading Biped_Setup for AnimationGraph...")
-        ensure_biped_setup(simulation_app=simulation_app)
+def _setup_workers(scene_config, asset_library, stage):
+    """Spawn workers, set up animation, and return (spawned_worker_names, worker_behaviors)."""
+    workers = [e for e in scene_config.get("entities", []) if e.get("type") == "worker"]
+    worker_behaviors = scene_config.get("worker_behaviors", [])
 
-        _progress("Attaching IRA behavior scripts to workers...")
-        attached, failed = setup_all_behaviors_async(spawned_worker_names, worker_behaviors, stage)
-        _progress(f"IRA behaviors: {attached} attached, {failed} failed")
+    if not workers:
+        return set(), worker_behaviors
 
-        _progress("Linking workers to AnimationGraph...")
-        linked, link_failed = link_workers_to_animation_graph(spawned_worker_names, stage, simulation_app)
-        _progress(f"AnimationGraph linking: {linked} linked, {link_failed} failed")
+    _progress("Enabling behavior extensions...")
+    enable_behavior_extensions(simulation_app=simulation_app)
 
-        _progress("Warming up simulation to apply ScriptingAPI + AnimationGraphAPI...")
-        for _ in range(120):
-            simulation_app.update()
+    _progress(f"Spawning {len(workers)} workers...")
+    spawned_names = spawn_workers(workers, worker_behaviors, asset_library, stage, simulation_app)
+
+    _progress("Loading Biped_Setup for AnimationGraph...")
+    ensure_biped_setup(simulation_app=simulation_app)
+
+    _progress("Attaching IRA behavior scripts to workers...")
+    attached, failed = setup_all_behaviors_async(spawned_names, worker_behaviors, stage)
+    _progress(f"IRA behaviors: {attached} attached, {failed} failed")
+
+    _progress("Linking workers to AnimationGraph...")
+    linked, link_failed = link_workers_to_animation_graph(spawned_names, stage, simulation_app)
+    _progress(f"AnimationGraph linking: {linked} linked, {link_failed} failed")
+
+    _progress("Warming up simulation to apply ScriptingAPI + AnimationGraphAPI...")
+    _tick(120)
+
+    return spawned_names, worker_behaviors
+
+
+# --- Main ---
+
+def main():
+    parser = argparse.ArgumentParser(description="Run Isaac Sim Headless Generation")
+    parser.add_argument("--config", type=str, default="configs/current_scene.json")
+    parser.add_argument("--library", type=str, default="assets/library.json")
+    args = parser.parse_args()
+
+    _progress("Loading configs...")
+    scene_config, asset_library = load_config(args.config, args.library)
+    _progress(f"Layout: {scene_config.get('layout', 'standard_warehouse')}")
+
+    _progress("Creating World...")
+    world = World(stage_units_in_meters=1.0)
+    _tick(5)
+    stage = omni.usd.get_context().get_stage()
+
+    _progress("Configuring SDG settings...")
+    _configure_sdg_settings()
+
+    _progress("Loading warehouse zone...")
+    rep.create.from_usd(asset_library["zone"])
+    _tick(5)
+
+    _progress("Clearing semantics and spawning warehouse layout...")
+    clear_unwanted_warehouse_semantics(stage)
+    spawn_bounds_min, spawn_bounds_max = spawn_warehouse_layout(scene_config, asset_library, stage)
+    _tick(10)
+
+    _progress("Setting up camera and lighting...")
+    camera, render_product = setup_camera_and_lighting(scene_config)
+    _tick(5)
+
+    hazard_zones = scene_config.get("hazard_zones", [])
+    if hazard_zones:
+        _progress("Spawning hazard zones...")
+        spawn_hazard_zones(hazard_zones, stage)
+
+    spawned_asset_ids = _spawn_entities(scene_config, asset_library, stage, spawn_bounds_min, spawn_bounds_max)
+
+    spawned_worker_names, worker_behaviors = _setup_workers(scene_config, asset_library, stage)
+    workers = [e for e in scene_config.get("entities", []) if e.get("type") == "worker"]
 
     _progress("Hiding driver prims...")
     hide_driver_prims(stage)
 
     _progress("Applying USD-level semantics to all scene prims...")
-    _apply_scene_semantics(stage, spawned_asset_ids, workers)
+    apply_scene_semantics(stage, spawned_asset_ids, workers)
 
     _progress("Computing scene centroid for camera framing...")
-    centroid = compute_scene_centroid(stage)
+    centroid, entity_positions, worker_positions = compute_scene_centroid(stage)
     look_at_target = (centroid[0], centroid[1], 1.0)
 
     _progress("Starting timeline for behavior scripts...")
     omni.timeline.get_timeline_interface().play()
-
     for _ in range(100):
         world.step(render=True)
 
@@ -465,13 +376,12 @@ def main():
     writer.attach([render_product])
 
     _progress("Configuring camera trigger...")
-    num_frames = _configure_camera_trigger(camera, scene_config, look_at_target)
+    _configure_camera_trigger(camera, scene_config, look_at_target, entity_positions, worker_positions)
 
     _progress("Running simulation loop...")
-    stage_ctx = omni.usd.get_context()
-    for step in range(num_frames):
+    for step in range(NUM_FRAMES):
         if step % 100 == 0:
-            _progress(f"Frame {step}/{num_frames}")
+            _progress(f"Frame {step}/{NUM_FRAMES}")
         world.step(render=False)
         rep.orchestrator.step()
 
@@ -480,18 +390,15 @@ def main():
 
     _progress("Waiting for writer flush...")
     deadline = time.time() + 60
-    while len(glob.glob("/tmp/dataset/Replicator/rgb_*.png")) < num_frames:
+    while len(glob.glob("/tmp/dataset/Replicator/rgb_*.png")) < NUM_FRAMES:
         if time.time() > deadline:
             found = len(glob.glob("/tmp/dataset/Replicator/rgb_*.png"))
-            print(f"[WARNING] Timed out waiting for writer flush ({found}/{num_frames} files written).")
+            print(f"[WARNING] Timed out waiting for writer flush ({found}/{NUM_FRAMES} files written).")
             break
         time.sleep(0.1)
         simulation_app.update()
 
-    result = subprocess.run(
-        ["find", "/tmp/dataset", "-type", "f"],
-        capture_output=True, text=True
-    )
+    result = subprocess.run(["find", "/tmp/dataset", "-type", "f"], capture_output=True, text=True)
     _progress(f"Files written to /tmp/dataset: {len(result.stdout.strip().splitlines()) if result.stdout.strip() else 0}")
 
     _teardown(rep, writer, world, simulation_app)
