@@ -105,20 +105,20 @@ from isaac_backend.animation import (
 )
 
 COCO_CATEGORIES = {
-    "person": {"name": "person", "id": 1, "supercategory": "worker"},
-    "vehicle": {"name": "vehicle", "id": 2, "supercategory": "equipment"},
-    "rack": {"name": "rack", "id": 3, "supercategory": "warehouse"},
-    "pallet": {"name": "pallet", "id": 4, "supercategory": "warehouse"},
-    "box": {"name": "box", "id": 5, "supercategory": "warehouse"},
-    "barrel": {"name": "barrel", "id": 6, "supercategory": "warehouse"},
-    "cone": {"name": "cone", "id": 7, "supercategory": "safety"},
-    "fire_extinguisher": {"name": "fire_extinguisher", "id": 8, "supercategory": "safety"},
-    "cart": {"name": "cart", "id": 9, "supercategory": "warehouse"},
-    "sign": {"name": "sign", "id": 10, "supercategory": "safety"},
-    "pillar": {"name": "pillar", "id": 11, "supercategory": "structure"},
-    "hazard_zone_warning": {"name": "hazard_zone_warning", "id": 12, "supercategory": "zone"},
-    "hazard_zone_restricted": {"name": "hazard_zone_restricted", "id": 13, "supercategory": "zone"},
-    "hazard_zone_critical": {"name": "hazard_zone_critical", "id": 14, "supercategory": "zone"},
+    "person": {"name": "person", "id": 1, "supercategory": "worker", "color": (220, 20, 60)},
+    "vehicle": {"name": "vehicle", "id": 2, "supercategory": "equipment", "color": (255, 165, 0)},
+    "rack": {"name": "rack", "id": 3, "supercategory": "warehouse", "color": (139, 69, 19)},
+    "pallet": {"name": "pallet", "id": 4, "supercategory": "warehouse", "color": (210, 180, 140)},
+    "box": {"name": "box", "id": 5, "supercategory": "warehouse", "color": (188, 143, 143)},
+    "barrel": {"name": "barrel", "id": 6, "supercategory": "warehouse", "color": (128, 0, 128)},
+    "cone": {"name": "cone", "id": 7, "supercategory": "safety", "color": (255, 140, 0)},
+    "fire_extinguisher": {"name": "fire_extinguisher", "id": 8, "supercategory": "safety", "color": (255, 0, 0)},
+    "cart": {"name": "cart", "id": 9, "supercategory": "warehouse", "color": (160, 82, 45)},
+    "sign": {"name": "sign", "id": 10, "supercategory": "safety", "color": (255, 255, 0)},
+    "pillar": {"name": "pillar", "id": 11, "supercategory": "structure", "color": (169, 169, 169)},
+    "hazard_zone_warning": {"name": "hazard_zone_warning", "id": 12, "supercategory": "zone", "color": (255, 255, 0)},
+    "hazard_zone_restricted": {"name": "hazard_zone_restricted", "id": 13, "supercategory": "zone", "color": (255, 165, 0)},
+    "hazard_zone_critical": {"name": "hazard_zone_critical", "id": 14, "supercategory": "zone", "color": (255, 0, 0)},
 }
 
 NUM_FRAMES = 200
