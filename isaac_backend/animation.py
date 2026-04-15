@@ -16,6 +16,8 @@ Reference: isaacsim.replicator.agent.core.stage_util.CharacterUtil
 """
 
 import os
+import random
+import sys
 import time
 
 import carb
@@ -435,3 +437,69 @@ def inject_commands_after_play(spawned_worker_names, worker_behaviors, simulatio
 
     print(f"[INFO] Command injection: {injected} succeeded, {failed} failed")
     return injected, failed
+
+
+WAREHOUSE_X_RANGE = (-5.5, 5.5)
+WAREHOUSE_Y_RANGE = (-5.5, 5.5)
+COMMAND_DURATION_RANGE = (80, 120)
+
+
+def reinject_random_commands(spawned_worker_names):
+    """Re-inject randomized commands to all registered agents.
+
+    Prevents IRA behavior loop from repeating the same command sequence.
+    Generates varied GoTo targets within warehouse bounds, plus Idle
+    and LookAround with random durations.
+
+    Returns (injected, failed) counts.
+    """
+    global AgentManager
+
+    if not _HAS_IRA_CORE or AgentManager is None:
+        return 0, 0
+
+    if not AgentManager.has_instance():
+        return 0, 0
+
+    agent_manager = AgentManager.get_instance()
+    injected = 0
+    failed = 0
+
+    for worker_name in sorted(spawned_worker_names):
+        if not agent_manager.agent_registered(worker_name):
+            failed += 1
+            continue
+
+        x = round(random.uniform(*WAREHOUSE_X_RANGE), 1)
+        y = round(random.uniform(*WAREHOUSE_Y_RANGE), 1)
+        rot = round(random.uniform(0, 360), 1)
+        idle_dur = round(random.uniform(3, 8), 1)
+        look_dur = round(random.uniform(2, 5), 1)
+
+        total_dur = COMMAND_DURATION_RANGE
+        cmd_list = [
+            f"{worker_name} GoTo {x} {y} 0.0 {rot}",
+            f"{worker_name} Idle {idle_dur}",
+            f"{worker_name} LookAround {look_dur}",
+        ]
+
+        try:
+            agent_manager.inject_command(
+                agent_name=worker_name,
+                command_list=cmd_list,
+                force_inject=True,
+                instant=True,
+            )
+            injected += 1
+        except Exception as e:
+            print(f"[WARN] Re-injection failed for {worker_name}: {e}")
+            failed += 1
+
+    if injected > 0:
+        _progress(f"Re-injected commands for {injected} workers (step midpoint)")
+    return injected, failed
+
+
+def _progress(msg):
+    print(f"[PROGRESS] [{time.strftime('%H:%M:%S')}] {msg}")
+    sys.stdout.flush()

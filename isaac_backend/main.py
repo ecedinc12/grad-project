@@ -102,6 +102,7 @@ from isaac_backend.animation import (
     ensure_biped_setup,
     link_workers_to_animation_graph,
     inject_commands_after_play,
+    reinject_random_commands,
 )
 
 COCO_CATEGORIES = {
@@ -122,6 +123,8 @@ COCO_CATEGORIES = {
 }
 
 NUM_FRAMES = 200
+SIM_STEPS_PER_FRAME = 2
+REINJECT_INTERVAL = 80
 
 
 # --- Helpers ---
@@ -435,7 +438,10 @@ def main():
     for step in range(NUM_FRAMES):
         if step % 100 == 0:
             _progress(f"Frame {step}/{NUM_FRAMES}")
-        world.step(render=False)
+        if step > 0 and step % REINJECT_INTERVAL == 0 and spawned_worker_names:
+            reinject_random_commands(spawned_worker_names)
+        for _ in range(SIM_STEPS_PER_FRAME):
+            world.step(render=False)
         rep.orchestrator.step()
 
     _progress("Waiting for orchestrator to finish...")
