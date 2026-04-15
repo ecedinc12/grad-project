@@ -83,6 +83,7 @@ def generate_scene_config(prompt: str, output_path: str):
     - Entities types: 'worker', 'vehicle', 'zone'.
     - The asset_id field MUST be exactly one of: 'worker', 'forklift', 'pallet', 'rack', 'box', 'barrel', 'cone'. Never invent an asset_id. If an entity does not match, omit it.
     - Set logical anchor_zones if mentioned (e.g., 'loading dock', 'aisle 3').
+    - IMPORTANT: Vehicles (forklifts, carts) MUST have anchor_zone set to the zone they operate in. For example, a forklift in "forklift_aisle" should have anchor_zone="forklift_aisle". This ensures the vehicle spawns in the correct location instead of randomly.
     - camera_angles values MUST each be exactly one of: 'overhead', 'high_angle', 'eye_level', 'low_angle'. Choose based on the user's description; default to ['eye_level'] if unspecified.
     - camera_mode MUST be 'indoor' for all warehouse scenes. This places the camera at a fixed position inside the warehouse at realistic surveillance heights. Do NOT use 'orbit'.
     - camera_position is optional. If omitted, it is auto-derived from worker and hazard zone positions. Only set it if the user specifies an exact viewpoint.

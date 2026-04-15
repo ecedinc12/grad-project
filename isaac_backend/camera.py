@@ -94,13 +94,17 @@ def pick_indoor_position(angle_hints, hazard_zones=None,
     looking toward the centroid. This ensures the camera sees all entities
     rather than hovering directly above them.
 
-    For 'high_angle': camera is placed at a diagonal corner offset.
-    For 'overhead': camera is placed directly above centroid (traditional).
-    For 'eye_level'/'low_angle': camera is offset to one side at low height.
+    Strategy per angle:
+    - 'overhead': directly above centroid (traditional overhead shot)
+    - 'high_angle': diagonal corner offset at ~5m height — frames the whole scene
+    - 'eye_level'/'low_angle': side offset at low height
+    - default: moderate diagonal offset
     """
     bbox = _compute_scene_bbox(entity_positions, worker_positions, hazard_zones)
     if bbox is None:
-        return clamp_to_warehouse(0.0, 0.0, 3.0)
+        pos = clamp_to_warehouse(0.0, 0.0, 3.0)
+        print(f"[CAMERA] No scene elements — defaulting to ({pos[0]:.2f}, {pos[1]:.2f}, {pos[2]:.2f})")
+        return pos
 
     cx, cy = bbox["centroid"]
     x_span = max(bbox["x_span"], 2.0)
@@ -111,49 +115,51 @@ def pick_indoor_position(angle_hints, hazard_zones=None,
     else:
         first_known = None
 
+    # Always pick the best corner: maximize offset from centroid while staying in bounds.
+    # For each angle type, we choose different heights and offsets.
+    z_lo, z_hi = ANGLE_HEIGHT_MAP.get(first_known, DEFAULT_HEIGHT_RANGE)
+    z = (z_lo + z_hi) / 2.0
+
     if first_known == "overhead":
-        z_lo, z_hi = ANGLE_HEIGHT_MAP["overhead"]
-        z = (z_lo + z_hi) / 2.0
-        cam_x, cam_y, cam_z = cx, cy, z
-    elif first_known == "high_angle":
-        z_lo, z_hi = ANGLE_HEIGHT_MAP["high_angle"]
-        z = (z_lo + z_hi) / 2.0
-        offset_x = max(x_span * 0.6, 3.0)
-        offset_y = max(y_span * 0.4, 2.0)
-        best_x, best_y = cx, cy
-        best_dist = -1
+        cam_x, cam_y = cx, cy
+    else:
+        # Compute desired XY offset based on angle type
+        if first_known == "high_angle":
+            offset_scale = 0.55
+        elif first_known in ("eye_level", "low_angle"):
+            offset_scale = 0.7
+        else:
+            offset_scale = 0.6
+
+        desired_offset_x = max(x_span * offset_scale, 2.5)
+        desired_offset_y = max(y_span * offset_scale, 2.0)
+
+        # Try all 4 diagonal corners, pick the one furthest from centroid
+        # that is NOT heavily clamped (stays inside warehouse)
+        candidates = []
         for sx in (1, -1):
             for sy in (1, -1):
-                try_x = cx + sx * offset_x
-                try_y = cy + sy * offset_y
+                try_x = cx + sx * desired_offset_x
+                try_y = cy + sy * desired_offset_y
                 clamped = clamp_to_warehouse(try_x, try_y, z)
-                dist = math.sqrt((try_x - clamped[0])**2 + (try_y - clamped[1])**2)
-                if dist < abs(sx) * offset_x * 0.1:
-                    corner_dist = math.sqrt((clamped[0] - cx)**2 + (clamped[1] - cy)**2)
-                    if corner_dist > best_dist:
-                        best_dist = corner_dist
-                        best_x, best_y = clamped[0], clamped[1]
-        if best_dist <= 0:
-            best_x = clamp_to_warehouse(cx + offset_x, cy + offset_y, z)[0]
-            best_y = clamp_to_warehouse(cx + offset_x, cy + offset_y, z)[1]
-        cam_x, cam_y, cam_z = best_x, best_y, z
-    elif first_known in ("eye_level", "low_angle"):
-        z_lo, z_hi = ANGLE_HEIGHT_MAP.get(first_known, DEFAULT_HEIGHT_RANGE)
-        z = (z_lo + z_hi) / 2.0
-        offset_x = max(x_span * 0.8, 4.0)
-        try_x = cx + offset_x
-        clamped = clamp_to_warehouse(try_x, cy, z)
-        cam_x, cam_y, cam_z = clamped
-    else:
-        z_lo, z_hi = DEFAULT_HEIGHT_RANGE
-        z = (z_lo + z_hi) / 2.0
-        offset_x = max(x_span * 0.7, 3.5)
-        offset_y = max(y_span * 0.5, 2.0)
-        best_x, best_y = cx + offset_x, cy - offset_y
-        clamped = clamp_to_warehouse(best_x, best_y, z)
-        cam_x, cam_y, cam_z = clamped
+                clip_dist = math.sqrt((try_x - clamped[0])**2 + (try_y - clamped[1])**2)
+                corner_dist = math.sqrt((clamped[0] - cx)**2 + (clamped[1] - cy)**2)
+                # Prefer corners NOT heavily clipped (clip_dist < 2m means we stayed in bounds)
+                if clip_dist < 2.0:
+                    candidates.append((clamped[0], clamped[1], corner_dist))
 
-    return (cam_x, cam_y, cam_z)
+        if candidates:
+            best = max(candidates, key=lambda c: c[2])
+            cam_x, cam_y = best[0], best[1]
+        else:
+            # Fallback: just offset in +X direction
+            clamped = clamp_to_warehouse(cx + desired_offset_x, cy - desired_offset_y, z)
+            cam_x, cam_y = clamped[0], clamped[1]
+
+    cam_pos = clamp_to_warehouse(cam_x, cam_y, z)
+    print(f"[CAMERA] pick_indoor_position: angle={first_known}, centroid=({cx:.2f}, {cy:.2f}), "
+          f"x_span={x_span:.2f}, y_span={y_span:.2f}, camera=({cam_pos[0]:.2f}, {cam_pos[1]:.2f}, {cam_pos[2]:.2f})")
+    return cam_pos
 
 
 def _build_orbit_positions(n=30, radius_min=4, radius_max=9,
@@ -264,8 +270,10 @@ def pick_look_at_target(entity_positions, worker_positions, hazard_zones):
             points.append(((bmin[0] + bmax[0]) / 2.0, (bmin[1] + bmax[1]) / 2.0))
 
     if not points:
+        print("[CAMERA] No points for look_at target — defaulting to (0, 0, 1.0)")
         return (0.0, 0.0, 1.0)
 
     cx = sum(p[0] for p in points) / len(points)
     cy = sum(p[1] for p in points) / len(points)
+    print(f"[CAMERA] pick_look_at_target: {len(points)} points, target=({cx:.2f}, {cy:.2f}, 1.0)")
     return (cx, cy, 1.0)

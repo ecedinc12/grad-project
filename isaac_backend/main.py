@@ -267,9 +267,11 @@ def _teardown(rep, writer, world, simulation_app):
 def _spawn_entities(scene_config, asset_library, stage, spawn_bounds_min, spawn_bounds_max):
     """Spawn non-worker entities and return (spawned_asset_ids, known_positions).
 
-    Entities with an anchor_zone are placed at the center of the matching
-    hazard zone using fixed-position spawning (no per-frame randomization).
-    Entities without anchor_zone use Replicator random spawning.
+    Strategy:
+    - Vehicles (type='vehicle') are ALWAYS placed at a fixed position.
+      If anchor_zone is set, placed at the matching hazard zone center.
+      If no anchor_zone, placed near the scene centroid (0, 0).
+    - All other non-worker entities use Replicator random spawning.
     """
     others = [e for e in scene_config.get("entities", []) if e.get("type") != "worker"]
     hazard_zones = scene_config.get("hazard_zones", [])
@@ -289,21 +291,25 @@ def _spawn_entities(scene_config, asset_library, stage, spawn_bounds_min, spawn_
         semantic_class = "vehicle" if asset_type == "vehicle" else asset_id
         anchor_zone = entity.get("anchor_zone")
 
-        zone_bounds = resolve_anchor_zone_bounds(anchor_zone, hazard_zones)
+        if asset_type == "vehicle":
+            zone_bounds = resolve_anchor_zone_bounds(anchor_zone, hazard_zones)
+            if zone_bounds is not None:
+                bmin, bmax = zone_bounds
+                cx = (bmin[0] + bmax[0]) / 2.0
+                cy = (bmin[1] + bmax[1]) / 2.0
+                cx += random.uniform(-0.5, 0.5)
+                cy += random.uniform(-0.5, 0.5)
+            else:
+                cx, cy = random.uniform(-3.0, 3.0), random.uniform(-3.0, 3.0)
+                print(f"[INFO] Vehicle '{asset_id}' has no anchor_zone, placing at ({cx:.2f}, {cy:.2f})")
 
-        if zone_bounds is not None:
-            bmin, bmax = zone_bounds
-            cx = (bmin[0] + bmax[0]) / 2.0
-            cy = (bmin[1] + bmax[1]) / 2.0
-            cx += random.uniform(-0.5, 0.5)
-            cy += random.uniform(-0.5, 0.5)
             prim_path, spawn_pos = spawn_at_fixed_position(
                 usd_path, position=(cx, cy, 0.0), semantic_class=semantic_class
             )
             known_positions.append(spawn_pos)
-            print(f"[INFO] Anchored {asset_id} to zone '{anchor_zone}' at ({cx:.2f}, {cy:.2f})")
+            _progress(f"Vehicle '{asset_id}' anchored to '{anchor_zone}' at ({cx:.2f}, {cy:.2f})")
         else:
-            print(f"[INFO] Spawning {asset_id} with semantic class '{semantic_class}' (random placement)")
+            _progress(f"Spawning '{asset_id}' (type={asset_type}) with random placement")
             spawner = get_geofenced_spawner(
                 usd_path, num_instances=1,
                 bounds_min=spawn_bounds_min, bounds_max=spawn_bounds_max,
@@ -314,7 +320,7 @@ def _spawn_entities(scene_config, asset_library, stage, spawn_bounds_min, spawn_
 
         spawned_asset_ids.append((asset_id, semantic_class))
 
-    _progress(f"Spawned {len(spawned_asset_ids)} non-worker entities ({len(known_positions)} anchored)")
+    _progress(f"Spawned {len(spawned_asset_ids)} non-worker entities ({len(known_positions)} fixed-position)")
     return spawned_asset_ids, known_positions
 
 
@@ -392,15 +398,23 @@ def main():
     spawned_worker_names, worker_behaviors = _setup_workers(scene_config, asset_library, stage)
     workers = [e for e in scene_config.get("entities", []) if e.get("type") == "worker"]
 
-    worker_known_positions = []
+    _worker_known_positions = []
     for wb in worker_behaviors:
         wid = wb.get("worker_id", "")
         for cmd in wb.get("commands", []):
             if cmd.get("command") == "GoTo":
                 wx = cmd.get("x", 0.0)
                 wy = cmd.get("y", 0.0)
-                worker_known_positions.append((wx, wy))
+                _worker_known_positions.append((wid, wx, wy))
                 break
+
+    for wid, wx, wy in _worker_known_positions:
+        _progress(f"  Worker {wid} initial position: ({wx:.2f}, {wy:.2f})")
+
+    for ent in scene_config.get("entities", []):
+        _progress(f"  Entity: type={ent.get('type')}, asset_id={ent.get('asset_id')}, anchor_zone={ent.get('anchor_zone')}")
+
+    worker_known_positions = [(wx, wy) for _, wx, wy in _worker_known_positions]
 
     _progress("Hiding driver prims...")
     hide_driver_prims(stage)

@@ -37,10 +37,14 @@ def spawn_at_fixed_position(asset_path, position, rotation=(0, 0, 0), semantic_c
     stage = omni.usd.get_context().get_stage()
 
     basename = asset_path.rstrip("/").split("/")[-1].replace(".usd", "")
-    prim_path = f"/World/Layout/{basename}"
+    parent_path = "/World/Entities"
+    if not stage.GetPrimAtPath(parent_path):
+        stage.DefinePrim(parent_path, "Xform")
+
+    prim_path = f"{parent_path}/{basename}"
     counter = 1
     while stage.GetPrimAtPath(prim_path):
-        prim_path = f"/World/Layout/{basename}_{counter}"
+        prim_path = f"{parent_path}/{basename}_{counter}"
         counter += 1
 
     prim = stage.DefinePrim(prim_path, "Xform")
@@ -56,7 +60,7 @@ def spawn_at_fixed_position(asset_path, position, rotation=(0, 0, 0), semantic_c
         prim.CreateAttribute("semantic:Semantics:params:semanticType", Sdf.ValueTypeNames.Token, True).Set("class")
 
     spawn_pos = (float(position[0]), float(position[1]))
-    print(f"[INFO] Fixed-spawn {basename} at ({position[0]:.2f}, {position[1]:.2f}, {position[2]:.2f}) sem={semantic_class}")
+    print(f"[INFO] Fixed-spawn '{basename}' -> {prim_path} at ({position[0]:.2f}, {position[1]:.2f}, {position[2]:.2f}) sem='{semantic_class}'")
     return prim_path, spawn_pos
 
 
@@ -76,6 +80,7 @@ def resolve_anchor_zone_bounds(anchor_zone, hazard_zones):
             bmax = zone.get("bounds_max", (2, 2))
             return (tuple(bmin), tuple(bmax))
 
+    print(f"[WARN] anchor_zone '{anchor_zone}' did not match any hazard zone name. Available: {[z.get('name') for z in hazard_zones]}")
     return None
 
 
