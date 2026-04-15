@@ -35,12 +35,37 @@ def _patch_fast_importer():
     _progress("Patched fast_importer.py for None submodule_search_locations")
 
 
+def _patch_kit_anim_schema():
+    """Patch isaacsim.exp.base.python.kit to include animation graph schema extensions.
+
+    Without omni.anim.graph.schema and omni.anim.graph.core in the kit dependencies,
+    character USDs fail to resolve AnimationGraphAPI and workers remain in T-pose.
+    """
+    KIT_FILE = "/isaac-sim/apps/isaacsim.exp.base.python.kit"
+    if not os.path.isfile(KIT_FILE):
+        _progress(f"Kit file not found at {KIT_FILE}, skipping anim schema patch")
+        return
+    with open(KIT_FILE, "r") as f:
+        src = f.read()
+    if '"omni.anim.graph.schema"' in src:
+        _progress("Kit file already contains anim graph schema, skipping patch")
+        return
+    patched = src.replace(
+        '"isaacsim.exp.base" = {}',
+        '"isaacsim.exp.base" = {}\n"omni.anim.graph.core" = {}\n"omni.anim.graph.schema" = {}',
+    )
+    with open(KIT_FILE, "w") as f:
+        f.write(patched)
+    _progress("Patched kit file with omni.anim.graph.core and omni.anim.graph.schema")
+
+
 def _progress(msg):
     print(f"[PROGRESS] [{time.strftime('%H:%M:%S')}] {msg}")
     sys.stdout.flush()
 
 
 _patch_fast_importer()
+_patch_kit_anim_schema()
 
 from isaacsim import SimulationApp
 
