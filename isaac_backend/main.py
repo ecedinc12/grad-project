@@ -112,22 +112,22 @@ from isaac_backend.animation import (
     inject_commands_after_play,
 )
 
-COCO_CATEGORIES = [
-    {"name": "person", "id": 1, "supercategory": "worker"},
-    {"name": "vehicle", "id": 2, "supercategory": "equipment"},
-    {"name": "rack", "id": 3, "supercategory": "warehouse"},
-    {"name": "pallet", "id": 4, "supercategory": "warehouse"},
-    {"name": "box", "id": 5, "supercategory": "warehouse"},
-    {"name": "barrel", "id": 6, "supercategory": "warehouse"},
-    {"name": "cone", "id": 7, "supercategory": "safety"},
-    {"name": "fire_extinguisher", "id": 8, "supercategory": "safety"},
-    {"name": "cart", "id": 9, "supercategory": "warehouse"},
-    {"name": "sign", "id": 10, "supercategory": "safety"},
-    {"name": "pillar", "id": 11, "supercategory": "structure"},
-    {"name": "hazard_zone_warning", "id": 12, "supercategory": "zone"},
-    {"name": "hazard_zone_restricted", "id": 13, "supercategory": "zone"},
-    {"name": "hazard_zone_critical", "id": 14, "supercategory": "zone"},
-]
+COCO_CATEGORIES = {
+    "person": {"name": "person", "id": 1, "supercategory": "worker"},
+    "vehicle": {"name": "vehicle", "id": 2, "supercategory": "equipment"},
+    "rack": {"name": "rack", "id": 3, "supercategory": "warehouse"},
+    "pallet": {"name": "pallet", "id": 4, "supercategory": "warehouse"},
+    "box": {"name": "box", "id": 5, "supercategory": "warehouse"},
+    "barrel": {"name": "barrel", "id": 6, "supercategory": "warehouse"},
+    "cone": {"name": "cone", "id": 7, "supercategory": "safety"},
+    "fire_extinguisher": {"name": "fire_extinguisher", "id": 8, "supercategory": "safety"},
+    "cart": {"name": "cart", "id": 9, "supercategory": "warehouse"},
+    "sign": {"name": "sign", "id": 10, "supercategory": "safety"},
+    "pillar": {"name": "pillar", "id": 11, "supercategory": "structure"},
+    "hazard_zone_warning": {"name": "hazard_zone_warning", "id": 12, "supercategory": "zone"},
+    "hazard_zone_restricted": {"name": "hazard_zone_restricted", "id": 13, "supercategory": "zone"},
+    "hazard_zone_critical": {"name": "hazard_zone_critical", "id": 14, "supercategory": "zone"},
+}
 
 
 def _apply_scene_semantics(stage, spawned_asset_ids, workers):
