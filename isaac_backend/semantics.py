@@ -16,6 +16,7 @@ VALID_SEMANTICS = {
     "person", "vehicle", "rack", "pallet", "box", "barrel",
     "cone", "fire_extinguisher", "cart", "sign", "pillar",
     "hazard_zone_warning", "hazard_zone_restricted", "hazard_zone_critical",
+    "hardhat", "vest",
 }
 
 HAZARD_LABELS = {"hazard_zone_warning", "hazard_zone_restricted", "hazard_zone_critical"}
@@ -75,7 +76,8 @@ def apply_scene_semantics(stage, spawned_asset_ids, workers):
     """Walk the stage and apply/correct USD-level semantics.
 
     1. Force-set semantics on spawned assets (vehicles, equipment) by path match.
-    2. Force-set 'person' on all worker Xform and SkelRoot prims.
+    2. Force-set 'person' on worker prims, skipping PPE meshes that already have
+       their own label (hardhat/vest) from apply_ppe().
     3. Force-set hazard zone semantics from /World/HazardZones/.
     4. Strip any semantic labels not in VALID_SEMANTICS to prevent 'other' category.
 
@@ -98,12 +100,20 @@ def apply_scene_semantics(stage, spawned_asset_ids, workers):
                 print(f"[INFO] Applied semantics '{semantic_class}' to {path}")
                 break
 
+    PPE_LABELS = {"hardhat", "vest"}
+
     if workers:
         for prim in stage.Traverse():
             path = str(prim.GetPath())
-            if path.startswith("/World/Characters/"):
-                _set_semantic(prim, "person")
-                applied += 1
+            if not path.startswith("/World/Characters/"):
+                continue
+            data_attr = prim.GetAttribute("semantic:Semantics:params:semanticData")
+            if data_attr and data_attr.HasAuthoredValue():
+                existing = str(data_attr.Get()).lower()
+                if existing in PPE_LABELS:
+                    continue
+            _set_semantic(prim, "person")
+            applied += 1
 
     for prim in stage.Traverse():
         path = str(prim.GetPath())

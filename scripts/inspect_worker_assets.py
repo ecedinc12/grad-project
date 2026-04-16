@@ -443,10 +443,14 @@ def main():
     with open("/workspace/grad-project/assets/library.json", "r") as f:
         asset_library = json.load(f)
 
+    worker_usd = asset_library.get("worker")
+    if not worker_usd:
+        print("[ERROR] No 'worker' key in asset_library! Available keys:", list(asset_library.keys()))
+        simulation_app.close()
+        os._exit(1)
+
     worker_variants = {
-        "worker_with_ppe": asset_library["worker_with_ppe"],
-        "worker_with_ppe_alt": asset_library.get("worker_with_ppe_alt", asset_library["worker_with_ppe"]),
-        "worker_no_ppe": asset_library.get("worker_no_ppe", asset_library["worker_with_ppe"]),
+        "worker": worker_usd,
     }
 
     # ── Phase 1: Load worker variants and inspect ──

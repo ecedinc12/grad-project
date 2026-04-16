@@ -1,32 +1,79 @@
 {
-    "entities": [
-        {"type": "worker", "asset_id": "worker_with_ppe", "ppe_state": {"hardhat": true, "vest": true}},
-        {"type": "vehicle", "asset_id": "forklift"}
-    ],
-    "hazard_zones": [
-        {"name": "custom_zone", "bounds_min": [-6.0, -3.0], "bounds_max": [6.0, 3.0], "danger_level": "warning"}
-    ],
-    "camera_angles": ["eye_level"],
-    "camera_mode": "indoor",
-    "lighting_conditions": "daylight",
-    "worker_behaviors": [
-        {"worker_id": "worker_01", "commands": [
-            {"command": "GoTo", "x": -4.0, "y": 0.0, "z": 0.0, "rotation": 90.0},
-            {"command": "Idle", "duration": 2.0},
-            {"command": "GoTo", "x": 4.0, "y": 0.0, "z": 0.0, "rotation": 270.0}
-        ]}
-    ],
-    "layout": "custom",
-    "layout_params": {
-        "rack_pattern": "rows",
-        "rack_rows": 10,
-        "rack_cols": 1,
-        "aisle_width": 3.0,
-        "bounds_min": [-6.0, -6.0],
-        "bounds_max": [6.0, 6.0],
-        "clutter_density": "low",
-        "clutter_zones": [],
-        "pallet_rows": 3,
-        "pallet_cols": 1
+  "entities": [
+    {
+      "type": "worker",
+      "asset_id": "worker",
+      "ppe_state": {
+        "hardhat": true,
+        "vest": true
+      }
+    },
+    {
+      "type": "vehicle",
+      "asset_id": "forklift"
     }
+  ],
+  "hazard_zones": [
+    {
+      "name": "custom_zone",
+      "bounds_min": [
+        -6.0,
+        -3.0
+      ],
+      "bounds_max": [
+        6.0,
+        3.0
+      ],
+      "danger_level": "warning"
+    }
+  ],
+  "camera_angles": [
+    "eye_level"
+  ],
+  "camera_mode": "indoor",
+  "lighting_conditions": "daylight",
+  "worker_behaviors": [
+    {
+      "worker_id": "worker_01",
+      "commands": [
+        {
+          "command": "GoTo",
+          "x": -4.0,
+          "y": 0.0,
+          "z": 0.0,
+          "rotation": 90.0
+        },
+        {
+          "command": "Idle",
+          "duration": 2.0
+        },
+        {
+          "command": "GoTo",
+          "x": 4.0,
+          "y": 0.0,
+          "z": 0.0,
+          "rotation": 270.0
+        }
+      ]
+    }
+  ],
+  "layout": "custom",
+  "layout_params": {
+    "rack_pattern": "rows",
+    "rack_rows": 10,
+    "rack_cols": 1,
+    "aisle_width": 3.0,
+    "bounds_min": [
+      -6.0,
+      -6.0
+    ],
+    "bounds_max": [
+      6.0,
+      6.0
+    ],
+    "clutter_density": "low",
+    "clutter_zones": [],
+    "pallet_rows": 3,
+    "pallet_cols": 1
+  }
 }

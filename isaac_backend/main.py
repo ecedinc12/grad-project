@@ -112,6 +112,8 @@ from isaac_backend.animation import (
 COCO_CATEGORIES = {
     "person": {"name": "person", "id": 1, "supercategory": "worker", "color": (220, 20, 60)},
     "vehicle": {"name": "vehicle", "id": 2, "supercategory": "equipment", "color": (255, 165, 0)},
+    "hardhat": {"name": "hardhat", "id": 15, "supercategory": "ppe", "color": (255, 255, 0)},
+    "vest": {"name": "vest", "id": 16, "supercategory": "ppe", "color": (0, 255, 127)},
     "rack": {"name": "rack", "id": 3, "supercategory": "warehouse", "color": (139, 69, 19)},
     "pallet": {"name": "pallet", "id": 4, "supercategory": "warehouse", "color": (210, 180, 140)},
     "box": {"name": "box", "id": 5, "supercategory": "warehouse", "color": (188, 143, 143)},
@@ -223,7 +225,7 @@ def _setup_coco_writer():
         instance_segmentation=True,
         coco_categories=COCO_CATEGORIES,
     )
-    _progress("CocoWriter initialized with 14 categories")
+    _progress("CocoWriter initialized with 16 categories (incl. hardhat, vest)")
     return writer
 
 

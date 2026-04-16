@@ -1,21 +1,62 @@
 {
-    "entities": [
-        {"type": "worker", "asset_id": "worker_with_ppe", "ppe_state": {"hardhat": true, "vest": true}},
-        {"type": "vehicle", "asset_id": "forklift"}
-    ],
-    "hazard_zones": [
-        {"name": "service_area", "bounds_min": [-3.0, -2.0], "bounds_max": [3.0, 2.0], "danger_level": "warning"}
-    ],
-    "camera_angles": ["eye_level"],
-    "camera_mode": "indoor",
-    "lighting_conditions": "daylight",
-    "worker_behaviors": [
-        {"worker_id": "worker_01", "commands": [
-            {"command": "GoTo", "x": 2.0, "y": 0.0, "z": 0.0, "rotation": 90.0},
-            {"command": "Idle", "duration": 3.0},
-            {"command": "GoTo", "x": -2.0, "y": 0.0, "z": 0.0, "rotation": 270.0}
-        ]}
-    ],
-    "layout": "maintenance_bay",
-    "layout_params": null
+  "entities": [
+    {
+      "type": "worker",
+      "asset_id": "worker",
+      "ppe_state": {
+        "hardhat": true,
+        "vest": true
+      }
+    },
+    {
+      "type": "vehicle",
+      "asset_id": "forklift"
+    }
+  ],
+  "hazard_zones": [
+    {
+      "name": "service_area",
+      "bounds_min": [
+        -3.0,
+        -2.0
+      ],
+      "bounds_max": [
+        3.0,
+        2.0
+      ],
+      "danger_level": "warning"
+    }
+  ],
+  "camera_angles": [
+    "eye_level"
+  ],
+  "camera_mode": "indoor",
+  "lighting_conditions": "daylight",
+  "worker_behaviors": [
+    {
+      "worker_id": "worker_01",
+      "commands": [
+        {
+          "command": "GoTo",
+          "x": 2.0,
+          "y": 0.0,
+          "z": 0.0,
+          "rotation": 90.0
+        },
+        {
+          "command": "Idle",
+          "duration": 3.0
+        },
+        {
+          "command": "GoTo",
+          "x": -2.0,
+          "y": 0.0,
+          "z": 0.0,
+          "rotation": 270.0
+        }
+      ]
+    }
+  ],
+  "layout": "maintenance_bay",
+  "layout_params": null
 }

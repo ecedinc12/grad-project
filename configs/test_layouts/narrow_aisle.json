@@ -1,21 +1,62 @@
 {
-    "entities": [
-        {"type": "worker", "asset_id": "worker_with_ppe", "ppe_state": {"hardhat": true, "vest": true}},
-        {"type": "vehicle", "asset_id": "forklift"}
-    ],
-    "hazard_zones": [
-        {"name": "tight_aisle", "bounds_min": [-5.0, -1.5], "bounds_max": [5.0, 1.5], "danger_level": "critical"}
-    ],
-    "camera_angles": ["eye_level"],
-    "camera_mode": "indoor",
-    "lighting_conditions": "daylight",
-    "worker_behaviors": [
-        {"worker_id": "worker_01", "commands": [
-            {"command": "GoTo", "x": -4.0, "y": 0.0, "z": 0.0, "rotation": 90.0},
-            {"command": "LookAround", "duration": 3.0},
-            {"command": "GoTo", "x": 4.0, "y": 0.0, "z": 0.0, "rotation": 270.0}
-        ]}
-    ],
-    "layout": "narrow_aisle",
-    "layout_params": null
+  "entities": [
+    {
+      "type": "worker",
+      "asset_id": "worker",
+      "ppe_state": {
+        "hardhat": true,
+        "vest": true
+      }
+    },
+    {
+      "type": "vehicle",
+      "asset_id": "forklift"
+    }
+  ],
+  "hazard_zones": [
+    {
+      "name": "tight_aisle",
+      "bounds_min": [
+        -5.0,
+        -1.5
+      ],
+      "bounds_max": [
+        5.0,
+        1.5
+      ],
+      "danger_level": "critical"
+    }
+  ],
+  "camera_angles": [
+    "eye_level"
+  ],
+  "camera_mode": "indoor",
+  "lighting_conditions": "daylight",
+  "worker_behaviors": [
+    {
+      "worker_id": "worker_01",
+      "commands": [
+        {
+          "command": "GoTo",
+          "x": -4.0,
+          "y": 0.0,
+          "z": 0.0,
+          "rotation": 90.0
+        },
+        {
+          "command": "LookAround",
+          "duration": 3.0
+        },
+        {
+          "command": "GoTo",
+          "x": 4.0,
+          "y": 0.0,
+          "z": 0.0,
+          "rotation": 270.0
+        }
+      ]
+    }
+  ],
+  "layout": "narrow_aisle",
+  "layout_params": null
 }
