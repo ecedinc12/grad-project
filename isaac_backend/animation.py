@@ -351,7 +351,7 @@ def setup_all_behaviors_async(spawned_worker_names, worker_behaviors, stage):
     return attached, failed
 
 
-def _build_command_list(worker_behaviors, worker_name):
+def _build_command_list(worker_behaviors, worker_name, visible_bounds=None):
     """Build a command list for a single worker from behavior config.
 
     character_behavior.py requires the character name as the first word in each
@@ -359,6 +359,9 @@ def _build_command_list(worker_behaviors, worker_name):
         "worker_01 GoTo -4.0 -5.0 0.0 90.0"
         "worker_01 Idle 5.0"
         "worker_01 LookAround 3.0"
+
+    If visible_bounds is provided, GoTo (x, y) targets are clamped to
+    the camera-visible area (min_x, max_x, min_y, max_y).
     """
     for wb in worker_behaviors:
         if wb.get("worker_id") == worker_name:
@@ -373,6 +376,9 @@ def _build_command_list(worker_behaviors, worker_name):
                     y = cmd.get("y", 0.0)
                     z = cmd.get("z", 0.0)
                     rot = cmd.get("rotation", 0.0)
+                    if visible_bounds is not None:
+                        x = max(visible_bounds[0], min(visible_bounds[1], x))
+                        y = max(visible_bounds[2], min(visible_bounds[3], y))
                     result.append(f"{worker_name} GoTo {x} {y} {z} {rot}")
                 elif cmd_type == "Idle":
                     duration = cmd.get("duration", 5.0)
@@ -384,12 +390,15 @@ def _build_command_list(worker_behaviors, worker_name):
     return [f"{worker_name} Idle 10"]
 
 
-def inject_commands_after_play(spawned_worker_names, worker_behaviors, simulation_app=None):
+def inject_commands_after_play(spawned_worker_names, worker_behaviors, simulation_app=None, visible_bounds=None):
     """Inject commands to all registered agents via AgentManager.
 
     Must be called AFTER timeline.play() and after waiting for agent registration.
     Uses AgentManager.inject_command() which properly sets animation graph
     variables through the registered behavior script instances.
+
+    visible_bounds: (min_x, max_x, min_y, max_y) constraining GoTo targets
+                    to the camera-visible area.
 
     Returns (injected, failed) counts.
     """
@@ -420,7 +429,7 @@ def inject_commands_after_play(spawned_worker_names, worker_behaviors, simulatio
             failed += 1
             continue
 
-        command_list = _build_command_list(worker_behaviors, worker_name)
+        command_list = _build_command_list(worker_behaviors, worker_name, visible_bounds=visible_bounds)
         print(f"[INFO] Injecting commands for {worker_name}: {command_list}")
 
         try:
@@ -444,12 +453,15 @@ WAREHOUSE_Y_RANGE = (-5.5, 5.5)
 COMMAND_DURATION_RANGE = (80, 120)
 
 
-def reinject_random_commands(spawned_worker_names):
+def reinject_random_commands(spawned_worker_names, visible_bounds=None):
     """Re-inject randomized commands to all registered agents.
 
     Prevents IRA behavior loop from repeating the same command sequence.
-    Generates varied GoTo targets within warehouse bounds, plus Idle
-    and LookAround with random durations.
+    Generates varied GoTo targets within visible_bounds (or warehouse bounds
+    as fallback), plus Idle and LookAround with random durations.
+
+    visible_bounds: (min_x, max_x, min_y, max_y) constraining GoTo targets.
+                    If None, falls back to WAREHOUSE_X/Y_RANGE.
 
     Returns (injected, failed) counts.
     """
@@ -465,13 +477,20 @@ def reinject_random_commands(spawned_worker_names):
     injected = 0
     failed = 0
 
+    if visible_bounds is not None:
+        x_lo, x_hi = visible_bounds[0], visible_bounds[1]
+        y_lo, y_hi = visible_bounds[2], visible_bounds[3]
+    else:
+        x_lo, x_hi = WAREHOUSE_X_RANGE
+        y_lo, y_hi = WAREHOUSE_Y_RANGE
+
     for worker_name in sorted(spawned_worker_names):
         if not agent_manager.agent_registered(worker_name):
             failed += 1
             continue
 
-        x = round(random.uniform(*WAREHOUSE_X_RANGE), 1)
-        y = round(random.uniform(*WAREHOUSE_Y_RANGE), 1)
+        x = round(random.uniform(x_lo, x_hi), 1)
+        y = round(random.uniform(y_lo, y_hi), 1)
         rot = round(random.uniform(0, 360), 1)
         idle_dur = round(random.uniform(3, 8), 1)
         look_dur = round(random.uniform(2, 5), 1)

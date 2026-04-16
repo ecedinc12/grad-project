@@ -5,9 +5,11 @@ Provides indoor fixed-position placement and orbit distribution for
 camera viewpoints in warehouse SDG. Pure Python — no Isaac Sim imports
 except rep.distribution in orbit_distribution().
 
-The indoor camera is placed at an OFFSET from the scene centroid,
-looking toward the centroid. This ensures the camera frames the entire
-scene rather than hovering directly above it.
+Camera-first approach: the camera placement is determined from config
+(angle hints, hazard zones, or explicit override) BEFORE entities are
+spawned. Then compute_ground_visible_area() projects the camera frustum
+onto the ground plane to derive a (min_x, max_x, min_y, max_y) spawn
+region so that entities are always placed within the camera's field of view.
 
 Constants define warehouse interior bounds, angle-to-height mappings,
 and angle-to-elevation mappings.
@@ -277,3 +279,179 @@ def pick_look_at_target(entity_positions, worker_positions, hazard_zones):
     cy = sum(p[1] for p in points) / len(points)
     print(f"[CAMERA] pick_look_at_target: {len(points)} points, target=({cx:.2f}, {cy:.2f}, 1.0)")
     return (cx, cy, 1.0)
+
+
+SENSOR_WIDTH_MM = 36.0
+SENSOR_HEIGHT_MM = 20.25
+VISIBLE_MARGIN_FRACTION = 0.15
+MIN_VISIBLE_SIZE = 2.0
+
+
+def compute_ground_visible_area(cam_pos, look_at, focal_length=14.0,
+                                 margin_fraction=VISIBLE_MARGIN_FRACTION):
+    """Compute the conservative AABB on the ground plane (z=0) visible from the camera.
+
+    Projects the four corner rays of the camera frustum onto z=0 and
+    returns a shrunk axis-aligned bounding box suitable for constraining
+    entity spawn positions.
+
+    Rays that don't hit the ground (ray_dz >= 0) are skipped — they
+    point skyward and don't limit the ground visible area. If too few
+    rays hit, falls back to a region around the camera's ground projection.
+
+    Args:
+        cam_pos: Camera position (x, y, z).
+        look_at: Look-at target (x, y, z).
+        focal_length: Focal length in mm (default 14.0 → wide FOV).
+        margin_fraction: Fraction of each edge to inset (0.15 = use inner 85%).
+
+    Returns:
+        Tuple (min_x, max_x, min_y, max_y) of the conservative spawn region.
+    """
+    cam_x, cam_y, cam_z = cam_pos
+    la_x, la_y, la_z = look_at
+
+    dx = la_x - cam_x
+    dy = la_y - cam_y
+    dz = la_z - cam_z
+    d_len = math.sqrt(dx * dx + dy * dy + dz * dz)
+    if d_len < 1e-6:
+        dz = -1.0
+        d_len = 1.0
+    dx /= d_len
+    dy /= d_len
+    dz /= d_len
+
+    right_len = math.sqrt(dy * dy + dx * dx)
+    if right_len < 1e-4:
+        rx, ry, rz = 1.0, 0.0, 0.0
+    else:
+        rx = -dy / right_len
+        ry = dx / right_len
+        rz = 0.0
+
+    ux = dy * rz - dz * ry
+    uy = dz * rx - dx * rz
+    uz = dx * ry - dy * rx
+    u_len = math.sqrt(ux * ux + uy * uy + uz * uz)
+    if u_len < 1e-6:
+        ux, uy, uz = 0.0, 1.0, 0.0
+    else:
+        ux /= u_len
+        uy /= u_len
+        uz /= u_len
+
+    half_hfov = math.atan(SENSOR_WIDTH_MM / (2.0 * focal_length))
+    half_vfov = math.atan(SENSOR_HEIGHT_MM / (2.0 * focal_length))
+
+    ground_points = []
+
+    for sh, sv in [(-1, -1), (1, -1), (-1, 1), (1, 1)]:
+        ray_dx = dx + math.tan(half_hfov) * sh * rx + math.tan(half_vfov) * sv * ux
+        ray_dy = dy + math.tan(half_hfov) * sh * ry + math.tan(half_vfov) * sv * uy
+        ray_dz = dz + math.tan(half_hfov) * sh * rz + math.tan(half_vfov) * sv * uz
+
+        if ray_dz < -1e-6:
+            t = -cam_z / ray_dz
+            if t > 0:
+                gx = cam_x + ray_dx * t
+                gy = cam_y + ray_dy * t
+                gx = max(WAREHOUSE_INTERIOR_X[0], min(WAREHOUSE_INTERIOR_X[1], gx))
+                gy = max(WAREHOUSE_INTERIOR_Y[0], min(WAREHOUSE_INTERIOR_Y[1], gy))
+                ground_points.append((gx, gy))
+
+    if len(ground_points) < 2:
+        fallback_radius = 3.0
+        cx = cam_x + dx * max(cam_z, 1.0)
+        cy = cam_y + dy * max(cam_z, 1.0)
+        ground_points = [
+            (cx - fallback_radius, cy - fallback_radius),
+            (cx + fallback_radius, cy - fallback_radius),
+            (cx - fallback_radius, cy + fallback_radius),
+            (cx + fallback_radius, cy + fallback_radius),
+        ]
+        print("[CAMERA] Too few ground intersections, using fallback region around camera projection")
+
+    min_x = min(p[0] for p in ground_points)
+    max_x = max(p[0] for p in ground_points)
+    min_y = min(p[1] for p in ground_points)
+    max_y = max(p[1] for p in ground_points)
+
+    span_x = max(max_x - min_x, MIN_VISIBLE_SIZE)
+    span_y = max(max_y - min_y, MIN_VISIBLE_SIZE)
+    min_x += span_x * margin_fraction / 2.0
+    max_x -= span_x * margin_fraction / 2.0
+    min_y += span_y * margin_fraction / 2.0
+    max_y -= span_y * margin_fraction / 2.0
+
+    if max_x - min_x < MIN_VISIBLE_SIZE:
+        cx = (min_x + max_x) / 2.0
+        min_x = cx - MIN_VISIBLE_SIZE / 2.0
+        max_x = cx + MIN_VISIBLE_SIZE / 2.0
+    if max_y - min_y < MIN_VISIBLE_SIZE:
+        cy = (min_y + max_y) / 2.0
+        min_y = cy - MIN_VISIBLE_SIZE / 2.0
+        max_y = cy + MIN_VISIBLE_SIZE / 2.0
+
+    wh_min_x = WAREHOUSE_INTERIOR_X[0] + INTERIOR_MARGIN
+    wh_max_x = WAREHOUSE_INTERIOR_X[1] - INTERIOR_MARGIN
+    wh_min_y = WAREHOUSE_INTERIOR_Y[0] + INTERIOR_MARGIN
+    wh_max_y = WAREHOUSE_INTERIOR_Y[1] - INTERIOR_MARGIN
+    min_x = max(min_x, wh_min_x)
+    max_x = min(max_x, wh_max_x)
+    min_y = max(min_y, wh_min_y)
+    max_y = min(max_y, wh_max_y)
+
+    print(f"[CAMERA] Ground visible area: x=[{min_x:.2f}, {max_x:.2f}] y=[{min_y:.2f}, {max_y:.2f}]")
+    return (min_x, max_x, min_y, max_y)
+
+
+def clamp_bounds_to_warehouse(visible_bounds):
+    """Clamp a (min_x, max_x, min_y, max_y) tuple to warehouse interior bounds."""
+    min_x, max_x, min_y, max_y = visible_bounds
+    wh_min_x = WAREHOUSE_INTERIOR_X[0] + INTERIOR_MARGIN
+    wh_max_x = WAREHOUSE_INTERIOR_X[1] - INTERIOR_MARGIN
+    wh_min_y = WAREHOUSE_INTERIOR_Y[0] + INTERIOR_MARGIN
+    wh_max_y = WAREHOUSE_INTERIOR_Y[1] - INTERIOR_MARGIN
+    return (
+        max(min_x, wh_min_x),
+        min(max_x, wh_max_x),
+        max(min_y, wh_min_y),
+        min(max_y, wh_max_y),
+    )
+
+
+def pick_camera_placement(scene_config, hazard_zones=None):
+    """Determine camera position and look_at from config alone — no entity dependency.
+
+    This is the camera-first entry point. Call BEFORE spawning entities
+    so that visible_bounds can be computed and used to constrain spawn positions.
+
+    Returns:
+        (cam_pos, look_at, focal_length) where cam_pos and look_at are (x, y, z) tuples.
+    """
+    angle_hints = scene_config.get("camera_angles", [])
+    camera_position_override = scene_config.get("camera_position")
+    focal_length = scene_config.get("focal_length", 14.0)
+
+    if camera_position_override:
+        cam_pos = clamp_to_warehouse(*camera_position_override)
+        print(f"[CAMERA] Using camera_position override: ({cam_pos[0]:.2f}, {cam_pos[1]:.2f}, {cam_pos[2]:.2f})")
+    else:
+        cam_pos = pick_indoor_position(
+            angle_hints,
+            hazard_zones=hazard_zones,
+            entity_positions=None,
+            worker_positions=None,
+        )
+
+    look_at = pick_look_at_target(
+        entity_positions=[],
+        worker_positions=[],
+        hazard_zones=hazard_zones or [],
+    )
+
+    print(f"[CAMERA] Camera placement: pos=({cam_pos[0]:.2f}, {cam_pos[1]:.2f}, {cam_pos[2]:.2f}) "
+          f"look_at=({look_at[0]:.2f}, {look_at[1]:.2f}, {look_at[2]:.2f}) "
+          f"focal_length={focal_length}mm")
+    return cam_pos, look_at, focal_length

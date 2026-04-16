@@ -91,7 +91,10 @@ from isaacsim.core.api import World
 from pxr import Usd, UsdGeom, Sdf
 
 from isaac_backend.config_loader import load_config
-from isaac_backend.camera import positions_for_angles, pick_indoor_position, clamp_to_warehouse, pick_look_at_target
+from isaac_backend.camera import (
+    positions_for_angles, pick_indoor_position, clamp_to_warehouse,
+    pick_look_at_target, pick_camera_placement, compute_ground_visible_area,
+)
 from isaac_backend.lighting import setup_camera_and_lighting
 from isaac_backend.semantics import clear_unwanted_warehouse_semantics, apply_scene_semantics
 from isaac_backend.spawner import get_geofenced_spawner, spawn_hazard_zones, spawn_at_fixed_position, resolve_anchor_zone_bounds
@@ -134,6 +137,24 @@ def _tick(n):
     """Process n simulation app updates (loads assets, resolves references, no physics)."""
     for _ in range(n):
         simulation_app.update()
+
+
+def intersect_bounds(spawn_min, spawn_max, visible_bounds):
+    """Intersect spawn bounds with camera visible bounds.
+
+    Args:
+        spawn_min: (x_min, y_min) of the warehouse spawn area.
+        spawn_max: (x_max, y_max) of the warehouse spawn area.
+        visible_bounds: (min_x, max_x, min_y, max_y) of the camera's ground visible area.
+
+    Returns:
+        ((x_min, y_min), (x_max, y_max)) of the intersection.
+    """
+    v_min_x, v_max_x, v_min_y, v_max_y = visible_bounds
+    return (
+        (max(spawn_min[0], v_min_x), max(spawn_min[1], v_min_y)),
+        (min(spawn_max[0], v_max_x), min(spawn_max[1], v_max_y)),
+    )
 
 
 def compute_scene_centroid(stage, known_positions=None):
@@ -206,34 +227,27 @@ def _setup_coco_writer():
     return writer
 
 
-def _configure_camera_trigger(camera, scene_config, look_at_target, entity_positions, worker_positions):
-    """Set up the frame trigger with either fixed indoor position or orbit distribution."""
+def _configure_camera_trigger(camera, scene_config, cam_pos, look_at_target):
+    """Set up the frame trigger with either fixed indoor position or orbit distribution.
+
+    cam_pos and look_at_target are pre-computed from pick_camera_placement().
+    """
     angle_hints = scene_config.get("camera_angles", [])
     hazard_zones = scene_config.get("hazard_zones", [])
     camera_mode = scene_config.get("camera_mode", "indoor")
-    camera_position_override = scene_config.get("camera_position")
 
     if camera_mode == "indoor":
-        if camera_position_override:
-            cam_x, cam_y, cam_z = clamp_to_warehouse(*camera_position_override)
-            _progress(f"Camera override clamped to ({cam_x:.2f}, {cam_y:.2f}, {cam_z:.2f})")
-        else:
-            cam_x, cam_y, cam_z = pick_indoor_position(
-                angle_hints, hazard_zones=hazard_zones,
-                entity_positions=entity_positions,
-                worker_positions=worker_positions or None,
-            )
-        camera_pos = (cam_x, cam_y, cam_z)
-        _progress(f"Camera indoor: ({cam_x:.2f}, {cam_y:.2f}, {cam_z:.2f}), look_at=({look_at_target[0]:.2f}, {look_at_target[1]:.2f}, {look_at_target[2]:.2f})")
+        _progress(f"Camera indoor: ({cam_pos[0]:.2f}, {cam_pos[1]:.2f}, {cam_pos[2]:.2f}), "
+                  f"look_at=({look_at_target[0]:.2f}, {look_at_target[1]:.2f}, {look_at_target[2]:.2f})")
 
         with rep.trigger.on_frame(num_frames=NUM_FRAMES):
             with camera:
-                rep.modify.pose(position=camera_pos, look_at=look_at_target)
+                rep.modify.pose(position=cam_pos, look_at=look_at_target)
     else:
         scene_positions = positions_for_angles(
             angle_hints, hazard_zones=hazard_zones,
-            entity_positions=entity_positions,
-            worker_positions=worker_positions or None,
+            entity_positions=None,
+            worker_positions=None,
             mode="orbit",
         )
         from isaac_backend.camera import orbit_distribution
@@ -265,19 +279,26 @@ def _teardown(rep, writer, world, simulation_app):
 
 # --- Pipeline phases ---
 
-def _spawn_entities(scene_config, asset_library, stage, spawn_bounds_min, spawn_bounds_max):
+def _spawn_entities(scene_config, asset_library, stage, spawn_bounds_min, spawn_bounds_max, visible_bounds=None):
     """Spawn non-worker entities and return (spawned_asset_ids, known_positions).
 
     Strategy:
     - Vehicles (type='vehicle') are ALWAYS placed at a fixed position.
       If anchor_zone is set, placed at the matching hazard zone center.
-      If no anchor_zone, placed near the scene centroid (0, 0).
-    - All other non-worker entities use Replicator random spawning.
+      If no anchor_zone, placed near the visible area center.
+      Vehicle positions are clamped toward the visible area.
+    - All other non-worker entities use Replicator random spawning,
+      constrained to the intersection of spawn bounds and visible bounds.
     """
     others = [e for e in scene_config.get("entities", []) if e.get("type") != "worker"]
     hazard_zones = scene_config.get("hazard_zones", [])
     spawned_asset_ids = []
     known_positions = []
+
+    constrained_min, constrained_max = spawn_bounds_min, spawn_bounds_max
+    if visible_bounds is not None:
+        constrained_min, constrained_max = intersect_bounds(spawn_bounds_min, spawn_bounds_max, visible_bounds)
+        _progress(f"Spawn bounds constrained to visible area: ({constrained_min[0]:.2f},{constrained_min[1]:.2f}) to ({constrained_max[0]:.2f},{constrained_max[1]:.2f})")
 
     for entity in others:
         asset_id = entity.get("asset_id", "")
@@ -301,8 +322,16 @@ def _spawn_entities(scene_config, asset_library, stage, spawn_bounds_min, spawn_
                 cx += random.uniform(-0.5, 0.5)
                 cy += random.uniform(-0.5, 0.5)
             else:
-                cx, cy = random.uniform(-3.0, 3.0), random.uniform(-3.0, 3.0)
+                if visible_bounds is not None:
+                    cx = random.uniform(visible_bounds[0], visible_bounds[1])
+                    cy = random.uniform(visible_bounds[2], visible_bounds[3])
+                else:
+                    cx, cy = random.uniform(-3.0, 3.0), random.uniform(-3.0, 3.0)
                 print(f"[INFO] Vehicle '{asset_id}' has no anchor_zone, placing at ({cx:.2f}, {cy:.2f})")
+
+            if visible_bounds is not None:
+                cx = max(visible_bounds[0], min(visible_bounds[1], cx))
+                cy = max(visible_bounds[2], min(visible_bounds[3], cy))
 
             prim_path, spawn_pos = spawn_at_fixed_position(
                 usd_path, position=(cx, cy, 0.0), semantic_class=semantic_class
@@ -313,7 +342,7 @@ def _spawn_entities(scene_config, asset_library, stage, spawn_bounds_min, spawn_
             _progress(f"Spawning '{asset_id}' (type={asset_type}) with random placement")
             spawner = get_geofenced_spawner(
                 usd_path, num_instances=1,
-                bounds_min=spawn_bounds_min, bounds_max=spawn_bounds_max,
+                bounds_min=constrained_min, bounds_max=constrained_max,
             )
             prims = spawner()
             with prims:
@@ -325,8 +354,11 @@ def _spawn_entities(scene_config, asset_library, stage, spawn_bounds_min, spawn_
     return spawned_asset_ids, known_positions
 
 
-def _setup_workers(scene_config, asset_library, stage):
-    """Spawn workers, set up animation, and return (spawned_worker_names, worker_behaviors)."""
+def _setup_workers(scene_config, asset_library, stage, visible_bounds=None):
+    """Spawn workers, set up animation, and return (spawned_worker_names, worker_behaviors).
+
+    visible_bounds constrains worker initial positions to the camera's visible area.
+    """
     workers = [e for e in scene_config.get("entities", []) if e.get("type") == "worker"]
     worker_behaviors = scene_config.get("worker_behaviors", [])
 
@@ -337,7 +369,7 @@ def _setup_workers(scene_config, asset_library, stage):
     enable_behavior_extensions(simulation_app=simulation_app)
 
     _progress(f"Spawning {len(workers)} workers...")
-    spawned_names = spawn_workers(workers, worker_behaviors, asset_library, stage, simulation_app)
+    spawned_names = spawn_workers(workers, worker_behaviors, asset_library, stage, simulation_app, visible_bounds=visible_bounds)
 
     _progress("Loading Biped_Setup for AnimationGraph...")
     ensure_biped_setup(simulation_app=simulation_app)
@@ -385,18 +417,30 @@ def main():
     spawn_bounds_min, spawn_bounds_max = spawn_warehouse_layout(scene_config, asset_library, stage)
     _tick(10)
 
+    _progress("Computing camera placement (camera-first)...")
+    hazard_zones = scene_config.get("hazard_zones", [])
+    cam_pos, look_at_target, focal_length = pick_camera_placement(scene_config, hazard_zones=hazard_zones)
+    visible_bounds = compute_ground_visible_area(cam_pos, look_at_target, focal_length=focal_length)
+    _progress(f"Camera position: ({cam_pos[0]:.2f}, {cam_pos[1]:.2f}, {cam_pos[2]:.2f})")
+    _progress(f"Camera look_at: ({look_at_target[0]:.2f}, {look_at_target[1]:.2f}, {look_at_target[2]:.2f})")
+    _progress(f"Visible spawn area: x=[{visible_bounds[0]:.2f}, {visible_bounds[1]:.2f}] y=[{visible_bounds[2]:.2f}, {visible_bounds[3]:.2f}]")
+
     _progress("Setting up camera and lighting...")
     camera, render_product = setup_camera_and_lighting(scene_config)
     _tick(5)
 
-    hazard_zones = scene_config.get("hazard_zones", [])
     if hazard_zones:
         _progress("Spawning hazard zones...")
         spawn_hazard_zones(hazard_zones, stage)
 
-    spawned_asset_ids, entity_known_positions = _spawn_entities(scene_config, asset_library, stage, spawn_bounds_min, spawn_bounds_max)
+    spawned_asset_ids, entity_known_positions = _spawn_entities(
+        scene_config, asset_library, stage, spawn_bounds_min, spawn_bounds_max,
+        visible_bounds=visible_bounds,
+    )
 
-    spawned_worker_names, worker_behaviors = _setup_workers(scene_config, asset_library, stage)
+    spawned_worker_names, worker_behaviors = _setup_workers(
+        scene_config, asset_library, stage, visible_bounds=visible_bounds,
+    )
     workers = [e for e in scene_config.get("entities", []) if e.get("type") == "worker"]
 
     _worker_known_positions = []
@@ -415,21 +459,11 @@ def main():
     for ent in scene_config.get("entities", []):
         _progress(f"  Entity: type={ent.get('type')}, asset_id={ent.get('asset_id')}, anchor_zone={ent.get('anchor_zone')}")
 
-    worker_known_positions = [(wx, wy) for _, wx, wy in _worker_known_positions]
-
     _progress("Hiding driver prims...")
     hide_driver_prims(stage)
 
     _progress("Applying USD-level semantics to all scene prims...")
     apply_scene_semantics(stage, spawned_asset_ids, workers)
-
-    _progress("Computing scene centroid for camera framing...")
-    all_known_positions = entity_known_positions + worker_known_positions
-    centroid, entity_positions, worker_positions = compute_scene_centroid(stage, known_positions=all_known_positions)
-
-    look_at_target = pick_look_at_target(entity_positions, worker_positions, hazard_zones)
-
-    _progress(f"Camera look_at target: ({look_at_target[0]:.2f}, {look_at_target[1]:.2f}, {look_at_target[2]:.2f})")
 
     _progress("Starting timeline for behavior scripts...")
     omni.timeline.get_timeline_interface().play()
@@ -438,7 +472,8 @@ def main():
 
     _progress("Injecting commands via AgentManager...")
     injected, inj_failed = inject_commands_after_play(
-        spawned_worker_names, worker_behaviors, simulation_app=simulation_app
+        spawned_worker_names, worker_behaviors, simulation_app=simulation_app,
+        visible_bounds=visible_bounds,
     )
     _progress(f"Command injection: {injected} succeeded, {inj_failed} failed")
 
@@ -447,14 +482,14 @@ def main():
     writer.attach([render_product])
 
     _progress("Configuring camera trigger...")
-    _configure_camera_trigger(camera, scene_config, look_at_target, entity_positions, worker_positions)
+    _configure_camera_trigger(camera, scene_config, cam_pos, look_at_target)
 
     _progress("Running simulation loop...")
     for step in range(NUM_FRAMES):
         if step % 100 == 0:
             _progress(f"Frame {step}/{NUM_FRAMES}")
         if step > 0 and step % REINJECT_INTERVAL == 0 and spawned_worker_names:
-            reinject_random_commands(spawned_worker_names)
+            reinject_random_commands(spawned_worker_names, visible_bounds=visible_bounds)
         for _ in range(SIM_STEPS_PER_FRAME):
             world.step(render=False)
         rep.orchestrator.step()

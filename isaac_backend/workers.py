@@ -51,9 +51,12 @@ def select_worker_usd(ppe_state, asset_library):
     return asset_library[key]
 
 
-def spawn_workers(workers, worker_behaviors, asset_library, stage, simulation_app=None):
+def spawn_workers(workers, worker_behaviors, asset_library, stage, simulation_app=None, visible_bounds=None):
     """Spawn workers as Xform prims with USD references and semantics.
 
+    visible_bounds: (min_x, max_x, min_y, max_y) constraining spawn positions
+                    to the camera-visible area. GoTo targets are clamped; random
+                    fallback positions are drawn from within these bounds.
     Returns a set of spawned worker names (e.g. {"worker_01", "worker_02"}).
     """
     def _initial_pos(worker_id):
@@ -61,7 +64,13 @@ def spawn_workers(workers, worker_behaviors, asset_library, stage, simulation_ap
             if wb.get("worker_id") == worker_id:
                 for cmd in wb.get("commands", []):
                     if cmd.get("command") == "GoTo":
-                        return cmd.get("x", 0.0), cmd.get("y", 0.0)
+                        x, y = cmd.get("x", 0.0), cmd.get("y", 0.0)
+                        if visible_bounds is not None:
+                            x = max(visible_bounds[0], min(visible_bounds[1], x))
+                            y = max(visible_bounds[2], min(visible_bounds[3], y))
+                        return x, y
+        if visible_bounds is not None:
+            return random.uniform(visible_bounds[0], visible_bounds[1]), random.uniform(visible_bounds[2], visible_bounds[3])
         return random.uniform(-5.0, 5.0), random.uniform(-1.5, 1.5)
 
     if workers:
