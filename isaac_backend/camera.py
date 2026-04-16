@@ -432,7 +432,7 @@ def pick_camera_placement(scene_config, hazard_zones=None):
     """
     angle_hints = scene_config.get("camera_angles", [])
     camera_position_override = scene_config.get("camera_position")
-    focal_length = scene_config.get("focal_length", 14.0)
+    focal_length = scene_config.get("focal_length") or 14.0
 
     if camera_position_override:
         cam_pos = clamp_to_warehouse(*camera_position_override)
