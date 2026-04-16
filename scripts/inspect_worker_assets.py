@@ -29,7 +29,7 @@ simulation_app = SimulationApp({"headless": True})
 import omni.usd
 from pxr import Sdf, Usd, UsdGeom
 
-sys.path.insert(0, "/workspace")
+sys.path.insert(0, "/workspace/grad-project")
 from isaac_backend.semantics import (
     _set_semantic,
     _clear_semantic,
@@ -440,7 +440,7 @@ def main():
 
     stage = omni.usd.get_context().get_stage()
 
-    with open("/workspace/assets/library.json", "r") as f:
+    with open("/workspace/grad-project/assets/library.json", "r") as f:
         asset_library = json.load(f)
 
     worker_variants = {
