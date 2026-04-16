@@ -467,6 +467,16 @@ def main():
     _progress("Applying USD-level semantics to all scene prims...")
     apply_scene_semantics(stage, spawned_asset_ids, workers)
 
+    _progress("Adjusting camera look_at to center on all spawned entities...")
+    all_known_positions = entity_known_positions + [(wx, wy) for _, wx, wy in _worker_known_positions]
+    _, post_entity_positions, post_worker_positions = compute_scene_centroid(
+        stage, known_positions=all_known_positions
+    )
+    look_at_target = pick_look_at_target(post_entity_positions, post_worker_positions, hazard_zones)
+    visible_bounds = compute_ground_visible_area(cam_pos, look_at_target, focal_length=focal_length)
+    _progress(f"Adjusted look_at: ({look_at_target[0]:.2f}, {look_at_target[1]:.2f}, {look_at_target[2]:.2f})")
+    _progress(f"Adjusted visible area: x=[{visible_bounds[0]:.2f}, {visible_bounds[1]:.2f}] y=[{visible_bounds[2]:.2f}, {visible_bounds[3]:.2f}]")
+
     _progress("Starting timeline for behavior scripts...")
     omni.timeline.get_timeline_interface().play()
     for _ in range(100):

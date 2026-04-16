@@ -24,14 +24,15 @@ WAREHOUSE_INTERIOR_Y = (-7.0, 7.0)
 INTERIOR_MARGIN = 0.5
 CEILING_Z = 6.0
 FLOOR_Z = 0.3
+MIN_INDOOR_HEIGHT = 3.0
 
 ANGLE_HEIGHT_MAP = {
     "overhead":   (5.0, 6.0),
     "high_angle": (4.0, 6.0),
-    "eye_level":  (1.4, 2.0),
-    "low_angle":  (0.3, 1.0),
+    "eye_level":  (2.5, 4.0),
+    "low_angle":  (2.0, 3.5),
 }
-DEFAULT_HEIGHT_RANGE = (1.4, 6.0)
+DEFAULT_HEIGHT_RANGE = (2.5, 6.0)
 
 ANGLE_ELEVATION_MAP = {
     "overhead":   (55, 70),
@@ -159,6 +160,7 @@ def pick_indoor_position(angle_hints, hazard_zones=None,
             cam_x, cam_y = clamped[0], clamped[1]
 
     cam_pos = clamp_to_warehouse(cam_x, cam_y, z)
+    cam_pos = (cam_pos[0], cam_pos[1], max(cam_pos[2], MIN_INDOOR_HEIGHT))
     print(f"[CAMERA] pick_indoor_position: angle={first_known}, centroid=({cx:.2f}, {cy:.2f}), "
           f"x_span={x_span:.2f}, y_span={y_span:.2f}, camera=({cam_pos[0]:.2f}, {cam_pos[1]:.2f}, {cam_pos[2]:.2f})")
     return cam_pos
@@ -283,7 +285,7 @@ def pick_look_at_target(entity_positions, worker_positions, hazard_zones):
 
 SENSOR_WIDTH_MM = 36.0
 SENSOR_HEIGHT_MM = 20.25
-VISIBLE_MARGIN_FRACTION = 0.15
+VISIBLE_MARGIN_FRACTION = 0.25
 MIN_VISIBLE_SIZE = 2.0
 
 
@@ -436,6 +438,7 @@ def pick_camera_placement(scene_config, hazard_zones=None):
 
     if camera_position_override:
         cam_pos = clamp_to_warehouse(*camera_position_override)
+        cam_pos = (cam_pos[0], cam_pos[1], max(cam_pos[2], MIN_INDOOR_HEIGHT))
         print(f"[CAMERA] Using camera_position override: ({cam_pos[0]:.2f}, {cam_pos[1]:.2f}, {cam_pos[2]:.2f})")
     else:
         cam_pos = pick_indoor_position(
