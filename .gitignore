@@ -8,6 +8,8 @@
 
 # Project Output (Dataset Generation)
 output/
+dataset_*.tar.gz
+configs/current_scene.json
 
 # Large Assets (USD files, textures, models)
 assets/
