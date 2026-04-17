@@ -58,90 +58,7 @@ PRESETS: dict[str, str] = {
 }
 
 CUSTOM_CSS = """
-.gradio-container {
-    max-width: none !important;
-    width: 100% !important;
-    margin-left: 0 !important;
-    margin-right: 0 !important;
-    box-sizing: border-box !important;
-    padding-left: clamp(0.75rem, 2vw, 1.5rem) !important;
-    padding-right: clamp(0.75rem, 2vw, 1.5rem) !important;
-}
-gradio-app {
-    width: 100% !important;
-    max-width: 100% !important;
-}
 footer { display: none !important; }
-.gr-panel { border-radius: 10px !important; }
-
-@media (min-width: 901px) {
-    #dt-dashboard-row {
-        display: flex !important;
-        flex-direction: row !important;
-        flex-wrap: nowrap !important;
-        align-items: flex-start !important;
-        gap: 1rem !important;
-        width: 100% !important;
-    }
-    #dt-sidebar-col {
-        flex: 0 1 34% !important;
-        min-width: 260px !important;
-        max-width: none !important;
-    }
-    #dt-log-col {
-        flex: 1 1 0 !important;
-        min-width: 0 !important;
-    }
-}
-
-@media (max-width: 900px) {
-    #dt-dashboard-row {
-        flex-direction: column !important;
-        align-items: stretch !important;
-    }
-    #dt-sidebar-col,
-    #dt-log-col {
-        min-width: 0 !important;
-        width: 100% !important;
-        max-width: 100% !important;
-    }
-    #dt-log-col textarea {
-        max-height: min(50vh, 28rem) !important;
-    }
-}
-
-@media (max-width: 480px) {
-    .gradio-container h3 { font-size: 1.05rem !important; line-height: 1.35 !important; }
-    #dt-log-col textarea {
-        min-height: 10rem !important;
-        max-height: 45vh !important;
-    }
-}
-
-@media (max-width: 768px) {
-    #dt-gallery {
-        min-height: 280px !important;
-        overflow-x: auto !important;
-        -webkit-overflow-scrolling: touch;
-    }
-    #dt-gallery [class*="grid"],
-    #dt-gallery [style*="grid-template"] {
-        grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-    }
-}
-@media (max-width: 420px) {
-    #dt-gallery [class*="grid"],
-    #dt-gallery [style*="grid"] {
-        grid-template-columns: 1fr !important;
-    }
-}
-
-#dt-video video,
-#dt-video .container {
-    width: 100% !important;
-    max-width: 100% !important;
-    height: auto !important;
-}
 """
 
 
@@ -326,7 +243,6 @@ def build_ui() -> Tuple[gr.Blocks, gr.themes.Soft]:
 
     with gr.Blocks(
         title="SDG Digital Twin — Kontrol",
-        fill_width=True,
     ) as demo:
         gr.Markdown("### Endüstriyel Güvenlik — SDG Pipeline")
 
