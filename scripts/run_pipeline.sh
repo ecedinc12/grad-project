@@ -15,6 +15,13 @@ echo "========================================"
 PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 FAILED=0
 
+# Annotate script needs Pillow — use project venv if present (system python may lack deps)
+if [ -x "$PROJECT_ROOT/.venv/bin/python" ]; then
+    ANNOTATE_PY="$PROJECT_ROOT/.venv/bin/python"
+else
+    ANNOTATE_PY=python3
+fi
+
 FAST_IMPORTER="/isaac-sim/kit/kernel/py/omni/ext/_impl/fast_importer.py"
 if [ -f "$FAST_IMPORTER" ]; then
     sed -i 's/for p in spec_default.submodule_search_locations:/for p in (spec_default.submodule_search_locations or []):/' "$FAST_IMPORTER"
@@ -57,7 +64,7 @@ echo "[7/9] Generating video from frames..."
 "$PROJECT_ROOT/scripts/make_video.sh" /tmp/dataset /tmp/dataset/output.mp4
 
 echo "[8/9] Generating annotated video with worker labels..."
-python3 "$PROJECT_ROOT/scripts/annotate_video.py" --dir /tmp/dataset --output /tmp/dataset/output_annotated.mp4
+"$ANNOTATE_PY" "$PROJECT_ROOT/scripts/annotate_video.py" --dir /tmp/dataset --output /tmp/dataset/output_annotated.mp4
 
 echo "[9/9] Archiving output to persistent storage..."
 TIMESTAMP=$(date +%s)

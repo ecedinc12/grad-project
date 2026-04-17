@@ -5,7 +5,6 @@ import glob
 import os
 import subprocess
 import time
-from pathlib import Path
 from typing import Generator, Iterable, List, Optional, Tuple
 
 import gradio as gr
@@ -18,6 +17,7 @@ RUN_SCRIPT = os.path.join(PROJECT_ROOT, "scripts", "run_pipeline.sh")
 DATASET_DIR = "/tmp/dataset"
 RGB_GLOB = os.path.join(DATASET_DIR, "rgb_*.png")
 VIDEO_PATH = os.path.join(DATASET_DIR, "output.mp4")
+ANNOTATED_VIDEO_PATH = os.path.join(DATASET_DIR, "output_annotated.mp4")
 ARCHIVE_GLOB = os.path.join(PROJECT_ROOT, "dataset_*.tar.gz")
 
 PRESETS: dict[str, str] = {
@@ -138,7 +138,9 @@ footer { display: none !important; }
 
 /* Video ve dosya: taşma yok */
 #dt-video video,
-#dt-video .container {
+#dt-video .container,
+#dt-video-annotated video,
+#dt-video-annotated .container {
     width: 100% !important;
     max-width: 100% !important;
     height: auto !important;
@@ -164,6 +166,10 @@ def _video_if_exists() -> Optional[str]:
     return VIDEO_PATH if os.path.isfile(VIDEO_PATH) else None
 
 
+def _annotated_video_if_exists() -> Optional[str]:
+    return ANNOTATED_VIDEO_PATH if os.path.isfile(ANNOTATED_VIDEO_PATH) else None
+
+
 def _stream_process_output(proc: subprocess.Popen[str]) -> Iterable[str]:
     assert proc.stdout is not None
     for line in iter(proc.stdout.readline, ""):
@@ -175,16 +181,26 @@ def _stream_process_output(proc: subprocess.Popen[str]) -> Iterable[str]:
 
 def run_pipeline(
     prompt: str,
-) -> Generator[Tuple[str, List[str], Optional[str], Optional[str]], None, None]:
+) -> Generator[
+    Tuple[str, List[str], Optional[str], Optional[str], Optional[str]],
+    None,
+    None,
+]:
     """
-    Logları satır satır biriktirip yield eder; bittiğinde galeri / video / arşiv yollarını günceller.
+    Logları satır satır biriktirip yield eder; bittiğinde galeri / videolar / arşiv yollarını günceller.
     """
     log: List[str] = []
 
     def emit(
         chunk: str,
-    ) -> Tuple[str, List[str], Optional[str], Optional[str]]:
-        return "".join(log), _sorted_rgb_frames(), _video_if_exists(), _newest_archive()
+    ) -> Tuple[str, List[str], Optional[str], Optional[str], Optional[str]]:
+        return (
+            "".join(log),
+            _sorted_rgb_frames(),
+            _video_if_exists(),
+            _annotated_video_if_exists(),
+            _newest_archive(),
+        )
 
     if not (prompt or "").strip():
         log.append("Hata: Serbest sahne tanımı boş. Metin girin veya bir senaryo seçin.\n")
@@ -291,10 +307,15 @@ def build_ui() -> Tuple[gr.Blocks, gr.themes.Soft]:
                     elem_id="dt-gallery",
                 )
             with gr.Tab("Video & İndirme"):
-                video = gr.Video(
-                    label="Özet video (`/tmp/dataset/output.mp4`)",
-                    elem_id="dt-video",
-                )
+                with gr.Row():
+                    video = gr.Video(
+                        label="Özet video (`/tmp/dataset/output.mp4`)",
+                        elem_id="dt-video",
+                    )
+                    video_annotated = gr.Video(
+                        label="İşçi kutuları — annotated (`/tmp/dataset/output_annotated.mp4`)",
+                        elem_id="dt-video-annotated",
+                    )
                 archive_fp = gr.File(
                     label="Dataset arşivi (`dataset_*.tar.gz` — proje kökü)",
                     interactive=False,
@@ -309,7 +330,7 @@ def build_ui() -> Tuple[gr.Blocks, gr.themes.Soft]:
         run_btn.click(
             fn=run_pipeline,
             inputs=scene_tb,
-            outputs=[log_tb, gallery, video, archive_fp],
+            outputs=[log_tb, gallery, video, video_annotated, archive_fp],
         )
 
         if USE_MOCK_PIPELINE:

@@ -110,6 +110,8 @@ def annotate_video(dataset_dir, output_path, fps=30):
         sorted_img_ids = sorted(images.keys())
         total = len(sorted_img_ids)
         annotated_count = 0
+        # ffmpeg frame_%04d.png needs contiguous names from 0000 when some COCO rows lack files
+        out_idx = 0
 
         for idx, img_id in enumerate(sorted_img_ids):
             img_info = images[img_id]
@@ -166,11 +168,12 @@ def annotate_video(dataset_dir, output_path, fps=30):
 
                 annotated_count += 1
 
-            frame_path = os.path.join(frames_dir, f"frame_{idx:04d}.png")
+            frame_path = os.path.join(frames_dir, f"frame_{out_idx:04d}.png")
             img.save(frame_path)
+            out_idx += 1
 
-            if (idx + 1) % 50 == 0 or idx == total - 1:
-                print(f"  Annotated {idx + 1}/{total} frames...")
+            if out_idx % 50 == 0 or idx == total - 1:
+                print(f"  Annotated {out_idx} saved / {idx + 1} scanned (COCO images: {total})...")
 
         print(f"Annotated {annotated_count} bounding boxes (workers/zones) across {total} frames.")
 
