@@ -445,7 +445,7 @@ def main():
 
     _progress("Computing camera placement (camera-first)...")
     hazard_zones = scene_config.get("hazard_zones", [])
-    cam_pos, look_at_target, focal_length = pick_camera_placement(scene_config, hazard_zones=hazard_zones)
+    cam_pos, look_at_target, focal_length, chosen_mount = pick_camera_placement(scene_config, hazard_zones=hazard_zones)
     visible_bounds = compute_ground_visible_area(cam_pos, look_at_target, focal_length=focal_length)
     _progress(f"Camera position: ({cam_pos[0]:.2f}, {cam_pos[1]:.2f}, {cam_pos[2]:.2f})")
     _progress(f"Camera look_at: ({look_at_target[0]:.2f}, {look_at_target[1]:.2f}, {look_at_target[2]:.2f})")
@@ -493,14 +493,15 @@ def main():
     _, post_entity_positions, post_worker_positions = compute_scene_centroid(
         stage, known_positions=all_known_positions
     )
-    cam_pos = pick_indoor_position(
+    cam_pos, _ = pick_indoor_position(
         scene_config.get("camera_angles", []),
         hazard_zones=hazard_zones,
         entity_positions=post_entity_positions,
         worker_positions=post_worker_positions,
+        preferred_mount=chosen_mount,
     )
     look_at_target = pick_look_at_target(post_entity_positions, post_worker_positions, hazard_zones)
-    cam_pos = fit_camera_to_entities(
+    cam_pos, focal_length = fit_camera_to_entities(
         cam_pos, look_at_target, all_known_positions, focal_length=focal_length
     )
     visible_bounds = compute_ground_visible_area(cam_pos, look_at_target, focal_length=focal_length)

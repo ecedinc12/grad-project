@@ -93,8 +93,11 @@ def _compute_scene_bbox(entity_positions, worker_positions, hazard_zones):
 
     if worker_positions:
         points.extend(worker_positions)
-    elif entity_positions:
-        points.extend(entity_positions)
+    
+    if entity_positions:
+        for p in entity_positions:
+            if p not in points:
+                points.append(p)
 
     if hazard_zones:
         for zone in hazard_zones:
@@ -123,7 +126,8 @@ def _compute_scene_bbox(entity_positions, worker_positions, hazard_zones):
 
 
 def pick_indoor_position(angle_hints, hazard_zones=None,
-                          entity_positions=None, worker_positions=None):
+                          entity_positions=None, worker_positions=None,
+                          preferred_mount=None):
     """Place camera at a realistic wall/ceiling surveillance mount.
 
     overhead   — ceiling above scene centroid, small random offset for natural tilt
@@ -138,16 +142,24 @@ def pick_indoor_position(angle_hints, hazard_zones=None,
     first_known = next((h for h in (angle_hints or []) if h in ANGLE_HEIGHT_MAP), None)
     z_lo, z_hi = ANGLE_HEIGHT_MAP.get(first_known, DEFAULT_HEIGHT_RANGE)
 
+    chosen_mount_idx = None
     if first_known == "overhead":
         jx = random.uniform(-MOUNT_XY_JITTER, MOUNT_XY_JITTER)
         jy = random.uniform(-MOUNT_XY_JITTER, MOUNT_XY_JITTER)
         cam_pos = clamp_to_warehouse(cx + jx, cy + jy, random.uniform(z_lo, z_hi))
     else:
         pool = CORNER_MOUNTS if first_known == "high_angle" else WALL_MID_MOUNTS
-        ranked = sorted(pool,
-                        key=lambda m: (m[0]-cx)**2 + (m[1]-cy)**2,
-                        reverse=True)
-        chosen = random.choice(ranked[:2])
+        if preferred_mount is not None and preferred_mount < len(pool):
+            chosen = pool[preferred_mount]
+            chosen_mount_idx = preferred_mount
+        else:
+            ranked = sorted(list(enumerate(pool)),
+                            key=lambda item: (item[1][0]-cx)**2 + (item[1][1]-cy)**2,
+                            reverse=True)
+            # Pick from top 2, but keep track of index
+            idx, chosen = random.choice(ranked[:2])
+            chosen_mount_idx = idx
+
         jx = random.uniform(-MOUNT_XY_JITTER, MOUNT_XY_JITTER)
         jy = random.uniform(-MOUNT_XY_JITTER, MOUNT_XY_JITTER)
         cam_pos = clamp_to_warehouse(chosen[0]+jx, chosen[1]+jy, random.uniform(z_lo, z_hi))
@@ -156,7 +168,7 @@ def pick_indoor_position(angle_hints, hazard_zones=None,
     print(f"[CAMERA] pick_indoor_position: angle={first_known}, "
           f"centroid=({cx:.2f},{cy:.2f}), "
           f"camera=({cam_pos[0]:.2f},{cam_pos[1]:.2f},{cam_pos[2]:.2f})")
-    return cam_pos
+    return cam_pos, chosen_mount_idx
 
 
 def _build_orbit_positions(n=30, radius_min=4, radius_max=9,
@@ -210,7 +222,7 @@ def positions_for_angles(angle_hints, hazard_zones=None,
     if mode == "indoor":
         positions = []
         for _ in range(num_positions):
-            pos = pick_indoor_position(
+            pos, _ = pick_indoor_position(
                 angle_hints, hazard_zones=hazard_zones,
                 entity_positions=entity_positions,
                 worker_positions=worker_positions,
@@ -427,10 +439,10 @@ def fit_camera_to_entities(cam_pos, look_at, entity_positions, focal_length=14.0
         margin: Fraction of each FOV half to use (0.85 keeps entities in inner 85%).
 
     Returns:
-        Adjusted cam_pos (x, y, z) — unchanged if all entities already fit.
+        (adjusted_cam_pos, adjusted_focal_length)
     """
     if not entity_positions:
-        return cam_pos
+        return cam_pos, focal_length
 
     cam_x, cam_y, cam_z = cam_pos
     la_x, la_y, la_z = look_at
@@ -440,7 +452,7 @@ def fit_camera_to_entities(cam_pos, look_at, entity_positions, focal_length=14.0
     dz = la_z - cam_z
     d_len = math.sqrt(dx*dx + dy*dy + dz*dz)
     if d_len < 1e-6:
-        return cam_pos
+        return cam_pos, focal_length
     fx, fy, fz = dx/d_len, dy/d_len, dz/d_len
 
     right_len = math.sqrt(fy*fy + fx*fx)
@@ -460,8 +472,12 @@ def fit_camera_to_entities(cam_pos, look_at, entity_positions, focal_length=14.0
     else:
         ux /= u_len; uy /= u_len; uz /= u_len
 
-    tan_hfov = math.tan(math.atan(SENSOR_WIDTH_MM  / (2.0 * focal_length))) * margin
-    tan_vfov = math.tan(math.atan(SENSOR_HEIGHT_MM / (2.0 * focal_length))) * margin
+    def get_tan_fovs(fl):
+        hf = math.tan(math.atan(SENSOR_WIDTH_MM  / (2.0 * fl))) * margin
+        vf = math.tan(math.atan(SENSOR_HEIGHT_MM / (2.0 * fl))) * margin
+        return hf, vf
+
+    tan_hfov, tan_vfov = get_tan_fovs(focal_length)
 
     max_delta = 0.0
     min_depth = 0.5  # entity must be at least this far in front after shift
@@ -484,17 +500,46 @@ def fit_camera_to_entities(cam_pos, look_at, entity_positions, focal_length=14.0
         max_delta = max(max_delta, entity_delta)
 
     if max_delta < 0.05:
-        return cam_pos
+        return cam_pos, focal_length
 
-    new_cam_pos = clamp_to_warehouse(
-        cam_x - fx * max_delta,
-        cam_y - fy * max_delta,
-        cam_z - fz * max_delta,
-    )
+    # Try to shift back
+    proposed_z = cam_z - fz * max_delta
+    
+    # If we hit the ceiling, we MUST decrease focal length (zoom out) instead
+    if proposed_z > CEILING_Z:
+        # Calculate how much depth we REALLY need
+        # depth_needed = depth + delta
+        # If we can only move to CEILING_Z, we get limited_delta
+        limited_delta = (CEILING_Z - cam_z) / (-fz) if abs(fz) > 1e-4 else max_delta
+        limited_delta = max(0.0, min(limited_delta, max_delta))
+        
+        # Move as much as we can
+        cam_x -= fx * limited_delta
+        cam_y -= fy * limited_delta
+        cam_z -= fz * limited_delta
+        
+        # Remaining delta must be compensated by focal length
+        remaining_delta = max_delta - limited_delta
+        
+        # New tan_hfov needed = abs(right_proj) / (depth + max_delta)
+        # Simplified: zoom out by the ratio of (current_dist / needed_dist)
+        current_dist = d_len + limited_delta
+        needed_dist = d_len + max_delta
+        zoom_factor = current_dist / needed_dist
+        focal_length = max(8.0, focal_length * zoom_factor)
+        
+        print(f"[CAMERA] fit_camera_to_entities: Hit ceiling at {CEILING_Z}m. Zooming out to {focal_length:.1f}mm")
+    else:
+        cam_x -= fx * max_delta
+        cam_y -= fy * max_delta
+        cam_z -= fz * max_delta
+
+    new_cam_pos = clamp_to_warehouse(cam_x, cam_y, cam_z)
     new_cam_pos = (new_cam_pos[0], new_cam_pos[1], max(new_cam_pos[2], MIN_INDOOR_HEIGHT))
+    
     print(f"[CAMERA] fit_camera_to_entities: shifted {max_delta:.2f}m back → "
-          f"({new_cam_pos[0]:.2f}, {new_cam_pos[1]:.2f}, {new_cam_pos[2]:.2f})")
-    return new_cam_pos
+          f"({new_cam_pos[0]:.2f}, {new_cam_pos[1]:.2f}, {new_cam_pos[2]:.2f}) fl={focal_length:.1f}mm")
+    return new_cam_pos, focal_length
 
 
 def pick_camera_placement(scene_config, hazard_zones=None):
@@ -504,7 +549,7 @@ def pick_camera_placement(scene_config, hazard_zones=None):
     so that visible_bounds can be computed and used to constrain spawn positions.
 
     Returns:
-        (cam_pos, look_at, focal_length) where cam_pos and look_at are (x, y, z) tuples.
+        (cam_pos, look_at, focal_length, chosen_mount)
     """
     angle_hints = scene_config.get("camera_angles", [])
     camera_position_override = scene_config.get("camera_position")
@@ -514,12 +559,13 @@ def pick_camera_placement(scene_config, hazard_zones=None):
         first_known = next((h for h in angle_hints if h in ANGLE_FOCAL_LENGTH_MAP), None)
         focal_length = ANGLE_FOCAL_LENGTH_MAP.get(first_known, DEFAULT_FOCAL_LENGTH)
 
+    chosen_mount = None
     if camera_position_override:
         cam_pos = clamp_to_warehouse(*camera_position_override)
         cam_pos = (cam_pos[0], cam_pos[1], max(cam_pos[2], MIN_INDOOR_HEIGHT))
         print(f"[CAMERA] Using camera_position override: ({cam_pos[0]:.2f}, {cam_pos[1]:.2f}, {cam_pos[2]:.2f})")
     else:
-        cam_pos = pick_indoor_position(
+        cam_pos, chosen_mount = pick_indoor_position(
             angle_hints,
             hazard_zones=hazard_zones,
             entity_positions=None,
@@ -534,5 +580,5 @@ def pick_camera_placement(scene_config, hazard_zones=None):
 
     print(f"[CAMERA] Camera placement: pos=({cam_pos[0]:.2f}, {cam_pos[1]:.2f}, {cam_pos[2]:.2f}) "
           f"look_at=({look_at[0]:.2f}, {look_at[1]:.2f}, {look_at[2]:.2f}) "
-          f"focal_length={focal_length}mm")
-    return cam_pos, look_at, focal_length
+          f"focal_length={focal_length}mm chosen_mount={chosen_mount}")
+    return cam_pos, look_at, focal_length, chosen_mount
