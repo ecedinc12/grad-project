@@ -159,10 +159,24 @@ def spawn_hazard_zones(hazard_zones, stage):
         # by using a very low opacity. This ensures CocoWriter sees them.
         color = (1.0, 0.0, 0.0) if danger == "critical" else (1.0, 1.0, 0.0)
         
-        # Apply a basic display color with low opacity
-        geom = UsdGeom.Cube(prim)
-        geom.GetDisplayColorAttr().Set([Gf.Vec3f(*color)])
-        geom.GetDisplayOpacityAttr().Set([0.005])
+        # Create a faint transparent material so the insides aren't a solid block
+        looks_path = "/World/Looks"
+        if not stage.GetPrimAtPath(looks_path):
+            stage.DefinePrim(looks_path, "Scope")
+            
+        mat_path = f"{looks_path}/hazard_mat_{danger}"
+        if not stage.GetPrimAtPath(mat_path):
+            mat = UsdShade.Material.Define(stage, mat_path)
+            shader = UsdShade.Shader.Define(stage, f"{mat_path}/shader")
+            shader.CreateIdAttr().Set("UsdPreviewSurface")
+            shader.CreateInput("diffuseColor", Sdf.ValueTypeNames.Color3f).Set(Gf.Vec3f(*color))
+            # Set opacity to a faint level so the forklift is visible inside
+            shader.CreateInput("opacity", Sdf.ValueTypeNames.Float).Set(0.05)
+            mat.CreateSurfaceOutput().ConnectToSource(shader.ConnectableAPI(), "surface")
+        else:
+            mat = UsdShade.Material(stage.GetPrimAtPath(mat_path))
+            
+        UsdShade.MaterialBindingAPI.Apply(prim).Bind(mat)
 
         from pxr import Semantics
         sem_api = Semantics.SemanticsAPI.Apply(prim, "class")
