@@ -77,6 +77,47 @@
 - [ ] **Task 8.6: Syntax Validation.** Run `python3 -m py_compile` on all modified files.
 - [ ] **Task 8.7: RunPod Test.** Execute pipeline and verify workers move via IRA navmesh.
 
+---
+
+#### Phase 9: GUI → DigitalOcean Droplet + Backend API Bridge
+> **Amaç:** `ui/app.py` artık `subprocess` ile yerel pipeline çalıştırmıyor.
+> GUI, DigitalOcean Droplet'te barındırılır; RunPod backend'e HTTP API üzerinden bağlanır.
+> Backend agent (`isaac_backend/`) + Frontend agent (`ui/`) birlikte bu köprüyü kurar.
+
+**9a — RunPod: HTTP API Katmanı (Backend Agent)**
+- [ ] **Task 9.1: FastAPI sunucusu.** `api/server.py` oluştur. `POST /generate` endpoint'i: `{"prompt": str}` alır, `run_pipeline.sh` çıktısını SSE (Server-Sent Events) ile stream eder.
+- [ ] **Task 9.2: Sonuç endpoint'leri.** `GET /frames` — son çalışmadaki RGB kare listesi (base64 veya URL). `GET /video` — `output.mp4` binary stream. `GET /archive` — son `dataset_*.tar.gz` download.
+- [ ] **Task 9.3: Durum endpoint'i.** `GET /status` — pipeline çalışıyor mu, son job ID, tamamlanma yüzdesi.
+- [ ] **Task 9.4: API anahtarı güvenliği.** `DROPLET_API_KEY` env değişkeniyle basit Bearer token doğrulama (her iki uçta da). `.env.example` dosyası ekle.
+- [ ] **Task 9.5: CORS.** DigitalOcean Droplet IP'si için CORS ayarla (`fastapi.middleware.cors`).
+- [ ] **Task 9.6: `api/requirements.txt`.** `fastapi`, `uvicorn[standard]`, `python-multipart`, `python-dotenv`.
+- [ ] **Task 9.7: RunPod başlatma komutu.** `scripts/start_api.sh` — `uvicorn api.server:app --host 0.0.0.0 --port 8000` şeklinde başlatır, arka planda çalışır.
+
+**9b — DigitalOcean Droplet: GUI Deployment (Frontend Agent)**
+- [ ] **Task 9.8: `ui/app.py` güncelle.** `subprocess` kaldır, `httpx` (async SSE) ile `BACKEND_URL` env'den okunan RunPod API'ye bağlan. `USE_MOCK_PIPELINE` mantığı `BACKEND_URL` boşsa mock'a dönsün.
+- [ ] **Task 9.9: Droplet ortam dosyası.** `.env` — `BACKEND_URL=http://<runpod-ip>:8000`, `DROPLET_API_KEY=<secret>`.
+- [ ] **Task 9.10: Droplet kurulum scripti.** `scripts/setup_droplet.sh` — `apt` ile Python 3.11, `pip install gradio httpx python-dotenv`, systemd servis dosyası (`ui.service`).
+- [ ] **Task 9.11: systemd servis.** `/etc/systemd/system/sdg-ui.service` — `ExecStart=python3 /opt/grad-project/ui/app.py`, `Restart=always`, `EnvironmentFile=/opt/grad-project/.env`.
+- [ ] **Task 9.12: Nginx reverse proxy.** Port 80 → 7860 yönlendirme. Droplet public IP üzerinden erişim.
+
+**9c — Ortak: Env & Bağımlılık Hazırlığı (Backend + Frontend)**
+- [ ] **Task 9.13: ffmpeg kurulumu.** RunPod pod'unda `apt-get install -y ffmpeg` veya `scripts/setup_runpod.sh`'a ekle. Video oluşturma için gerekli.
+- [ ] **Task 9.14: Gemini API Key.** RunPod `.env`'e `GEMINI_API_KEY=<key>` ekle. `llm_pipeline/generator.py` `os.environ["GEMINI_API_KEY"]` okuyor mu doğrula. Model: `gemini-2.5-flash` (migration versiyonu).
+- [ ] **Task 9.15: Isaac Sim EULA.** RunPod `.env`'e `ACCEPT_EULA=Y` ekle. `scripts/run_pipeline.sh`'da `export ACCEPT_EULA=Y` ile pass et, yoksa bağlantı kurulmuyor.
+- [ ] **Task 9.16: `.env.example` şablonu.** Proje köküne ekle: `GEMINI_API_KEY=`, `ACCEPT_EULA=Y`, `BACKEND_URL=`, `DROPLET_API_KEY=`, `GRADIO_MOCK=0`.
+
+---
+
+#### Phase 10: Isaac Sim Pipeline Fixes (Sonraki Aşama)
+> Ece'nin listelediği bilinen hatalar ve eksiklikler.
+
+- [ ] **Task 10.1: Kamera sahne kapsamı.** `isaac_backend/camera.py` — prompt'tan gelen tüm entity'lerin bounding box'ını hesapla, kamerayı otomatik olarak sahneyi tam kaplayacak yükseklik/açıya ayarla.
+- [ ] **Task 10.2: Generator eksikliği — worker spawn hatası.** `llm_pipeline/generator.py` — iki worker'ın neden spawn olmadığını araştır (muhtemelen Pydantic schema'da entity listesi kısıtlaması veya LLM'in düşük sayıda entity üretmesi). Hata ayıkla ve düzelt.
+- [ ] **Task 10.3: Annotated video generation.** `scripts/make_annotated_video.py` — eklenmiş ama test edilmemiş. Bounding box overlay'li video oluşturmayı test et, ffmpeg pipeline'ı doğrula.
+- [ ] **Task 10.4: Hareketli forklift.** `isaac_backend/` — forklift için IRA benzeri hareket komutu veya USD animation path. Şu an forklift statik spawna lanıyor.
+- [ ] **Task 10.5: Worker-obje çarpışma.** `isaac_backend/animation.py` — worker'ların fizik nesnelerinin içinden geçmemesi için navmesh obstacle veya collision layer ayarı.
+- [ ] **Task 10.6: GUI hata ayıklaması.** `ui/app.py` — sonradan ortaya çıkan "anlamsız" GUI hatalarını reproduce et ve düzelt. Olası sebep: Gradio sürüm uyumsuzluğu veya SSE stream kesintisi.
+
 #### Phase 7: Complete Rewrite — Isaac Sim 5.1 Extension & Library Update
 - [x] **Task 7.1: Delete Deprecated Files.** Removed `people.py`, `animator.py`, `test_people_walk.py`, `references/omni_anim_people/`.
 - [x] **Task 7.2: Rewrite `main.py`.** `isaacsim.core.api.World`, CocoWriter with 14 categories (incl. hazard zones), DLSS Quality mode, capture_on_play=False, extracted helper functions.
