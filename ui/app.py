@@ -15,11 +15,31 @@ load_dotenv()
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
-BACKEND_URL = os.environ.get("BACKEND_URL", "").rstrip("/")
 API_KEY = os.environ.get("DROPLET_API_KEY", "")
 
-# BACKEND_URL yoksa mock mod
-USE_MOCK = not BACKEND_URL or os.environ.get("GRADIO_MOCK", "").strip().lower() in ("1", "true", "yes")
+# Backend URL: önce kalıcı dosyadan oku, yoksa env'den al
+_CONFIG_FILE = Path(os.environ.get("CONFIG_FILE", "/opt/grad-project/.backend_url"))
+_ENV_BACKEND_URL = os.environ.get("BACKEND_URL", "").rstrip("/")
+
+
+def _load_backend_url() -> str:
+    try:
+        if _CONFIG_FILE.is_file():
+            url = _CONFIG_FILE.read_text().strip()
+            if url:
+                return url
+    except OSError:
+        pass
+    return _ENV_BACKEND_URL
+
+
+def _save_backend_url(url: str) -> None:
+    try:
+        _CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _CONFIG_FILE.write_text(url.strip())
+    except OSError:
+        pass
+
 
 PRESETS: dict[str, str] = {
     "PPE İhlali": (
@@ -134,22 +154,20 @@ def _auth_headers() -> dict[str, str]:
     return {}
 
 
-def _fetch_frames_after_run() -> List[str]:
-    """Backend'den kare URL'lerini çek."""
+def _fetch_frames_after_run(backend_url: str) -> List[str]:
     try:
         with httpx.Client(timeout=10) as client:
-            resp = client.get(f"{BACKEND_URL}/frames", headers=_auth_headers())
+            resp = client.get(f"{backend_url}/frames", headers=_auth_headers())
             resp.raise_for_status()
             return resp.json().get("frames", [])
     except Exception:
         return []
 
 
-def _download_video() -> Optional[str]:
-    """output.mp4'ü geçici dosyaya indir, yolunu döndür."""
+def _download_video(backend_url: str) -> Optional[str]:
     try:
         with httpx.Client(timeout=60) as client:
-            resp = client.get(f"{BACKEND_URL}/video", headers=_auth_headers())
+            resp = client.get(f"{backend_url}/video", headers=_auth_headers())
             if resp.status_code == 404:
                 return None
             resp.raise_for_status()
@@ -161,19 +179,14 @@ def _download_video() -> Optional[str]:
         return None
 
 
-def _download_archive() -> Optional[str]:
-    """En son tar.gz arşivini geçici dosyaya indir, yolunu döndür."""
+def _download_archive(backend_url: str) -> Optional[str]:
     try:
         with httpx.Client(timeout=120) as client:
-            resp = client.get(f"{BACKEND_URL}/archive", headers=_auth_headers())
+            resp = client.get(f"{backend_url}/archive", headers=_auth_headers())
             if resp.status_code == 404:
                 return None
             resp.raise_for_status()
-            suffix = ".tar.gz"
-            cd = resp.headers.get("content-disposition", "")
-            if "filename=" in cd:
-                suffix = "." + cd.split("filename=")[-1].strip('"').split(".")[-1]
-            tmp = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
+            tmp = tempfile.NamedTemporaryFile(suffix=".tar.gz", delete=False)
             tmp.write(resp.content)
             tmp.close()
             return tmp.name
@@ -182,15 +195,36 @@ def _download_archive() -> Optional[str]:
 
 
 # ---------------------------------------------------------------------------
+# Backend URL kaydet + bağlantı testi
+# ---------------------------------------------------------------------------
+def save_and_test_backend(url: str) -> str:
+    url = url.strip().rstrip("/")
+    if not url:
+        return "❌ URL boş bırakılamaz."
+    _save_backend_url(url)
+    try:
+        with httpx.Client(timeout=8) as client:
+            resp = client.get(f"{url}/health", headers=_auth_headers())
+            if resp.status_code == 200:
+                return f"✅ Bağlantı başarılı — {url}"
+            return f"⚠️ Sunucu yanıt verdi ama status: {resp.status_code}"
+    except httpx.ConnectError:
+        return f"❌ Bağlanamadı: {url}\n   Pod açık mı? HTTP Service port 8000 aktif mi?"
+    except Exception as exc:
+        return f"❌ Hata: {exc}"
+
+
+# ---------------------------------------------------------------------------
 # Pipeline runner
 # ---------------------------------------------------------------------------
 Result = Tuple[str, List[str], Optional[str], Optional[str]]
 
 
-def run_pipeline(prompt: str) -> Generator[Result, None, None]:
+def run_pipeline(prompt: str, backend_url: str) -> Generator[Result, None, None]:
     log: List[str] = []
+    backend_url = backend_url.strip().rstrip("/")
 
-    def emit(extra: str = "") -> Result:
+    def emit() -> Result:
         return "".join(log), [], None, None
 
     if not (prompt or "").strip():
@@ -198,25 +232,24 @@ def run_pipeline(prompt: str) -> Generator[Result, None, None]:
         yield emit()
         return
 
-    # --- Mock mod ---
-    if USE_MOCK:
-        for i in range(1, 6):
-            log.append(f"[MOCK] Adım {i}/5 — pipeline bağlantısı yok (BACKEND_URL tanımlı değil)\n")
+    # --- Mock mod (URL yoksa) ---
+    if not backend_url:
+        for i in range(1, 4):
+            log.append(f"[MOCK] Adım {i}/3 — BACKEND_URL tanımlı değil\n")
             time.sleep(0.15)
             yield emit()
-        log.append("[MOCK] Gerçek akış için Droplet .env dosyasına BACKEND_URL ekleyin.\n")
+        log.append("[MOCK] RunPod URL'sini aşağıdaki alana girin ve kaydedin.\n")
         yield emit()
         return
 
-    # --- Gerçek akış: SSE ---
-    log.append(f"[*] Backend bağlantısı: {BACKEND_URL}\n")
+    log.append(f"[*] Backend: {backend_url}\n")
     yield emit()
 
     try:
         with httpx.Client(timeout=httpx.Timeout(None, connect=10.0)) as client:
             with client.stream(
                 "POST",
-                f"{BACKEND_URL}/generate",
+                f"{backend_url}/generate",
                 json={"prompt": prompt.strip()},
                 headers={**_auth_headers(), "Accept": "text/event-stream"},
             ) as resp:
@@ -225,18 +258,16 @@ def run_pipeline(prompt: str) -> Generator[Result, None, None]:
                     yield emit()
                     return
                 if resp.status_code == 401:
-                    log.append("[ERROR] API anahtarı geçersiz (401 Unauthorized).\n")
+                    log.append("[ERROR] API anahtarı geçersiz (401).\n")
                     yield emit()
                     return
                 resp.raise_for_status()
 
-                done = False
                 for line in resp.iter_lines():
                     if not line.startswith("data: "):
                         continue
                     chunk = line[6:]
                     if chunk.startswith("[DONE]"):
-                        done = True
                         ok = "ERROR" not in chunk
                         log.append(
                             "\n[✓] Pipeline tamamlandı.\n" if ok
@@ -252,8 +283,10 @@ def run_pipeline(prompt: str) -> Generator[Result, None, None]:
                     yield emit()
 
     except httpx.ConnectError:
-        log.append(f"\n[ERROR] Backend'e bağlanılamadı: {BACKEND_URL}\n"
-                   "        RunPod pod'unun açık ve HTTP service'in etkin olduğundan emin olun.\n")
+        log.append(
+            f"\n[ERROR] Bağlanamadı: {backend_url}\n"
+            "        Pod açık mı? HTTP Service port 8000 aktif mi?\n"
+        )
         yield emit()
         return
     except Exception as exc:
@@ -261,21 +294,23 @@ def run_pipeline(prompt: str) -> Generator[Result, None, None]:
         yield emit()
         return
 
-    # --- Pipeline bitti: medya indir / URL al ---
     log.append("[*] Kareler alınıyor...\n")
     yield emit()
-    frames = _fetch_frames_after_run()
+    frames = _fetch_frames_after_run(backend_url)
 
     log.append("[*] Video indiriliyor...\n")
     yield emit()
-    video_path = _download_video()
+    video_path = _download_video(backend_url)
 
     log.append("[*] Arşiv indiriliyor...\n")
     yield emit()
-    archive_path = _download_archive()
+    archive_path = _download_archive(backend_url)
 
-    log.append(f"[✓] {len(frames)} kare, video={'var' if video_path else 'yok'}, "
-               f"arşiv={'var' if archive_path else 'yok'}\n")
+    log.append(
+        f"[✓] {len(frames)} kare  |  "
+        f"video={'✓' if video_path else '✗'}  |  "
+        f"arşiv={'✓' if archive_path else '✗'}\n"
+    )
     yield "".join(log), frames, video_path, archive_path
 
 
@@ -294,6 +329,22 @@ def build_ui() -> Tuple[gr.Blocks, gr.themes.Soft]:
         fill_width=True,
     ) as demo:
         gr.Markdown("### Endüstriyel Güvenlik — SDG Pipeline")
+
+        # ------------------------------------------------------------------ #
+        # RunPod bağlantı ayarı — her pod yeniden başladığında buradan güncelle
+        # ------------------------------------------------------------------ #
+        with gr.Accordion("⚙️ RunPod Bağlantısı", open=not bool(_load_backend_url())):
+            with gr.Row():
+                backend_url_tb = gr.Textbox(
+                    label="RunPod Backend URL",
+                    placeholder="https://<pod-id>-8000.proxy.runpod.net",
+                    value=_load_backend_url(),
+                    scale=5,
+                )
+                save_btn = gr.Button("Kaydet & Test Et", scale=1, variant="secondary")
+            conn_status = gr.Markdown("")
+
+        gr.Markdown("---")
 
         with gr.Row(elem_id="dt-dashboard-row", equal_height=False):
             with gr.Column(scale=4, min_width=260, elem_id="dt-sidebar-col"):
@@ -342,11 +393,14 @@ def build_ui() -> Tuple[gr.Blocks, gr.themes.Soft]:
                     interactive=False,
                 )
 
-        if USE_MOCK:
-            gr.Markdown(
-                "⚠️ *Mock mod:* `BACKEND_URL` tanımlı değil. "
-                "Gerçek pipeline için Droplet `.env` dosyasına `BACKEND_URL` ekleyin."
-            )
+        # ------------------------------------------------------------------ #
+        # Event handlers
+        # ------------------------------------------------------------------ #
+        save_btn.click(
+            fn=save_and_test_backend,
+            inputs=backend_url_tb,
+            outputs=conn_status,
+        )
 
         preset_dd.change(
             fn=lambda k: PRESETS.get(k, ""),
@@ -356,7 +410,7 @@ def build_ui() -> Tuple[gr.Blocks, gr.themes.Soft]:
 
         run_btn.click(
             fn=run_pipeline,
-            inputs=scene_tb,
+            inputs=[scene_tb, backend_url_tb],
             outputs=[log_tb, gallery, video, archive_fp],
         )
 
