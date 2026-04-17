@@ -154,7 +154,9 @@ def _fetch_frames_after_run(base_url: str, log: Optional[List[str]] = None) -> L
         images: List[Image.Image] = []
         with httpx.Client(timeout=httpx.Timeout(60.0, connect=10.0)) as client:
             for name in names:
-                url = f"{base_url}/frame/{name}"
+                # name may be a full URL (old server code) — extract just the filename
+                filename = Path(name).name
+                url = f"{base_url}/frame/{filename}"
                 try:
                     img_resp = client.get(url, headers=_auth_headers())
                     img_resp.raise_for_status()

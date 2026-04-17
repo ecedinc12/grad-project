@@ -114,7 +114,7 @@
 - [ ] **Task 10.3: Annotated video generation.** `scripts/make_annotated_video.py` — eklenmiş ama test edilmemiş. Bounding box overlay'li video oluşturmayı test et, ffmpeg pipeline'ı doğrula.
 - [ ] **Task 10.4: Hareketli forklift.** `isaac_backend/` — forklift için IRA benzeri hareket komutu veya USD animation path. Şu an forklift statik spawna lanıyor.
 - [ ] **Task 10.5: Worker-obje çarpışma.** `isaac_backend/animation.py` — worker'ların fizik nesnelerinin içinden geçmemesi için navmesh obstacle veya collision layer ayarı.
-- [ ] **Task 10.6: GUI hata ayıklaması.** `ui/app.py` — sonradan ortaya çıkan "anlamsız" GUI hatalarını reproduce et ve düzelt. Olası sebep: Gradio sürüm uyumsuzluğu veya SSE stream kesintisi.
+- [x] **Task 10.6: GUI hata ayıklaması — frame delivery.** `ui/app.py` — `/frames` endpoint bazen tam iç URL (`http://100.65.x.x:PORT/frame/rgb_N.png`) döndürüyor; client bunu `{proxy}/frame/{full_url}` ile birleştirince bozuk URL oluşuyor. Fix: `Path(name).name` ile basename'e normalize et, ardından proxy URL ile yeniden oluştur. `api/server.py`'de de `_rgb_frames` her zaman sadece basename döndürmeli (zaten doğru, eski pod kodu farklıydı).
 
 #### Phase 11: Dosya Yönetimi (Sonraki Aşama)
 > RunPod pod kapandığında `/workspace` dışındaki her şey siliniyor. `dataset_*.tar.gz` dosyaları `/workspace/grad-project` köküne birikmeye devam ediyor.
