@@ -127,17 +127,32 @@ def spawn_hazard_zones(hazard_zones, stage):
         bmax = zone.get("bounds_max", (2, 2))
         danger = zone.get("danger_level", "warning")
 
+        # Check if we should parent this zone to an existing entity (e.g. for moving hazards)
+        parent_path = "/World/HazardZones"
+        for prim in stage.Traverse():
+            if prim.GetName().lower() == name.lower() and "/World/Entities/" in str(prim.GetPath()):
+                parent_path = str(prim.GetPath())
+                print(f"[INFO] Parenting hazard zone '{name}' to entity at {parent_path}")
+                break
+
         cx = (bmin[0] + bmax[0]) / 2.0
         cy = (bmin[1] + bmax[1]) / 2.0
+        
+        # If parented to an entity, use relative offset 0,0 instead of absolute world coords
+        if parent_path != "/World/HazardZones":
+            pos = Gf.Vec3d(0, 0, 0.5)
+        else:
+            pos = Gf.Vec3d(cx, cy, 0.5)
+
         sx = abs(bmax[0] - bmin[0])
         sy = abs(bmax[1] - bmin[1])
 
-        prim_path = f"/World/HazardZones/{name}"
+        prim_path = f"{parent_path}/hazard_volume"
         prim = stage.DefinePrim(prim_path, "Cube")
 
         xf = UsdGeom.Xformable(prim)
         xf.ClearXformOpOrder()
-        xf.AddTranslateOp().Set(Gf.Vec3d(cx, cy, 0.5))
+        xf.AddTranslateOp().Set(pos)
         xf.AddScaleOp().Set(Gf.Vec3d(sx, sy, 1.0))
 
         # Make them visible to the renderer but effectively invisible to RGB

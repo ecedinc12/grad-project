@@ -486,9 +486,6 @@ def main():
     for ent in scene_config.get("entities", []):
         _progress(f"  Entity: type={ent.get('type')}, asset_id={ent.get('asset_id')}, anchor_zone={ent.get('anchor_zone')}")
 
-    _progress("Clearing unwanted semantics from spawned entity USDs...")
-    clear_unwanted_warehouse_semantics(stage)
-
     _progress("Hiding driver prims...")
     hide_driver_prims(stage)
 
