@@ -176,14 +176,10 @@ async def status(request: Request):
 
 @app.get("/frames")
 async def frames(request: Request):
-    """Son çalışmadaki ilk 12 RGB kare URL'lerini döndürür."""
+    """Son çalışmadaki ilk 12 RGB kare dosya adlarını döndürür."""
     _verify_key(request)
-    host = request.base_url
-    urls = [
-        str(host) + f"frame/{Path(p).name}"
-        for p in _rgb_frames()
-    ]
-    return {"frames": urls, "count": len(urls)}
+    names = [Path(p).name for p in _rgb_frames()]
+    return {"frames": names, "count": len(names)}
 
 
 @app.get("/frame/{filename}")

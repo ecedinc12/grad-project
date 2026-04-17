@@ -135,13 +135,30 @@ def _auth_headers() -> dict[str, str]:
 
 
 def _fetch_frames_after_run() -> List[str]:
-    """Backend'den kare URL'lerini çek."""
+    """Backend'den kareleri indir, geçici dosya yollarını döndür."""
     try:
-        with httpx.Client(timeout=10) as client:
+        with httpx.Client(timeout=30) as client:
             resp = client.get(f"{BACKEND_URL}/frames", headers=_auth_headers())
             resp.raise_for_status()
-            return resp.json().get("frames", [])
-    except Exception:
+            names: List[str] = resp.json().get("frames", [])
+
+        local_paths: List[str] = []
+        with httpx.Client(timeout=15) as client:
+            for name in names:
+                url = f"{BACKEND_URL}/frame/{name}"
+                try:
+                    img_resp = client.get(url, headers=_auth_headers())
+                    img_resp.raise_for_status()
+                    tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
+                    tmp.write(img_resp.content)
+                    tmp.close()
+                    local_paths.append(tmp.name)
+                except Exception as e:
+                    print(f"[WARN] frame indir hatası {url}: {e}")
+                    continue
+        return local_paths
+    except Exception as e:
+        print(f"[ERROR] _fetch_frames_after_run: {e}")
         return []
 
 
@@ -164,7 +181,7 @@ def _download_video() -> Optional[str]:
 def _download_archive() -> Optional[str]:
     """En son tar.gz arşivini geçici dosyaya indir, yolunu döndür."""
     try:
-        with httpx.Client(timeout=120) as client:
+        with httpx.Client(timeout=180) as client:
             resp = client.get(f"{BACKEND_URL}/archive", headers=_auth_headers())
             if resp.status_code == 404:
                 return None
@@ -177,7 +194,8 @@ def _download_archive() -> Optional[str]:
             tmp.write(resp.content)
             tmp.close()
             return tmp.name
-    except Exception:
+    except Exception as e:
+        print(f"[ERROR] _download_archive: {e}")
         return None
 
 
@@ -189,9 +207,12 @@ Result = Tuple[str, List[str], Optional[str], Optional[str]]
 
 def run_pipeline(prompt: str) -> Generator[Result, None, None]:
     log: List[str] = []
+    _frames: List[str] = []
+    _video: Optional[str] = None
+    _archive: Optional[str] = None
 
-    def emit(extra: str = "") -> Result:
-        return "".join(log), [], None, None
+    def emit() -> Result:
+        return "".join(log), _frames, _video, _archive
 
     if not (prompt or "").strip():
         log.append("Hata: Sahne tanımı boş. Metin girin veya bir senaryo seçin.\n")
@@ -230,13 +251,12 @@ def run_pipeline(prompt: str) -> Generator[Result, None, None]:
                     return
                 resp.raise_for_status()
 
-                done = False
                 for line in resp.iter_lines():
                     if not line.startswith("data: "):
                         continue
                     chunk = line[6:]
+
                     if chunk.startswith("[DONE]"):
-                        done = True
                         ok = "ERROR" not in chunk
                         log.append(
                             "\n[✓] Pipeline tamamlandı.\n" if ok
@@ -244,11 +264,28 @@ def run_pipeline(prompt: str) -> Generator[Result, None, None]:
                         )
                         yield emit()
                         break
+
                     if chunk.startswith("[FATAL]"):
                         log.append(f"\n[FATAL] {chunk}\n")
                         yield emit()
                         return
+
                     log.append(chunk + "\n")
+
+                    # Step 4 (COCO→YOLO) biter bitmez rgb_*.png hazır olur — hemen çek
+                    if "[5/9]" in chunk and not _frames:
+                        log.append("[*] Kareler alınıyor...\n")
+                        yield emit()
+                        _frames = _fetch_frames_after_run()
+                        log.append(f"[*] {len(_frames)} kare alındı.\n")
+
+                    # Step 7 (video encode) biter bitmez video hazır olur — hemen çek
+                    elif "[8/9]" in chunk and _video is None:
+                        log.append("[*] Video indiriliyor...\n")
+                        yield emit()
+                        _video = _download_video()
+                        log.append(f"[*] Video {'alındı' if _video else 'bulunamadı'}.\n")
+
                     yield emit()
 
     except httpx.ConnectError:
@@ -261,22 +298,25 @@ def run_pipeline(prompt: str) -> Generator[Result, None, None]:
         yield emit()
         return
 
-    # --- Pipeline bitti: medya indir / URL al ---
-    log.append("[*] Kareler alınıyor...\n")
-    yield emit()
-    frames = _fetch_frames_after_run()
+    # --- Arşiv ve eksik medya son adımda tamamla ---
+    if not _frames:
+        log.append("[*] Kareler alınıyor...\n")
+        yield emit()
+        _frames = _fetch_frames_after_run()
+        log.append(f"[*] {len(_frames)} kare alındı.\n")
 
-    log.append("[*] Video indiriliyor...\n")
-    yield emit()
-    video_path = _download_video()
+    if _video is None:
+        log.append("[*] Video indiriliyor...\n")
+        yield emit()
+        _video = _download_video()
 
     log.append("[*] Arşiv indiriliyor...\n")
     yield emit()
-    archive_path = _download_archive()
+    _archive = _download_archive()
 
-    log.append(f"[✓] {len(frames)} kare, video={'var' if video_path else 'yok'}, "
-               f"arşiv={'var' if archive_path else 'yok'}\n")
-    yield "".join(log), frames, video_path, archive_path
+    log.append(f"[✓] {len(_frames)} kare, video={'var' if _video else 'yok'}, "
+               f"arşiv={'var' if _archive else 'yok'}\n")
+    yield emit()
 
 
 # ---------------------------------------------------------------------------
