@@ -1,0 +1,185 @@
+{
+    "entities": [
+        {
+            "type": "worker",
+            "asset_id": "worker_01",
+            "ppe_state": {
+                "hardhat": true,
+                "vest": true
+            },
+            "anchor_zone": "loading_dock"
+        },
+        {
+            "type": "worker",
+            "asset_id": "worker_02",
+            "ppe_state": {
+                "hardhat": false,
+                "vest": false
+            },
+            "anchor_zone": "storage_area"
+        },
+        {
+            "type": "vehicle",
+            "asset_id": "forklift",
+            "ppe_state": null,
+            "anchor_zone": "forklift_aisle"
+        },
+        {
+            "type": "zone",
+            "asset_id": "forklift_aisle",
+            "ppe_state": null,
+            "anchor_zone": null
+        },
+        {
+            "type": "zone",
+            "asset_id": "loading_dock",
+            "ppe_state": null,
+            "anchor_zone": null
+        },
+        {
+            "type": "zone",
+            "asset_id": "storage_area",
+            "ppe_state": null,
+            "anchor_zone": null
+        }
+    ],
+    "hazard_zones": [
+        {
+            "name": "forklift_aisle",
+            "bounds_min": [
+                -5.0,
+                -2.0
+            ],
+            "bounds_max": [
+                5.0,
+                2.0
+            ],
+            "danger_level": "critical"
+        },
+        {
+            "name": "loading_dock",
+            "bounds_min": [
+                -5.0,
+                -6.0
+            ],
+            "bounds_max": [
+                5.0,
+                -4.0
+            ],
+            "danger_level": "restricted"
+        },
+        {
+            "name": "storage_area",
+            "bounds_min": [
+                -6.0,
+                3.0
+            ],
+            "bounds_max": [
+                6.0,
+                7.0
+            ],
+            "danger_level": "warning"
+        }
+    ],
+    "camera_angles": [
+        "high_angle"
+    ],
+    "camera_mode": "indoor",
+    "camera_position": null,
+    "focal_length": null,
+    "lighting_conditions": "dusk",
+    "worker_behaviors": [
+        {
+            "worker_id": "worker_01",
+            "commands": [
+                {
+                    "command": "GoTo",
+                    "x": -4.0,
+                    "y": -5.0,
+                    "z": 0.0,
+                    "rotation": 90.0,
+                    "duration": null
+                },
+                {
+                    "command": "Idle",
+                    "x": null,
+                    "y": null,
+                    "z": 0.0,
+                    "rotation": null,
+                    "duration": 3.0
+                },
+                {
+                    "command": "GoTo",
+                    "x": 4.0,
+                    "y": -5.0,
+                    "z": 0.0,
+                    "rotation": 270.0,
+                    "duration": null
+                },
+                {
+                    "command": "Idle",
+                    "x": null,
+                    "y": null,
+                    "z": 0.0,
+                    "rotation": null,
+                    "duration": 3.0
+                },
+                {
+                    "command": "GoTo",
+                    "x": 0.0,
+                    "y": -5.5,
+                    "z": 0.0,
+                    "rotation": 180.0,
+                    "duration": null
+                }
+            ]
+        },
+        {
+            "worker_id": "worker_02",
+            "commands": [
+                {
+                    "command": "GoTo",
+                    "x": -4.0,
+                    "y": 4.0,
+                    "z": 0.0,
+                    "rotation": 45.0,
+                    "duration": null
+                },
+                {
+                    "command": "LookAround",
+                    "x": null,
+                    "y": null,
+                    "z": 0.0,
+                    "rotation": null,
+                    "duration": 2.0
+                },
+                {
+                    "command": "GoTo",
+                    "x": -2.0,
+                    "y": 5.0,
+                    "z": 0.0,
+                    "rotation": 90.0,
+                    "duration": null
+                },
+                {
+                    "command": "LookAround",
+                    "x": null,
+                    "y": null,
+                    "z": 0.0,
+                    "rotation": null,
+                    "duration": 2.0
+                },
+                {
+                    "command": "GoTo",
+                    "x": 0.0,
+                    "y": 4.5,
+                    "z": 0.0,
+                    "rotation": 135.0,
+                    "duration": null
+                }
+            ]
+        }
+    ],
+    "layout": "standard_warehouse",
+    "layout_params": null
+}

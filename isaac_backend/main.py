@@ -94,14 +94,16 @@ from isaac_backend.config_loader import load_config
 from isaac_backend.camera import (
     positions_for_angles, pick_indoor_position, clamp_to_warehouse,
     pick_look_at_target, pick_camera_placement, compute_ground_visible_area,
+    fit_camera_to_entities,
 )
 from isaac_backend.lighting import setup_camera_and_lighting
-from isaac_backend.semantics import clear_unwanted_warehouse_semantics, apply_scene_semantics
+from isaac_backend.semantics import clear_unwanted_warehouse_semantics
 from isaac_backend.spawner import get_geofenced_spawner, spawn_hazard_zones, spawn_at_fixed_position, resolve_anchor_zone_bounds
 from isaac_backend.warehouse import spawn_warehouse_layout, hide_driver_prims
 from isaac_backend.workers import spawn_workers
 from isaac_backend.animation import (
     enable_behavior_extensions,
+    bake_navmesh,
     setup_all_behaviors_async,
     ensure_biped_setup,
     link_workers_to_animation_graph,
@@ -179,7 +181,7 @@ def compute_scene_centroid(stage, known_positions=None):
 
     for prim in stage.Traverse():
         path = str(prim.GetPath())
-        if not (path.startswith("/World/Characters/") or path.startswith("/World/Layout/") or path.startswith("/Replicator/")):
+        if not (path.startswith("/World/Characters/") or path.startswith("/World/Entities/") or path.startswith("/Replicator/")):
             continue
         xf = UsdGeom.Xformable(prim)
         if not xf:
@@ -419,6 +421,9 @@ def main():
     spawn_bounds_min, spawn_bounds_max = spawn_warehouse_layout(scene_config, asset_library, stage)
     _tick(10)
 
+    _progress("Baking navmesh for obstacle avoidance...")
+    bake_navmesh(simulation_app=simulation_app)
+
     _progress("Computing camera placement (camera-first)...")
     hazard_zones = scene_config.get("hazard_zones", [])
     cam_pos, look_at_target, focal_length = pick_camera_placement(scene_config, hazard_zones=hazard_zones)
@@ -461,25 +466,36 @@ def main():
     for ent in scene_config.get("entities", []):
         _progress(f"  Entity: type={ent.get('type')}, asset_id={ent.get('asset_id')}, anchor_zone={ent.get('anchor_zone')}")
 
+    _progress("Clearing unwanted semantics from spawned entity USDs...")
+    clear_unwanted_warehouse_semantics(stage)
+
     _progress("Hiding driver prims...")
     hide_driver_prims(stage)
-
-    _progress("Applying USD-level semantics to all scene prims...")
-    apply_scene_semantics(stage, spawned_asset_ids, workers)
 
     _progress("Adjusting camera look_at to center on all spawned entities...")
     all_known_positions = entity_known_positions + [(wx, wy) for _, wx, wy in _worker_known_positions]
     _, post_entity_positions, post_worker_positions = compute_scene_centroid(
         stage, known_positions=all_known_positions
     )
+    cam_pos = pick_indoor_position(
+        scene_config.get("camera_angles", []),
+        hazard_zones=hazard_zones,
+        entity_positions=post_entity_positions,
+        worker_positions=post_worker_positions,
+    )
     look_at_target = pick_look_at_target(post_entity_positions, post_worker_positions, hazard_zones)
+    cam_pos = fit_camera_to_entities(
+        cam_pos, look_at_target, all_known_positions, focal_length=focal_length
+    )
     visible_bounds = compute_ground_visible_area(cam_pos, look_at_target, focal_length=focal_length)
+    _progress(f"Adjusted camera position: ({cam_pos[0]:.2f}, {cam_pos[1]:.2f}, {cam_pos[2]:.2f})")
     _progress(f"Adjusted look_at: ({look_at_target[0]:.2f}, {look_at_target[1]:.2f}, {look_at_target[2]:.2f})")
     _progress(f"Adjusted visible area: x=[{visible_bounds[0]:.2f}, {visible_bounds[1]:.2f}] y=[{visible_bounds[2]:.2f}, {visible_bounds[3]:.2f}]")
 
     _progress("Starting timeline for behavior scripts...")
     omni.timeline.get_timeline_interface().play()
-    for _ in range(100):
+    _progress("Warming up simulation for behavior initialization (300 steps)...")
+    for _ in range(300):
         world.step(render=True)
 
     _progress("Injecting commands via AgentManager...")

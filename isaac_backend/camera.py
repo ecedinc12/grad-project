@@ -41,6 +41,39 @@ ANGLE_ELEVATION_MAP = {
     "low_angle":  (5,  15),
 }
 
+# Surveillance mount geometry
+MOUNT_WALL_INSET = 0.4   # metres camera body is inset from the effective wall face
+_WX = WAREHOUSE_INTERIOR_X[1] - INTERIOR_MARGIN   # 6.5
+_WY = WAREHOUSE_INTERIOR_Y[1] - INTERIOR_MARGIN   # 6.5
+
+# 4 warehouse corners — classic CCTV mount positions
+CORNER_MOUNTS = [
+    ( _WX - MOUNT_WALL_INSET,  _WY - MOUNT_WALL_INSET),
+    (-_WX + MOUNT_WALL_INSET,  _WY - MOUNT_WALL_INSET),
+    ( _WX - MOUNT_WALL_INSET, -_WY + MOUNT_WALL_INSET),
+    (-_WX + MOUNT_WALL_INSET, -_WY + MOUNT_WALL_INSET),
+]
+
+# 4 wall midpoints — sweeping side/aisle view cameras
+WALL_MID_MOUNTS = [
+    ( _WX - MOUNT_WALL_INSET,  0.0),
+    (-_WX + MOUNT_WALL_INSET,  0.0),
+    (0.0,  _WY - MOUNT_WALL_INSET),
+    (0.0, -_WY + MOUNT_WALL_INSET),
+]
+
+MOUNT_XY_JITTER = 0.3   # metres, uniform ±, for dataset diversity
+
+# Per-angle default focal lengths — only used when config omits focal_length
+ANGLE_FOCAL_LENGTH_MAP = {
+    "overhead":    24.0,   # ceiling mount, wide area
+    "high_angle":   8.0,   # wide-angle CCTV covering diagonal corner view
+    "eye_level":   16.0,   # moderate — mid-wall/rack post
+    "low_angle":   14.0,   # moderate-wide from low rack/wall post
+}
+DEFAULT_FOCAL_LENGTH = 14.0
+
+
 
 def clamp_to_warehouse(x, y, z):
     """Constrain a position to warehouse interior bounds with margin."""
@@ -91,78 +124,38 @@ def _compute_scene_bbox(entity_positions, worker_positions, hazard_zones):
 
 def pick_indoor_position(angle_hints, hazard_zones=None,
                           entity_positions=None, worker_positions=None):
-    """Compute an offset indoor camera position that frames the entire scene.
+    """Place camera at a realistic wall/ceiling surveillance mount.
 
-    Places the camera at a corner/side offset from the scene centroid,
-    looking toward the centroid. This ensures the camera sees all entities
-    rather than hovering directly above them.
-
-    Strategy per angle:
-    - 'overhead': directly above centroid (traditional overhead shot)
-    - 'high_angle': diagonal corner offset at ~5m height — frames the whole scene
-    - 'eye_level'/'low_angle': side offset at low height
-    - default: moderate diagonal offset
+    overhead   — ceiling above scene centroid, small random offset for natural tilt
+    high_angle — corner mount near ceiling; choose randomly from top-2 corners
+                 by distance from scene centroid (farther = wider view)
+    eye_level  — wall-midpoint mount at mid height; top-2 by distance
+    low_angle  — wall-midpoint mount at low height; top-2 by distance
     """
     bbox = _compute_scene_bbox(entity_positions, worker_positions, hazard_zones)
-    if bbox is None:
-        pos = clamp_to_warehouse(0.0, 0.0, 3.0)
-        print(f"[CAMERA] No scene elements — defaulting to ({pos[0]:.2f}, {pos[1]:.2f}, {pos[2]:.2f})")
-        return pos
+    cx, cy = bbox["centroid"] if bbox is not None else (0.0, 0.0)
 
-    cx, cy = bbox["centroid"]
-    x_span = max(bbox["x_span"], 2.0)
-    y_span = max(bbox["y_span"], 2.0)
-
-    if angle_hints:
-        first_known = next((h for h in angle_hints if h in ANGLE_HEIGHT_MAP), None)
-    else:
-        first_known = None
-
-    # Always pick the best corner: maximize offset from centroid while staying in bounds.
-    # For each angle type, we choose different heights and offsets.
+    first_known = next((h for h in (angle_hints or []) if h in ANGLE_HEIGHT_MAP), None)
     z_lo, z_hi = ANGLE_HEIGHT_MAP.get(first_known, DEFAULT_HEIGHT_RANGE)
-    z = (z_lo + z_hi) / 2.0
 
     if first_known == "overhead":
-        cam_x, cam_y = cx, cy
+        jx = random.uniform(-MOUNT_XY_JITTER, MOUNT_XY_JITTER)
+        jy = random.uniform(-MOUNT_XY_JITTER, MOUNT_XY_JITTER)
+        cam_pos = clamp_to_warehouse(cx + jx, cy + jy, random.uniform(z_lo, z_hi))
     else:
-        # Compute desired XY offset based on angle type
-        if first_known == "high_angle":
-            offset_scale = 0.55
-        elif first_known in ("eye_level", "low_angle"):
-            offset_scale = 0.7
-        else:
-            offset_scale = 0.6
+        pool = CORNER_MOUNTS if first_known == "high_angle" else WALL_MID_MOUNTS
+        ranked = sorted(pool,
+                        key=lambda m: (m[0]-cx)**2 + (m[1]-cy)**2,
+                        reverse=True)
+        chosen = random.choice(ranked[:2])
+        jx = random.uniform(-MOUNT_XY_JITTER, MOUNT_XY_JITTER)
+        jy = random.uniform(-MOUNT_XY_JITTER, MOUNT_XY_JITTER)
+        cam_pos = clamp_to_warehouse(chosen[0]+jx, chosen[1]+jy, random.uniform(z_lo, z_hi))
 
-        desired_offset_x = max(x_span * offset_scale, 2.5)
-        desired_offset_y = max(y_span * offset_scale, 2.0)
-
-        # Try all 4 diagonal corners, pick the one furthest from centroid
-        # that is NOT heavily clamped (stays inside warehouse)
-        candidates = []
-        for sx in (1, -1):
-            for sy in (1, -1):
-                try_x = cx + sx * desired_offset_x
-                try_y = cy + sy * desired_offset_y
-                clamped = clamp_to_warehouse(try_x, try_y, z)
-                clip_dist = math.sqrt((try_x - clamped[0])**2 + (try_y - clamped[1])**2)
-                corner_dist = math.sqrt((clamped[0] - cx)**2 + (clamped[1] - cy)**2)
-                # Prefer corners NOT heavily clipped (clip_dist < 2m means we stayed in bounds)
-                if clip_dist < 2.0:
-                    candidates.append((clamped[0], clamped[1], corner_dist))
-
-        if candidates:
-            best = max(candidates, key=lambda c: c[2])
-            cam_x, cam_y = best[0], best[1]
-        else:
-            # Fallback: just offset in +X direction
-            clamped = clamp_to_warehouse(cx + desired_offset_x, cy - desired_offset_y, z)
-            cam_x, cam_y = clamped[0], clamped[1]
-
-    cam_pos = clamp_to_warehouse(cam_x, cam_y, z)
     cam_pos = (cam_pos[0], cam_pos[1], max(cam_pos[2], MIN_INDOOR_HEIGHT))
-    print(f"[CAMERA] pick_indoor_position: angle={first_known}, centroid=({cx:.2f}, {cy:.2f}), "
-          f"x_span={x_span:.2f}, y_span={y_span:.2f}, camera=({cam_pos[0]:.2f}, {cam_pos[1]:.2f}, {cam_pos[2]:.2f})")
+    print(f"[CAMERA] pick_indoor_position: angle={first_known}, "
+          f"centroid=({cx:.2f},{cy:.2f}), "
+          f"camera=({cam_pos[0]:.2f},{cam_pos[1]:.2f},{cam_pos[2]:.2f})")
     return cam_pos
 
 
@@ -423,6 +416,91 @@ def clamp_bounds_to_warehouse(visible_bounds):
     )
 
 
+def fit_camera_to_entities(cam_pos, look_at, entity_positions, focal_length=14.0, margin=0.85):
+    """Pull camera backward along view axis until all entity positions fit in the frame.
+
+    For each entity, computes the minimum backward shift needed so the entity's
+    angular offset from the view axis is within margin * half_fov. Takes the
+    max shift across all entities and both FOV axes.
+
+    Args:
+        cam_pos: Camera position (x, y, z).
+        look_at: Look-at target (x, y, z).
+        entity_positions: List of (x, y) ground-plane entity positions.
+        focal_length: Camera focal length in mm.
+        margin: Fraction of each FOV half to use (0.85 keeps entities in inner 85%).
+
+    Returns:
+        Adjusted cam_pos (x, y, z) — unchanged if all entities already fit.
+    """
+    if not entity_positions:
+        return cam_pos
+
+    cam_x, cam_y, cam_z = cam_pos
+    la_x, la_y, la_z = look_at
+
+    dx = la_x - cam_x
+    dy = la_y - cam_y
+    dz = la_z - cam_z
+    d_len = math.sqrt(dx*dx + dy*dy + dz*dz)
+    if d_len < 1e-6:
+        return cam_pos
+    fx, fy, fz = dx/d_len, dy/d_len, dz/d_len
+
+    right_len = math.sqrt(fy*fy + fx*fx)
+    if right_len < 1e-4:
+        rx, ry, rz = 1.0, 0.0, 0.0
+    else:
+        rx = -fy / right_len
+        ry =  fx / right_len
+        rz =  0.0
+
+    ux = fy*rz - fz*ry
+    uy = fz*rx - fx*rz
+    uz = fx*ry - fy*rx
+    u_len = math.sqrt(ux*ux + uy*uy + uz*uz)
+    if u_len < 1e-6:
+        ux, uy, uz = 0.0, 1.0, 0.0
+    else:
+        ux /= u_len; uy /= u_len; uz /= u_len
+
+    tan_hfov = math.tan(math.atan(SENSOR_WIDTH_MM  / (2.0 * focal_length))) * margin
+    tan_vfov = math.tan(math.atan(SENSOR_HEIGHT_MM / (2.0 * focal_length))) * margin
+
+    max_delta = 0.0
+    min_depth = 0.5  # entity must be at least this far in front after shift
+
+    for ex, ey in entity_positions:
+        ex_rel = ex - cam_x
+        ey_rel = ey - cam_y
+        ez_rel = 0.0 - cam_z
+
+        depth      = ex_rel*fx + ey_rel*fy + ez_rel*fz
+        right_proj = ex_rel*rx + ey_rel*ry + ez_rel*rz
+        up_proj    = ex_rel*ux + ey_rel*uy + ez_rel*uz
+
+        entity_delta = max(0.0, min_depth - depth)
+        if tan_hfov > 0:
+            entity_delta = max(entity_delta, abs(right_proj) / tan_hfov - depth)
+        if tan_vfov > 0:
+            entity_delta = max(entity_delta, abs(up_proj)    / tan_vfov - depth)
+
+        max_delta = max(max_delta, entity_delta)
+
+    if max_delta < 0.05:
+        return cam_pos
+
+    new_cam_pos = clamp_to_warehouse(
+        cam_x - fx * max_delta,
+        cam_y - fy * max_delta,
+        cam_z - fz * max_delta,
+    )
+    new_cam_pos = (new_cam_pos[0], new_cam_pos[1], max(new_cam_pos[2], MIN_INDOOR_HEIGHT))
+    print(f"[CAMERA] fit_camera_to_entities: shifted {max_delta:.2f}m back → "
+          f"({new_cam_pos[0]:.2f}, {new_cam_pos[1]:.2f}, {new_cam_pos[2]:.2f})")
+    return new_cam_pos
+
+
 def pick_camera_placement(scene_config, hazard_zones=None):
     """Determine camera position and look_at from config alone — no entity dependency.
 
@@ -434,7 +512,11 @@ def pick_camera_placement(scene_config, hazard_zones=None):
     """
     angle_hints = scene_config.get("camera_angles", [])
     camera_position_override = scene_config.get("camera_position")
-    focal_length = scene_config.get("focal_length") or 14.0
+    if scene_config.get("focal_length"):
+        focal_length = scene_config["focal_length"]
+    else:
+        first_known = next((h for h in angle_hints if h in ANGLE_FOCAL_LENGTH_MAP), None)
+        focal_length = ANGLE_FOCAL_LENGTH_MAP.get(first_known, DEFAULT_FOCAL_LENGTH)
 
     if camera_position_override:
         cam_pos = clamp_to_warehouse(*camera_position_override)

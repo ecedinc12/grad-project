@@ -121,13 +121,17 @@ isaac_backend/
   main.py         — Entry point: SimulationApp bootstrap, scene assembly, Replicator loop
   config_loader.py — Loads SceneConfig JSON + asset library
   warehouse.py    — Warehouse layout spawning
-  layouts.py      — Procedural layout generator (8 presets: rows, grid, L-shape, perimeter, clusters, none)
+  layouts.py      — Procedural layout generator (8 presets + rack shelf population + dock areas)
   spawner.py      — Geofenced entity spawner
   camera.py       — Camera positioning and orbit distributions
   lighting.py     — Camera and lighting setup
-  semantics.py    — USD semantic label application
+  semantics.py    — USD semantic label application (maps variant assets to canonical COCO classes)
   workers.py      — Worker (character) spawning
   animation.py    — IRA behavior manager: attaches built-in character_behavior.py + injects commands via AgentManager
+
+assets/
+  library.json    — Asset registry: worker, forklift, pallet, rack, zone, box, box_small, box_large, barrel, drum, cone, crate
+  layouts.json    — 8 layout presets: standard_warehouse, narrow_aisle, open_floor, cross_dock, cold_storage, loading_dock, maintenance_bay, storage_yard
 ```
 
 ## Data Flow
@@ -150,6 +154,11 @@ isaac_backend/
 - Worker animation uses IRA's built-in character_behavior.py (Omni.Anim.People). Commands injected via AgentManager.
 - IRA behavior attachment: Phase 1 (before play) = attach built-in script via CharacterUtil. Phase 2 (after play) = inject GoTo/Idle/LookAround via AgentManager.inject_command().
 - Import `World` from `isaacsim.core.api`, NOT `omni.isaac.core`.
+- Layout assets map to COCO categories via `SEMANTIC_MAP` in `layouts.py`: box_small/box_large/crate → "box", drum → "barrel". All other assets map 1:1.
+- Rack shelf population: `_populate_rack_shelves()` places 2 items per shelf level (at z=0.15, 0.85, 1.55) with fill probability controlled by `rack_fill` param (empty=0%, sparse=30%, medium=60%, full=90%).
+- Pallets are spawned loaded: 50% chance of box/crate stack, 25% chance barrel/drum, 25% bare pallet.
+- Dock areas: when `dock_area=true` in layout params, a cluster of loaded pallets + extra props spawns near the warehouse entrance (negative-Y wall).
+- Layout presets in `assets/layouts.json` override default `_resolve_params()` values. Each preset can specify `rack_fill`, `dock_area`, and `clutter_zones`.
 
 ## Validation
 

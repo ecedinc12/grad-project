@@ -56,8 +56,9 @@ def spawn_at_fixed_position(asset_path, position, rotation=(0, 0, 0), semantic_c
     xf.AddRotateYOp().Set(float(rotation[1]))
 
     if semantic_class:
-        prim.CreateAttribute("semantic:Semantics:params:semanticData", Sdf.ValueTypeNames.Token, True).Set(semantic_class)
-        prim.CreateAttribute("semantic:Semantics:params:semanticType", Sdf.ValueTypeNames.Token, True).Set("class")
+        from pxr import Semantics
+        sem_api = Semantics.SemanticsAPI.Apply(prim, "class")
+        sem_api.CreateSemanticDataAttr().Set(semantic_class)
 
     spawn_pos = (float(position[0]), float(position[1]))
     print(f"[INFO] Fixed-spawn '{basename}' -> {prim_path} at ({position[0]:.2f}, {position[1]:.2f}, {position[2]:.2f}) sem='{semantic_class}'")
@@ -136,7 +137,8 @@ def spawn_hazard_zones(hazard_zones, stage):
 
         UsdGeom.Imageable(prim).MakeInvisible()
 
-        prim.CreateAttribute("semantic:Semantics:params:semanticData", Sdf.ValueTypeNames.Token, True).Set(f"hazard_zone_{danger}")
-        prim.CreateAttribute("semantic:Semantics:params:semanticType", Sdf.ValueTypeNames.Token, True).Set("class")
+        from pxr import Semantics
+        sem_api = Semantics.SemanticsAPI.Apply(prim, "class")
+        sem_api.CreateSemanticDataAttr().Set(f"hazard_zone_{danger}")
 
         print(f"[INFO] Hazard zone '{name}' at ({cx:.1f}, {cy:.1f}) size={sx:.1f}x{sy:.1f} danger={danger}")

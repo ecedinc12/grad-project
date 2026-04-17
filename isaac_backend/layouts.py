@@ -2,7 +2,8 @@
 Procedural Layout Generator
 
 Reads layout presets from assets/layouts.json, merges with user overrides,
-and spawns racks, pallets, and clutter props into the USD stage.
+and spawns racks, rack shelf inventory, pallets (loaded), dock areas,
+and clutter props into the USD stage.
 """
 
 import os
@@ -20,26 +21,53 @@ try:
 except Exception:
     LAYOUTS = {}
 
+SHELF_PROPS = ["box", "box_small", "box_large", "crate"]
+PALLET_CARGO_PROPS = ["box", "box_small", "box_large", "barrel", "drum", "crate"]
+CLUTTER_PROPS = ["box", "box_small", "box_large", "barrel", "drum", "cone", "pallet", "crate"]
+SHELF_HEIGHTS = [0.15, 0.85, 1.55]
+SHELF_POSITIONS_PER_LEVEL = 2
+
+RACK_FILL_PROBS = {
+    "empty": 0.0,
+    "sparse": 0.30,
+    "medium": 0.60,
+    "full": 0.90,
+}
+
+SEMANTIC_MAP = {
+    "box": "box",
+    "box_small": "box",
+    "box_large": "box",
+    "crate": "box",
+    "barrel": "barrel",
+    "drum": "barrel",
+    "cone": "cone",
+    "pallet": "pallet",
+    "rack": "rack",
+}
+
 
 def _resolve_params(layout_name, layout_params, layouts):
     preset = layouts.get(layout_name, layouts.get("standard_warehouse", {}))
     params = {
         "rack_pattern": preset.get("rack_pattern", "rows"),
-        "rack_rows": preset.get("rack_rows", 5),
-        "rack_cols": preset.get("rack_cols", 1),
-        "aisle_width": preset.get("aisle_width", 2.0),
-        "bounds_min": tuple(preset.get("bounds_min", [-5.0, -5.0])),
-        "bounds_max": tuple(preset.get("bounds_max", [5.0, 5.0])),
-        "clutter_density": preset.get("clutter_density", "medium"),
+        "rack_rows": preset.get("rack_rows", 8),
+        "rack_cols": preset.get("rack_cols", 2),
+        "aisle_width": preset.get("aisle_width", 2.5),
+        "bounds_min": tuple(preset.get("bounds_min", [-12.0, -12.0])),
+        "bounds_max": tuple(preset.get("bounds_max", [12.0, 12.0])),
+        "clutter_density": preset.get("clutter_density", "high"),
         "clutter_zones": [dict(z) for z in preset.get("clutter_zones", [])],
-        "pallet_rows": preset.get("pallet_rows", 2),
-        "pallet_cols": preset.get("pallet_cols", 1),
+        "pallet_rows": preset.get("pallet_rows", 3),
+        "pallet_cols": preset.get("pallet_cols", 2),
+        "rack_fill": preset.get("rack_fill", "medium"),
+        "dock_area": preset.get("dock_area", False),
     }
     if layout_params:
         for key in (
             "rack_pattern", "rack_rows", "rack_cols", "aisle_width",
             "bounds_min", "bounds_max", "clutter_density", "clutter_zones",
-            "pallet_rows", "pallet_cols",
+            "pallet_rows", "pallet_cols", "rack_fill", "dock_area",
         ):
             if key in layout_params:
                 val = layout_params[key]
@@ -52,7 +80,7 @@ def _resolve_params(layout_name, layout_params, layouts):
     return params
 
 
-def _place(asset_id, x, y, z, rot_z, asset_library, stage, idx):
+def _place(asset_id, x, y, z, rot_z, asset_library, stage, idx, scale=None):
     usd = asset_library.get(asset_id)
     if not usd:
         return idx
@@ -70,7 +98,10 @@ def _place(asset_id, x, y, z, rot_z, asset_library, stage, idx):
     xf = UsdGeom.XformCommonAPI(prim)
     xf.SetTranslate(Gf.Vec3d(x, y, z))
     xf.SetRotate(Gf.Vec3f(0, 0, rot_z), UsdGeom.XformCommonAPI.RotationOrderXYZ)
-    apply_usd_semantics(path, asset_id)
+    if scale is not None:
+        xf.SetScale(Gf.Vec3f(scale, scale, scale))
+    semantic_class = SEMANTIC_MAP.get(asset_id, asset_id)
+    apply_usd_semantics(prim, semantic_class)
     return idx + 1
 
 
@@ -82,9 +113,10 @@ def _spawn_racks(params, asset_library, stage, idx):
     bmin = params["bounds_min"]
     bmax = params["bounds_max"]
     count = 0
+    rack_positions = []
 
     if pattern == "none" or rows == 0:
-        return idx, 0
+        return idx, 0, rack_positions
 
     if pattern == "rows":
         total_span = (rows - 1) * aw
@@ -93,6 +125,7 @@ def _spawn_racks(params, asset_library, stage, idx):
             y = y_start + r * aw
             x_center = (bmin[0] + bmax[0]) / 2.0
             idx = _place("rack", x_center, y, 0, 90, asset_library, stage, idx)
+            rack_positions.append((x_center, y))
             count += 1
 
     elif pattern == "grid":
@@ -105,6 +138,7 @@ def _spawn_racks(params, asset_library, stage, idx):
                 x = x_start + c * aw
                 y = y_start + r * aw
                 idx = _place("rack", x, y, 0, 90, asset_library, stage, idx)
+                rack_positions.append((x, y))
                 count += 1
 
     elif pattern == "L-shape":
@@ -114,6 +148,7 @@ def _spawn_racks(params, asset_library, stage, idx):
         for r in range(rows):
             y = y_start_h + r * aw
             idx = _place("rack", x_h, y, 0, 90, asset_library, stage, idx)
+            rack_positions.append((x_h, y))
             count += 1
         total_span_v = max(2, rows - 1) * aw
         x_start_v = x_h + aw
@@ -121,11 +156,10 @@ def _spawn_racks(params, asset_library, stage, idx):
         for c in range(max(2, rows - 1)):
             x = x_start_v + c * aw
             idx = _place("rack", x, y_bottom, 0, 0, asset_library, stage, idx)
+            rack_positions.append((x, y_bottom))
             count += 1
 
     elif pattern == "perimeter":
-        cx = (bmin[0] + bmax[0]) / 2.0
-        cy = (bmin[1] + bmax[1]) / 2.0
         margin = 1.0
         y_top = bmax[1] - margin
         y_bottom = bmin[1] + margin
@@ -133,7 +167,9 @@ def _spawn_racks(params, asset_library, stage, idx):
             frac = (i + 0.5) / rows
             x = bmin[0] + frac * (bmax[0] - bmin[0])
             idx = _place("rack", x, y_top, 0, 90, asset_library, stage, idx)
+            rack_positions.append((x, y_top))
             idx = _place("rack", x, y_bottom, 0, 90, asset_library, stage, idx)
+            rack_positions.append((x, y_bottom))
             count += 2
         x_left = bmin[0] + margin
         x_right = bmax[0] - margin
@@ -141,7 +177,9 @@ def _spawn_racks(params, asset_library, stage, idx):
             frac = (i + 0.5) / max(1, rows - 2)
             y = bmin[1] + frac * (bmax[1] - bmin[1])
             idx = _place("rack", x_left, y, 0, 0, asset_library, stage, idx)
+            rack_positions.append((x_left, y))
             idx = _place("rack", x_right, y, 0, 0, asset_library, stage, idx)
+            rack_positions.append((x_right, y))
             count += 2
 
     elif pattern == "clusters":
@@ -157,41 +195,91 @@ def _spawn_racks(params, asset_library, stage, idx):
             for r in range(cluster_rows):
                 y = y_start + r * aw
                 idx = _place("rack", cx, y, 0, 90, asset_library, stage, idx)
+                rack_positions.append((cx, y))
+                count += 1
+
+    return idx, count, rack_positions
+
+
+def _populate_rack_shelves(rack_positions, params, asset_library, stage, idx):
+    fill_level = params.get("rack_fill", "medium")
+    fill_prob = RACK_FILL_PROBS.get(fill_level, 0.60)
+    count = 0
+
+    if fill_prob <= 0.0:
+        return idx, 0
+
+    for rx, ry in rack_positions:
+        for shelf_z in SHELF_HEIGHTS:
+            for _ in range(SHELF_POSITIONS_PER_LEVEL):
+                if random.random() > fill_prob:
+                    continue
+                prop = random.choice(SHELF_PROPS)
+                jitter_x = random.uniform(-0.35, 0.35)
+                jitter_y = random.uniform(-0.15, 0.15)
+                jitter_z = random.uniform(-0.03, 0.03)
+                x = rx + jitter_x
+                y = ry + jitter_y
+                z = shelf_z + jitter_z
+                rot = random.uniform(-25, 25)
+                idx = _place(prop, x, y, z, rot, asset_library, stage, idx)
+                count += 1
+
+    print(f"[INFO] Populated rack shelves with {count} items (fill={fill_level}, prob={fill_prob:.0%})")
+    return idx, count
+
+
+def _spawn_pallets(params, asset_library, stage, idx):
+    pallet_rows_grid = params["pallet_rows"]
+    pallet_cols_grid = params["pallet_cols"]
+    bmin = params["bounds_min"]
+    bmax = params["bounds_max"]
+    count = 0
+
+    if pallet_rows_grid == 0 or pallet_cols_grid == 0:
+        return idx, 0
+
+    spacing_x = 2.0
+    spacing_y = 2.5
+    total_x = (pallet_cols_grid - 1) * spacing_x
+    total_y = (pallet_rows_grid - 1) * spacing_y
+    x_start = (bmin[0] + bmax[0]) / 2.0 - total_x / 2.0
+    y_start = bmax[1] - 2.0
+
+    for r in range(pallet_rows_grid):
+        for c in range(pallet_cols_grid):
+            x = x_start + c * spacing_x + random.uniform(-0.3, 0.3)
+            y = y_start - r * spacing_y + random.uniform(-0.3, 0.3)
+            rot = random.uniform(-20, 20)
+            idx = _place("pallet", x, y, 0, rot, asset_library, stage, idx)
+            count += 1
+
+            cargo_roll = random.random()
+            if cargo_roll < 0.50:
+                cargo_prop = random.choice(["box", "box_small", "box_large", "crate"])
+                idx = _place(cargo_prop,
+                              x + random.uniform(-0.1, 0.1),
+                              y + random.uniform(-0.1, 0.1), 0.15,
+                              random.uniform(-30, 30), asset_library, stage, idx)
+                count += 1
+                if random.random() < 0.4:
+                    second_prop = random.choice(["box", "box_small", "crate"])
+                    idx = _place(second_prop,
+                                  x + random.uniform(-0.2, 0.2),
+                                  y + random.uniform(-0.2, 0.2), 0.45,
+                                  random.uniform(-30, 30), asset_library, stage, idx)
+                    count += 1
+            elif cargo_roll < 0.75:
+                barrel_prop = random.choice(["barrel", "drum"])
+                idx = _place(barrel_prop, x, y, 0.15,
+                              random.uniform(0, 360), asset_library, stage, idx)
                 count += 1
 
     return idx, count
 
 
-def _spawn_pallets(params, asset_library, stage, idx):
-    pallet_rows = params["pallet_rows"]
-    pallet_cols = params["pallet_cols"]
-    bmin = params["bounds_min"]
-    bmax = params["bounds_max"]
-    count = 0
-
-    if pallet_rows == 0 or pallet_cols == 0:
-        return idx, 0
-
-    spacing_x = 2.0
-    spacing_y = 2.5
-    total_x = (pallet_cols - 1) * spacing_x
-    total_y = (pallet_rows - 1) * spacing_y
-    x_start = (bmin[0] + bmax[0]) / 2.0 - total_x / 2.0
-    y_start = bmin[1] + 1.0
-
-    for r in range(pallet_rows):
-        for c in range(pallet_cols):
-            x = x_start + c * spacing_x + random.uniform(-0.3, 0.3)
-            y = y_start + r * spacing_y + random.uniform(-0.3, 0.3)
-            rot = random.uniform(-20, 20)
-            idx = _place("pallet", x, y, 0, rot, asset_library, stage, idx)
-            count += 1
-
-    return idx, count
-
-
 def _count_clutter_for_density(density):
-    return {"low": 5, "medium": 12, "high": 20}.get(density, 12)
+    return {"low": 8, "medium": 18, "high": 30}.get(density, 18)
 
 
 def _spawn_clutter(params, asset_library, stage, idx):
@@ -201,16 +289,19 @@ def _spawn_clutter(params, asset_library, stage, idx):
     bmax = params["bounds_max"]
     count = 0
 
-    prop_types = ["box", "barrel", "cone", "pallet"]
-
     if zones:
         for zone in zones:
             n = _count_clutter_for_density(zone.get("density", density))
-            types = zone.get("types", prop_types)
+            types = zone.get("types", CLUTTER_PROPS)
+            available_types = [t for t in types if t in asset_library]
+            if not available_types:
+                available_types = [t for t in CLUTTER_PROPS if t in asset_library]
+                if not available_types:
+                    available_types = ["box"]
             zbmin = tuple(zone.get("bounds_min", bmin))
             zbmax = tuple(zone.get("bounds_max", bmax))
             for _ in range(n):
-                prop = random.choice(types)
+                prop = random.choice(available_types)
                 x = random.uniform(zbmin[0], zbmax[0])
                 y = random.uniform(zbmin[1], zbmax[1])
                 rot = random.uniform(0, 360)
@@ -218,14 +309,72 @@ def _spawn_clutter(params, asset_library, stage, idx):
                 count += 1
     else:
         n = _count_clutter_for_density(density)
+        available_types = [p for p in CLUTTER_PROPS if p in asset_library]
+        if not available_types:
+            available_types = ["box"]
         for _ in range(n):
-            prop = random.choice(prop_types)
+            prop = random.choice(available_types)
             x = random.uniform(bmin[0], bmax[0])
             y = random.uniform(bmin[1], bmax[1])
             rot = random.uniform(0, 360)
             idx = _place(prop, x, y, 0, rot, asset_library, stage, idx)
             count += 1
 
+    return idx, count
+
+
+def _spawn_dock_area(params, asset_library, stage, idx):
+    bmin = params["bounds_min"]
+    bmax = params["bounds_max"]
+    count = 0
+
+    dock_x_start = bmin[0] + 2.0
+    dock_x_end = bmin[0] + 9.0
+    dock_y_start = bmin[1] + 1.0
+    dock_y_end = bmin[1] + 5.0
+
+    dock_pallet_rows = 2
+    dock_pallet_cols = 4
+    spacing_x = 1.8
+    spacing_y = 2.0
+
+    dock_y_total = (dock_pallet_rows - 1) * spacing_y
+    dock_y_center = (dock_y_start + dock_y_end) / 2.0
+    dock_y_base = dock_y_center - dock_y_total / 2.0
+
+    for r in range(dock_pallet_rows):
+        for c in range(dock_pallet_cols):
+            x = dock_x_start + c * spacing_x + random.uniform(-0.2, 0.2)
+            y = dock_y_base + r * spacing_y + random.uniform(-0.2, 0.2)
+            rot = random.uniform(-15, 15)
+            idx = _place("pallet", x, y, 0, rot, asset_library, stage, idx)
+            count += 1
+
+            cargo_prop = random.choice(["box", "box_small", "box_large", "crate"])
+            idx = _place(cargo_prop,
+                          x + random.uniform(-0.15, 0.15),
+                          y + random.uniform(-0.15, 0.15), 0.15,
+                          random.uniform(-30, 30), asset_library, stage, idx)
+            count += 1
+
+            if random.random() < 0.5:
+                second_prop = random.choice(["box", "box_small", "crate"])
+                idx = _place(second_prop,
+                              x + random.uniform(-0.2, 0.2),
+                              y + random.uniform(-0.2, 0.2), 0.45,
+                              random.uniform(-30, 30), asset_library, stage, idx)
+                count += 1
+
+    for _ in range(random.randint(3, 6)):
+        x = random.uniform(dock_x_start - 1.0, dock_x_end + 1.0)
+        y = random.uniform(dock_y_start - 1.0, dock_y_end + 1.0)
+        prop = random.choice(["barrel", "drum", "box_large", "cone"])
+        if prop not in asset_library:
+            prop = "box"
+        idx = _place(prop, x, y, 0, random.uniform(0, 360), asset_library, stage, idx)
+        count += 1
+
+    print(f"[INFO] Spawned dock area with {count} items")
     return idx, count
 
 
@@ -236,11 +385,23 @@ def generate_layout(layout_name, layout_params, asset_library, stage):
     num_racks = 0
     num_pallets = 0
     num_clutter = 0
+    num_shelf_items = 0
+    num_dock_items = 0
 
-    idx, num_racks = _spawn_racks(params, asset_library, stage, idx)
+    idx, num_racks, rack_positions = _spawn_racks(params, asset_library, stage, idx)
+
+    idx, num_shelf_items = _populate_rack_shelves(
+        rack_positions, params, asset_library, stage, idx
+    )
+
     idx, num_pallets = _spawn_pallets(params, asset_library, stage, idx)
+
     idx, num_clutter = _spawn_clutter(params, asset_library, stage, idx)
 
-    print(f"[INFO] Spawned {num_racks} racks, {num_pallets} pallets, {num_clutter} clutter props.")
+    if params.get("dock_area", False):
+        idx, num_dock_items = _spawn_dock_area(params, asset_library, stage, idx)
+
+    print(f"[INFO] Spawned {num_racks} racks, {num_shelf_items} shelf items, "
+          f"{num_pallets} pallets, {num_clutter} clutter props, {num_dock_items} dock items.")
 
     return params["bounds_min"], params["bounds_max"]

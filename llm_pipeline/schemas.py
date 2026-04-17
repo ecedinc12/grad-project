@@ -37,25 +37,32 @@ class ClutterZone(BaseModel):
     bounds_min: tuple[float, float] = Field(..., description="Minimum (x, y) bounds of the zone in meters")
     bounds_max: tuple[float, float] = Field(..., description="Maximum (x, y) bounds of the zone in meters")
     density: Literal["low", "medium", "high"] = Field(default="medium", description="Clutter density within this zone")
-    types: List[str] = Field(default_factory=lambda: ["box", "barrel", "cone", "pallet"], description="Clutter prop types for this zone")
+    types: List[str] = Field(default_factory=lambda: ["box", "box_small", "box_large", "barrel", "drum", "cone", "pallet", "crate"], description="Clutter prop types for this zone")
 
 class LayoutParams(BaseModel):
     rack_pattern: Literal["rows", "grid", "L-shape", "perimeter", "clusters", "none"] = Field(
         default="rows", description="Rack placement pattern algorithm"
     )
-    rack_rows: int = Field(default=5, description="Number of rack rows (1-12)")
-    rack_cols: int = Field(default=1, description="Number of rack columns (1-3)")
-    aisle_width: float = Field(default=2.0, description="Distance between rack rows in meters (1.0-5.0)")
-    bounds_min: tuple[float, float] = Field(default=(-5.0, -5.0), description="Minimum (x, y) layout footprint in meters")
-    bounds_max: tuple[float, float] = Field(default=(5.0, 5.0), description="Maximum (x, y) layout footprint in meters")
+    rack_rows: int = Field(default=8, description="Number of rack rows (1-12)")
+    rack_cols: int = Field(default=2, description="Number of rack columns (1-3)")
+    aisle_width: float = Field(default=2.5, description="Distance between rack rows in meters (1.0-5.0)")
+    bounds_min: tuple[float, float] = Field(default=(-12.0, -12.0), description="Minimum (x, y) layout footprint in meters")
+    bounds_max: tuple[float, float] = Field(default=(12.0, 12.0), description="Maximum (x, y) layout footprint in meters")
     clutter_density: Literal["low", "medium", "high"] = Field(
-        default="medium", description="Global clutter density: low=5 props, medium=12 props, high=20 props"
+        default="high", description="Global clutter density: low=8 props, medium=18 props, high=30 props"
     )
     clutter_zones: List[ClutterZone] = Field(
         default_factory=list, description="Optional zone-specific clutter overrides. If empty, clutter is scattered globally."
     )
-    pallet_rows: int = Field(default=2, description="Number of pallet staging rows")
-    pallet_cols: int = Field(default=1, description="Number of pallet staging columns")
+    pallet_rows: int = Field(default=3, description="Number of pallet staging rows")
+    pallet_cols: int = Field(default=2, description="Number of pallet staging columns")
+    rack_fill: Literal["empty", "sparse", "medium", "full"] = Field(
+        default="medium",
+        description="How full rack shelves are: empty=0%, sparse=30%, medium=60%, full=90% of shelf positions filled"
+    )
+    dock_area: bool = Field(
+        default=False, description="Whether to spawn a loading dock cluster of loaded pallets near the warehouse entrance"
+    )
 
 class SceneConfig(BaseModel):
     entities: List[Entity] = Field(default_factory=list, description="List of entities in the scene")
@@ -77,7 +84,7 @@ class SceneConfig(BaseModel):
     )
     focal_length: Optional[float] = Field(
         default=None,
-        description="Camera focal length in mm. Lower values = wider FOV. Default 14.0 for indoor warehouse (captures ~90deg FOV). Use 10-12 for very wide, 18-24 for narrower."
+        description="Camera focal length in mm. Lower values = wider FOV. Default 14.0 for indoor warehouse (captures ~90deg FOV). Use 10-12 to guarantee wide shots that include all described assets, 18-24 for narrower."
     )
     lighting_conditions: Literal["daylight", "overcast", "dusk", "night"] = Field(
         default="daylight",

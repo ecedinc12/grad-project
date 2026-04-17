@@ -76,10 +76,12 @@ def _refresh_ira_state():
 def enable_behavior_extensions(simulation_app=None):
     """Enable extensions required for IRA behavior scripts and configure navmesh settings."""
     settings = carb.settings.get_settings()
-    settings.set("/persistent/omni/anim/people/navmeshBasedNavigation", False)
-    settings.set("/exts/omni.anim.people/navigation_settings/navmesh_enabled", False)
+    settings.set("/persistent/omni/anim/people/navmeshBasedNavigation", True)
+    settings.set("/exts/omni.anim.people/navigation_settings/navmesh_enabled", True)
     settings.set("/exts/omni.anim.people/navigation_settings/dynamic_avoidance_enabled", True)
-    print("[INFO] Navmesh disabled — GoTo uses direct navigation with dynamic avoidance")
+    settings.set("/persistent/exts/omni.anim.people/character_prim_path", "/World/Characters")
+    print("[INFO] Navmesh enabled — GoTo uses navmesh pathfinding with dynamic avoidance")
+    print("[INFO] CHARACTER_PRIM_PATH set to /World/Characters")
 
     manager = omni.kit.app.get_app().get_extension_manager()
     extensions = [
@@ -105,6 +107,55 @@ def enable_behavior_extensions(simulation_app=None):
             simulation_app.update()
 
     _refresh_ira_state()
+
+
+def bake_navmesh(simulation_app=None):
+    """Bake navmesh after the warehouse layout is loaded so workers path around obstacles.
+
+    Uses event-stream polling to wait for the bake to complete, rather than a
+    fixed tick count. Falls back to extended tick polling if the event API
+    is unavailable.
+    """
+    try:
+        import omni.anim.navigation.core as nav_core
+        interface = nav_core.acquire_interface()
+        interface.start_navmesh_baking()
+        print("[INFO] Navmesh baking started — waiting for completion...")
+
+        baked = False
+        try:
+            event_stream = interface.get_navmesh_event_stream()
+            nav_updated_event = nav_core.EVENT_TYPE_NAVMESH_UPDATED
+
+            if simulation_app:
+                for _ in range(300):
+                    simulation_app.update()
+                    pending = event_stream.pop()
+                    while pending:
+                        if pending.type == nav_updated_event:
+                            baked = True
+                            break
+                        pending = event_stream.pop()
+                    if baked:
+                        break
+        except Exception:
+            pass
+
+        if not baked and simulation_app:
+            print("[INFO] Event stream unavailable — polling with extended ticks (200)")
+            for _ in range(200):
+                simulation_app.update()
+
+        navmesh_obj = interface.get_navmesh()
+        if navmesh_obj is not None:
+            print("[INFO] Navmesh bake succeeded — navmesh object available")
+        else:
+            print("[WARN] Navmesh bake returned None — workers may use direct navigation")
+
+        return True
+    except Exception as e:
+        print(f"[WARN] Navmesh baking failed (workers will use direct navigation): {e}")
+        return False
 
 
 def ensure_biped_setup(simulation_app=None):
@@ -375,11 +426,11 @@ def _build_command_list(worker_behaviors, worker_name, visible_bounds=None):
                     x = cmd.get("x", 0.0)
                     y = cmd.get("y", 0.0)
                     z = cmd.get("z", 0.0)
-                    rot = cmd.get("rotation", 0.0)
+                    rotation = cmd.get("rotation", "_")
                     if visible_bounds is not None:
                         x = max(visible_bounds[0], min(visible_bounds[1], x))
                         y = max(visible_bounds[2], min(visible_bounds[3], y))
-                    result.append(f"{worker_name} GoTo {x} {y} {z} {rot}")
+                    result.append(f"{worker_name} GoTo {x} {y} {z} {rotation}")
                 elif cmd_type == "Idle":
                     duration = cmd.get("duration", 5.0)
                     result.append(f"{worker_name} Idle {duration}")
@@ -417,6 +468,13 @@ def inject_commands_after_play(spawned_worker_names, worker_behaviors, simulatio
         return 0, len(spawned_worker_names)
 
     agent_manager = AgentManager.get_instance()
+
+    if simulation_app:
+        for _ in range(50):
+            simulation_app.update()
+            registered = agent_manager.get_all_agent_names()
+            if spawned_worker_names.issubset(set(registered)):
+                break
     registered = agent_manager.get_all_agent_names()
     print(f"[INFO] AgentManager registered agents: {list(registered)}")
 
@@ -450,7 +508,6 @@ def inject_commands_after_play(spawned_worker_names, worker_behaviors, simulatio
 
 WAREHOUSE_X_RANGE = (-5.5, 5.5)
 WAREHOUSE_Y_RANGE = (-5.5, 5.5)
-COMMAND_DURATION_RANGE = (80, 120)
 
 
 def reinject_random_commands(spawned_worker_names, visible_bounds=None):
@@ -489,18 +546,18 @@ def reinject_random_commands(spawned_worker_names, visible_bounds=None):
             failed += 1
             continue
 
-        x = round(random.uniform(x_lo, x_hi), 1)
-        y = round(random.uniform(y_lo, y_hi), 1)
-        rot = round(random.uniform(0, 360), 1)
-        idle_dur = round(random.uniform(3, 8), 1)
-        look_dur = round(random.uniform(2, 5), 1)
-
-        total_dur = COMMAND_DURATION_RANGE
-        cmd_list = [
-            f"{worker_name} GoTo {x} {y} 0.0 {rot}",
-            f"{worker_name} Idle {idle_dur}",
-            f"{worker_name} LookAround {look_dur}",
-        ]
+        num_waypoints = random.randint(2, 3)
+        cmd_list = []
+        for i in range(num_waypoints):
+            wx = round(random.uniform(x_lo, x_hi), 1)
+            wy = round(random.uniform(y_lo, y_hi), 1)
+            cmd_list.append(f"{worker_name} GoTo {wx} {wy} 0.0 _")
+            if i < num_waypoints - 1:
+                if random.random() < 0.5:
+                    cmd_list.append(f"{worker_name} Idle {round(random.uniform(1, 4), 1)}")
+                else:
+                    cmd_list.append(f"{worker_name} LookAround {round(random.uniform(1, 3), 1)}")
+        cmd_list.append(f"{worker_name} Idle {round(random.uniform(3, 8), 1)}")
 
         try:
             agent_manager.inject_command(
