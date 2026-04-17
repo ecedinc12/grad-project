@@ -17,9 +17,24 @@ import shutil
 from PIL import Image, ImageDraw, ImageFont
 
 PERSON_CATEGORY_KEYWORDS = {"person"}
+HAZARD_CATEGORY_KEYWORDS = {"hazard_zone_warning", "hazard_zone_restricted", "hazard_zone_critical"}
 
-BOX_COLOR = (0, 180, 0)
-TEXT_COLOR = (0, 180, 0)
+# Color definitions (RGB for PIL)
+BOX_COLOR_PERSON = (0, 180, 0)       # Green
+TEXT_COLOR_PERSON = (0, 0, 0)        # Black text on green box
+
+BOX_COLORS_HAZARD = {
+    "hazard_zone_warning": (255, 255, 0),     # Yellow
+    "hazard_zone_restricted": (255, 165, 0),  # Orange
+    "hazard_zone_critical": (255, 0, 0),      # Red
+}
+
+TEXT_COLORS_HAZARD = {
+    "hazard_zone_warning": (0, 0, 0),         # Black text on yellow box
+    "hazard_zone_restricted": (0, 0, 0),      # Black text on orange box
+    "hazard_zone_critical": (255, 255, 255),  # White text on red box
+}
+
 BOX_WIDTH = 3
 FONT_SIZE = 24
 LABEL_PADDING = 4
@@ -54,13 +69,13 @@ def _get_font(size):
                 return ImageFont.load_default()
 
 
-def _person_category_ids(coco_data):
-    person_ids = set()
+def _target_category_ids(coco_data):
+    target_ids = set()
     for cat in coco_data.get("categories", []):
         name = cat.get("name", "").lower()
-        if name in PERSON_CATEGORY_KEYWORDS:
-            person_ids.add(cat["id"])
-    return person_ids
+        if name in PERSON_CATEGORY_KEYWORDS or name in HAZARD_CATEGORY_KEYWORDS:
+            target_ids.add(cat["id"])
+    return target_ids
 
 
 def annotate_video(dataset_dir, output_path, fps=30):
@@ -72,16 +87,16 @@ def annotate_video(dataset_dir, output_path, fps=30):
     with open(annotations_path, "r") as f:
         coco_data = json.load(f)
 
-    person_cat_ids = _person_category_ids(coco_data)
-    if not person_cat_ids:
-        print("Warning: No 'person' category found in COCO annotations.")
+    target_cat_ids = _target_category_ids(coco_data)
+    if not target_cat_ids:
+        print("Warning: No 'person' or 'hazard_zone' categories found in COCO annotations.")
 
     cat_id_to_name = {cat["id"]: cat["name"] for cat in coco_data.get("categories", [])}
     images = {img["id"]: img for img in coco_data.get("images", [])}
 
     image_annotations = {}
     for ann in coco_data.get("annotations", []):
-        if ann["category_id"] in person_cat_ids:
+        if ann["category_id"] in target_cat_ids:
             img_id = ann["image_id"]
             if img_id not in image_annotations:
                 image_annotations[img_id] = []
@@ -117,14 +132,21 @@ def annotate_video(dataset_dir, output_path, fps=30):
                 x_max = x_min + bbox_w
                 y_max = y_min + bbox_h
 
-                draw.rectangle(
-                    [(x_min, y_min), (x_max, y_max)],
-                    outline=BOX_COLOR,
-                    width=BOX_WIDTH,
-                )
-
                 cat_name = cat_id_to_name.get(ann["category_id"], "person")
                 label = cat_name.upper()
+
+                if cat_name in HAZARD_CATEGORY_KEYWORDS:
+                    box_color = BOX_COLORS_HAZARD.get(cat_name, (255, 255, 0))
+                    text_color = TEXT_COLORS_HAZARD.get(cat_name, (0, 0, 0))
+                else:
+                    box_color = BOX_COLOR_PERSON
+                    text_color = TEXT_COLOR_PERSON
+
+                draw.rectangle(
+                    [(x_min, y_min), (x_max, y_max)],
+                    outline=box_color,
+                    width=BOX_WIDTH,
+                )
 
                 text_bbox = draw.textbbox((x_min, y_min), label, font=font)
                 text_w = text_bbox[2] - text_bbox[0]
@@ -133,12 +155,12 @@ def annotate_video(dataset_dir, output_path, fps=30):
                 label_y = max(y_min - text_h - 2 * LABEL_PADDING, 0)
                 draw.rectangle(
                     [(x_min, label_y), (x_min + text_w + 2 * LABEL_PADDING, label_y + text_h + 2 * LABEL_PADDING)],
-                    fill=BOX_COLOR,
+                    fill=box_color,
                 )
                 draw.text(
                     (x_min + LABEL_PADDING, label_y + LABEL_PADDING),
                     label,
-                    fill=TEXT_COLOR,
+                    fill=text_color,
                     font=font,
                 )
 
@@ -150,7 +172,7 @@ def annotate_video(dataset_dir, output_path, fps=30):
             if (idx + 1) % 50 == 0 or idx == total - 1:
                 print(f"  Annotated {idx + 1}/{total} frames...")
 
-        print(f"Annotated {annotated_count} worker bounding boxes across {total} frames.")
+        print(f"Annotated {annotated_count} bounding boxes (workers/zones) across {total} frames.")
 
         num_frames = len(glob.glob(os.path.join(frames_dir, "frame_*.png")))
         if num_frames < 2:

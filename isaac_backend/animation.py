@@ -19,6 +19,7 @@ import os
 import random
 import sys
 import time
+import math
 
 import carb
 import omni.kit.app
@@ -579,3 +580,105 @@ def reinject_random_commands(spawned_worker_names, visible_bounds=None):
 def _progress(msg):
     print(f"[PROGRESS] [{time.strftime('%H:%M:%S')}] {msg}")
     sys.stdout.flush()
+class VehicleAnimator:
+    """Animates non-biped vehicles like forklifts over the simulation frames."""
+    def __init__(self, vehicle_behaviors, stage, fps=30):
+        self.stage = stage
+        self.fps = fps
+        self.vehicles = []
+        
+        for vb in vehicle_behaviors:
+            v_id = vb.get("vehicle_id")
+            commands = vb.get("commands", [])
+            prim_path = f"/World/Entities/{v_id}"
+            prim = self.stage.GetPrimAtPath(prim_path)
+            if not prim or not prim.IsValid():
+                print(f"[WARN] VehicleAnimator: Prim not found for {v_id} at {prim_path}")
+                continue
+            
+            # Extract waypoints
+            waypoints = []
+            for cmd in commands:
+                if cmd.get("command") == "GoTo":
+                    waypoints.append({
+                        "x": cmd.get("x", 0.0),
+                        "y": cmd.get("y", 0.0),
+                        "z": cmd.get("z", 0.0),
+                        "rot": cmd.get("rotation")
+                    })
+                elif cmd.get("command") == "Idle":
+                    # Just add a delay by duplicating last waypoint
+                    if waypoints:
+                        waypoints.append(waypoints[-1].copy())
+            
+            if len(waypoints) < 2:
+                print(f"[WARN] VehicleAnimator: Not enough waypoints for {v_id}")
+                continue
+                
+            self.vehicles.append({
+                "id": v_id,
+                "prim": prim,
+                "waypoints": waypoints,
+                "current_wp": 0
+            })
+            print(f"[INFO] VehicleAnimator tracking {v_id} with {len(waypoints)} waypoints")
+
+    def update(self, current_frame, total_frames):
+        if not self.vehicles:
+            return
+            
+        from pxr import UsdGeom, Gf
+        
+        for v in self.vehicles:
+            wps = v["waypoints"]
+            if not wps:
+                continue
+                
+            # Simple interpolation across total frames
+            progress = current_frame / max(1, total_frames - 1)
+            total_segments = len(wps) - 1
+            segment_float = progress * total_segments
+            segment_idx = min(int(segment_float), total_segments - 1)
+            t = segment_float - segment_idx
+            
+            p1 = wps[segment_idx]
+            p2 = wps[segment_idx + 1]
+            
+            cur_x = p1["x"] + (p2["x"] - p1["x"]) * t
+            cur_y = p1["y"] + (p2["y"] - p1["y"]) * t
+            cur_z = p1["z"] + (p2["z"] - p1["z"]) * t
+            
+            xformable = UsdGeom.Xformable(v["prim"])
+            xform_ops = xformable.GetOrderedXformOps()
+            
+            translate_op = None
+            rotate_op = None
+            
+            for op in xform_ops:
+                if op.GetOpType() == UsdGeom.XformOp.TypeTranslate:
+                    translate_op = op
+                elif op.GetOpType() in [UsdGeom.XformOp.TypeRotateXYZ, UsdGeom.XformOp.TypeOrient]:
+                    rotate_op = op
+                    
+            if not translate_op:
+                translate_op = xformable.AddTranslateOp()
+                
+            # If rotation is not provided, look towards the next waypoint
+            if p2.get("rot") is not None:
+                rot_deg = p1["rot"] + (p2["rot"] - p1["rot"]) * t if p1.get("rot") is not None else p2["rot"]
+            else:
+                dx = p2["x"] - p1["x"]
+                dy = p2["y"] - p1["y"]
+                if dx*dx + dy*dy > 0.001:
+                    rot_deg = math.degrees(math.atan2(dy, dx))
+                else:
+                    rot_deg = 0.0
+                    
+            if not rotate_op:
+                rotate_op = xformable.AddRotateXYZOp()
+                
+            translate_op.Set(Gf.Vec3d(cur_x, cur_y, cur_z))
+            
+            if rotate_op.GetOpType() == UsdGeom.XformOp.TypeRotateXYZ:
+                rotate_op.Set(Gf.Vec3d(0, 0, rot_deg))
+

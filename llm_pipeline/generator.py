@@ -85,7 +85,7 @@ def generate_scene_config(prompt: str, output_path: str):
     - Set logical anchor_zones if mentioned (e.g., 'loading dock', 'aisle 3').
     - IMPORTANT: Vehicles (forklifts, carts) MUST have anchor_zone set to the zone they operate in. For example, a forklift in "forklift_aisle" should have anchor_zone="forklift_aisle". This ensures the vehicle spawns in the correct location instead of randomly.
     - camera_angles values MUST each be exactly one of: 'overhead', 'high_angle', 'eye_level', 'low_angle'. Choose based on the user's description; default to ['eye_level'] if unspecified.
-    - camera_mode MUST be 'indoor' for all warehouse scenes. This places the camera at a fixed position inside the warehouse at realistic surveillance heights. Do NOT use 'orbit'.
+    - camera_mode MUST be 'indoor' by default (fixed surveillance position). However, if the user explicitly asks for "multiple angles", "different points of view", or "orbit", you MUST set it to 'orbit'.
     - camera_position is optional. If omitted, it is auto-derived from worker and hazard zone positions. Only set it if the user specifies an exact viewpoint.
     - focal_length is optional. Default is 14.0 (wide indoor FOV ~90deg). Use 10-12 to guarantee wide shots that include all described assets, 18-24 for narrower focus on specific areas. Do NOT set it unless the user specifies a field of view preference or requests a scene with many distributed assets.
     - lighting_conditions MUST be exactly one of: 'daylight', 'overcast', 'dusk', 'night'. Choose based on the user's description; default to 'daylight' if unspecified.
@@ -112,6 +112,13 @@ def generate_scene_config(prompt: str, output_path: str):
       * "patrol" → 4+ GoTo waypoints forming a loop around the warehouse perimeter
       * "inspection" → alternating short GoTo hops (1–2 m apart) and LookAround pauses
       * Default (no scenario) → mix of GoTo waypoints and Idle breaks covering different quadrants
+
+    VEHICLE BEHAVIOR RULES:
+    - Generate one VehicleBehavior entry per vehicle entity (e.g. forklift) IF movement is requested or implied.
+    - Assign vehicle_id matching the vehicle's asset_id (e.g. "forklift", "forklift_01"). Note that the backend spawns multiple vehicles as asset_id_01, asset_id_02, etc. If only 1, use "forklift_01".
+    - Use GoTo commands for movement waypoints. Set x and y to specify paths.
+    - Use Idle commands for stops.
+    - Ensure paths stay within their operating zones or logical warehouse aisles.
     """
 
     print(f"Generating configuration for prompt: '{prompt}'...")

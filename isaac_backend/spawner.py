@@ -18,7 +18,7 @@ from pxr import UsdGeom, Gf, Sdf
 import omni.usd
 
 
-def spawn_at_fixed_position(asset_path, position, rotation=(0, 0, 0), semantic_class=None):
+def spawn_at_fixed_position(asset_path, position, rotation=(0, 0, 0), semantic_class=None, prim_name=None):
     """Spawn an entity at a deterministic position using direct USD xform ops.
 
     Unlike get_geofenced_spawner which uses Replicator randomization
@@ -30,13 +30,18 @@ def spawn_at_fixed_position(asset_path, position, rotation=(0, 0, 0), semantic_c
         position: (x, y, z) position in meters.
         rotation: (rx, ry, rz) rotation in degrees.
         semantic_class: Optional semantic class name for labeling.
+        prim_name: Optional explicit name for the prim. If None, derives from basename.
 
     Returns:
         Tuple of (prim_path, (x, y)) for tracking spawn position.
     """
     stage = omni.usd.get_context().get_stage()
 
-    basename = asset_path.rstrip("/").split("/")[-1].replace(".usd", "")
+    if prim_name:
+        basename = prim_name
+    else:
+        basename = asset_path.rstrip("/").split("/")[-1].replace(".usd", "")
+        
     parent_path = "/World/Entities"
     if not stage.GetPrimAtPath(parent_path):
         stage.DefinePrim(parent_path, "Xform")
@@ -53,7 +58,7 @@ def spawn_at_fixed_position(asset_path, position, rotation=(0, 0, 0), semantic_c
     xf = UsdGeom.Xformable(prim)
     xf.ClearXformOpOrder()
     xf.AddTranslateOp().Set(Gf.Vec3d(float(position[0]), float(position[1]), float(position[2])))
-    xf.AddRotateYOp().Set(float(rotation[1]))
+    xf.AddRotateXYZOp().Set(Gf.Vec3d(float(rotation[0]), float(rotation[1]), float(rotation[2])))
 
     if semantic_class:
         from pxr import Semantics

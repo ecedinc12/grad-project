@@ -64,6 +64,10 @@ class LayoutParams(BaseModel):
         default=False, description="Whether to spawn a loading dock cluster of loaded pallets near the warehouse entrance"
     )
 
+class VehicleBehavior(BaseModel):
+    vehicle_id: str                  # matches prim name: "forklift_01", "cart_01", ...
+    commands: List[BehaviorCommand]
+
 class SceneConfig(BaseModel):
     entities: List[Entity] = Field(default_factory=list, description="List of entities in the scene")
     hazard_zones: List[HazardZone] = Field(
@@ -76,7 +80,7 @@ class SceneConfig(BaseModel):
     )
     camera_mode: Literal["indoor", "orbit"] = Field(
         default="indoor",
-        description="Camera placement: 'indoor' = single fixed position inside warehouse, 'orbit' = spherical orbit (legacy)"
+        description="Camera placement: 'indoor' = single fixed surveillance position inside warehouse, 'orbit' = multiple dynamic viewpoints/angles on a spherical shell around the scene"
     )
     camera_position: Optional[tuple[float, float, float]] = Field(
         default=None,
@@ -93,6 +97,10 @@ class SceneConfig(BaseModel):
     worker_behaviors: List[WorkerBehavior] = Field(
         default_factory=list,
         description="Behavior command sequences for each worker, one entry per worker entity"
+    )
+    vehicle_behaviors: List[VehicleBehavior] = Field(
+        default_factory=list,
+        description="Behavior command sequences for each vehicle (like forklift), one entry per vehicle entity"
     )
     layout: str = Field(
         default="standard_warehouse",

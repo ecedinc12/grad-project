@@ -109,6 +109,7 @@ from isaac_backend.animation import (
     link_workers_to_animation_graph,
     inject_commands_after_play,
     reinject_random_commands,
+    VehicleAnimator,
 )
 
 COCO_CATEGORIES = {
@@ -318,30 +319,46 @@ def _spawn_entities(scene_config, asset_library, stage, spawn_bounds_min, spawn_
         anchor_zone = entity.get("anchor_zone")
 
         if asset_type == "vehicle":
-            zone_bounds = resolve_anchor_zone_bounds(anchor_zone, hazard_zones)
-            if zone_bounds is not None:
-                bmin, bmax = zone_bounds
-                cx = (bmin[0] + bmax[0]) / 2.0
-                cy = (bmin[1] + bmax[1]) / 2.0
-                cx += random.uniform(-0.5, 0.5)
-                cy += random.uniform(-0.5, 0.5)
-            else:
-                if visible_bounds is not None:
-                    cx = random.uniform(visible_bounds[0], visible_bounds[1])
-                    cy = random.uniform(visible_bounds[2], visible_bounds[3])
-                else:
-                    cx, cy = random.uniform(-3.0, 3.0), random.uniform(-3.0, 3.0)
-                print(f"[INFO] Vehicle '{asset_id}' has no anchor_zone, placing at ({cx:.2f}, {cy:.2f})")
+            vehicle_count = sum(1 for a, _ in spawned_asset_ids if a == asset_id)
+            prim_name = f"{asset_id}_{vehicle_count + 1:02d}"
 
-            if visible_bounds is not None:
-                cx = max(visible_bounds[0], min(visible_bounds[1], cx))
-                cy = max(visible_bounds[2], min(visible_bounds[3], cy))
+            # Check if there is a behavior with a first GoTo command to use as spawn pos
+            spawn_x, spawn_y = None, None
+            for vb in scene_config.get("vehicle_behaviors", []):
+                if vb.get("vehicle_id") == prim_name:
+                    for cmd in vb.get("commands", []):
+                        if cmd.get("command") == "GoTo":
+                            spawn_x, spawn_y = cmd.get("x"), cmd.get("y")
+                            break
+                    break
+            
+            if spawn_x is not None and spawn_y is not None:
+                cx, cy = spawn_x, spawn_y
+            else:
+                zone_bounds = resolve_anchor_zone_bounds(anchor_zone, hazard_zones)
+                if zone_bounds is not None:
+                    bmin, bmax = zone_bounds
+                    cx = (bmin[0] + bmax[0]) / 2.0
+                    cy = (bmin[1] + bmax[1]) / 2.0
+                    cx += random.uniform(-0.5, 0.5)
+                    cy += random.uniform(-0.5, 0.5)
+                else:
+                    if visible_bounds is not None:
+                        cx = random.uniform(visible_bounds[0], visible_bounds[1])
+                        cy = random.uniform(visible_bounds[2], visible_bounds[3])
+                    else:
+                        cx, cy = random.uniform(-3.0, 3.0), random.uniform(-3.0, 3.0)
+                    print(f"[INFO] Vehicle '{asset_id}' has no anchor_zone, placing at ({cx:.2f}, {cy:.2f})")
+
+                if visible_bounds is not None:
+                    cx = max(visible_bounds[0], min(visible_bounds[1], cx))
+                    cy = max(visible_bounds[2], min(visible_bounds[3], cy))
 
             prim_path, spawn_pos = spawn_at_fixed_position(
-                usd_path, position=(cx, cy, 0.0), semantic_class=semantic_class
+                usd_path, position=(cx, cy, 0.0), semantic_class=semantic_class, prim_name=prim_name
             )
             known_positions.append(spawn_pos)
-            _progress(f"Vehicle '{asset_id}' anchored to '{anchor_zone}' at ({cx:.2f}, {cy:.2f})")
+            _progress(f"Vehicle '{prim_name}' anchored to '{anchor_zone}' at ({cx:.2f}, {cy:.2f})")
         else:
             _progress(f"Spawning '{asset_id}' (type={asset_type}) with random placement")
             spawner = get_geofenced_spawner(
@@ -512,12 +529,16 @@ def main():
     _progress("Configuring camera trigger...")
     _configure_camera_trigger(camera, scene_config, cam_pos, look_at_target)
 
+    _progress("Initializing vehicle animator...")
+    vehicle_animator = VehicleAnimator(scene_config.get("vehicle_behaviors", []), stage, fps=30)
+
     _progress("Running simulation loop...")
     for step in range(NUM_FRAMES):
         if step % 100 == 0:
             _progress(f"Frame {step}/{NUM_FRAMES}")
         if step > 0 and step % REINJECT_INTERVAL == 0 and spawned_worker_names:
             reinject_random_commands(spawned_worker_names, visible_bounds=visible_bounds)
+        vehicle_animator.update(step, NUM_FRAMES)
         for _ in range(SIM_STEPS_PER_FRAME):
             world.step(render=False)
         rep.orchestrator.step()

@@ -236,15 +236,8 @@ def positions_for_angles(angle_hints, hazard_zones=None,
 
 
 def orbit_distribution(scene_positions):
-    """Return a rep.distribution.uniform over the bounding box of scene_positions."""
-    xs = [p[0] for p in scene_positions]
-    ys = [p[1] for p in scene_positions]
-    zs = [p[2] for p in scene_positions]
-
-    return rep.distribution.uniform(
-        (min(xs), min(ys), min(zs)),
-        (max(xs), max(ys), max(zs))
-    )
+    """Return a rep.distribution.sequence over the calculated spherical shell positions."""
+    return rep.distribution.sequence(scene_positions)
 
 
 def pick_look_at_target(entity_positions, worker_positions, hazard_zones):
