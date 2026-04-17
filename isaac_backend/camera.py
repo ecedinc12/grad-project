@@ -148,7 +148,7 @@ def pick_indoor_position(angle_hints, hazard_zones=None,
         jy = random.uniform(-MOUNT_XY_JITTER, MOUNT_XY_JITTER)
         cam_pos = clamp_to_warehouse(cx + jx, cy + jy, random.uniform(z_lo, z_hi))
     else:
-        pool = CORNER_MOUNTS if first_known == "high_angle" else WALL_MID_MOUNTS
+        pool = CORNER_MOUNTS if first_known in ("high_angle", "cctv") else WALL_MID_MOUNTS
         if preferred_mount is not None and preferred_mount < len(pool):
             chosen = pool[preferred_mount]
             chosen_mount_idx = preferred_mount
