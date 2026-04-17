@@ -134,6 +134,7 @@ COCO_CATEGORIES = {
 NUM_FRAMES = 200
 SIM_STEPS_PER_FRAME = 2
 REINJECT_INTERVAL = 80
+CAMERA_RANDOMIZE_INTERVAL = 20
 
 
 # --- Helpers ---
@@ -245,7 +246,7 @@ def _configure_camera_trigger(camera, scene_config, cam_pos, look_at_target):
         _progress(f"Camera indoor: ({cam_pos[0]:.2f}, {cam_pos[1]:.2f}, {cam_pos[2]:.2f}), "
                   f"look_at=({look_at_target[0]:.2f}, {look_at_target[1]:.2f}, {look_at_target[2]:.2f})")
 
-        with rep.trigger.on_frame(num_frames=NUM_FRAMES):
+        with rep.trigger.on_frame(num_frames=NUM_FRAMES, interval=CAMERA_RANDOMIZE_INTERVAL):
             with camera:
                 rep.modify.pose(position=cam_pos, look_at=look_at_target)
     else:
@@ -259,7 +260,7 @@ def _configure_camera_trigger(camera, scene_config, cam_pos, look_at_target):
         camera_pos_dist = orbit_distribution(scene_positions)
         _progress(f"Camera orbit: {len(scene_positions)} positions")
 
-        with rep.trigger.on_frame(num_frames=NUM_FRAMES):
+        with rep.trigger.on_frame(num_frames=NUM_FRAMES, interval=CAMERA_RANDOMIZE_INTERVAL):
             with camera:
                 rep.modify.pose(position=camera_pos_dist, look_at=look_at_target)
 

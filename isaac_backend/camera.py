@@ -201,19 +201,22 @@ def _compute_scene_radius(hazard_zones=None, entity_positions=None):
 
 def positions_for_angles(angle_hints, hazard_zones=None,
                           entity_positions=None, worker_positions=None,
-                          mode="indoor"):
+                          mode="indoor", num_positions=1):
     """Return camera positions for the given angle hints.
 
-    mode="indoor" — single fixed position inside the warehouse.
-    mode="orbit" — multiple positions on a spherical shell around the scene.
+    mode="indoor" — fixed positions inside the warehouse.
+    mode="orbit" — positions on a spherical shell around the scene.
     """
     if mode == "indoor":
-        pos = pick_indoor_position(
-            angle_hints, hazard_zones=hazard_zones,
-            entity_positions=entity_positions,
-            worker_positions=worker_positions,
-        )
-        return [pos]
+        positions = []
+        for _ in range(num_positions):
+            pos = pick_indoor_position(
+                angle_hints, hazard_zones=hazard_zones,
+                entity_positions=entity_positions,
+                worker_positions=worker_positions,
+            )
+            positions.append(pos)
+        return positions
 
     radius_min, radius_max = _compute_scene_radius(hazard_zones, entity_positions)
 
