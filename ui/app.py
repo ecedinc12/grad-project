@@ -369,7 +369,7 @@ def build_ui() -> Tuple[gr.Blocks, gr.themes.Soft]:
                     lines=22,
                     max_lines=30,
                     interactive=False,
-                    buttons=["copy"],
+                    show_copy_button=True,
                 )
 
         gr.Markdown("---")
