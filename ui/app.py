@@ -20,9 +20,6 @@ load_dotenv()
 BACKEND_URL = os.environ.get("BACKEND_URL", "").rstrip("/")
 API_KEY = os.environ.get("DROPLET_API_KEY", "")
 
-# BACKEND_URL yoksa mock mod
-USE_MOCK = not BACKEND_URL or os.environ.get("GRADIO_MOCK", "").strip().lower() in ("1", "true", "yes")
-
 PRESETS: dict[str, str] = {
     "PPE İhlali": (
         "İşçi tehlike bölgesinde baret ve yelek olmadan; forklift arka planda."
@@ -136,11 +133,8 @@ def _auth_headers() -> dict[str, str]:
     return {}
 
 
-def _fetch_frames_after_run(log: Optional[List[str]] = None) -> List[Image.Image]:
-    """Backend'den kareleri indir, PIL.Image listesi döndür.
-
-    Hatalar hem print hem de log listesine yazılır (Gradio textarea'da görünür).
-    """
+def _fetch_frames_after_run(base_url: str, log: Optional[List[str]] = None) -> List[Image.Image]:
+    """Backend'den kareleri indir, PIL.Image listesi döndür."""
     def _err(msg: str) -> None:
         print(msg)
         if log is not None:
@@ -148,7 +142,7 @@ def _fetch_frames_after_run(log: Optional[List[str]] = None) -> List[Image.Image
 
     try:
         with httpx.Client(timeout=30) as client:
-            resp = client.get(f"{BACKEND_URL}/frames", headers=_auth_headers())
+            resp = client.get(f"{base_url}/frames", headers=_auth_headers())
             resp.raise_for_status()
             data = resp.json()
             names: List[str] = data.get("frames", [])
@@ -160,7 +154,7 @@ def _fetch_frames_after_run(log: Optional[List[str]] = None) -> List[Image.Image
         images: List[Image.Image] = []
         with httpx.Client(timeout=httpx.Timeout(60.0, connect=10.0)) as client:
             for name in names:
-                url = f"{BACKEND_URL}/frame/{name}"
+                url = f"{base_url}/frame/{name}"
                 try:
                     img_resp = client.get(url, headers=_auth_headers())
                     img_resp.raise_for_status()
@@ -176,11 +170,11 @@ def _fetch_frames_after_run(log: Optional[List[str]] = None) -> List[Image.Image
         return []
 
 
-def _download_video() -> Optional[str]:
+def _download_video(base_url: str) -> Optional[str]:
     """output.mp4'ü geçici dosyaya indir, yolunu döndür."""
     try:
         with httpx.Client(timeout=60) as client:
-            resp = client.get(f"{BACKEND_URL}/video", headers=_auth_headers())
+            resp = client.get(f"{base_url}/video", headers=_auth_headers())
             if resp.status_code == 404:
                 return None
             resp.raise_for_status()
@@ -192,11 +186,11 @@ def _download_video() -> Optional[str]:
         return None
 
 
-def _download_archive() -> Optional[str]:
+def _download_archive(base_url: str) -> Optional[str]:
     """En son tar.gz arşivini geçici dosyaya indir, yolunu döndür."""
     try:
         with httpx.Client(timeout=180) as client:
-            resp = client.get(f"{BACKEND_URL}/archive", headers=_auth_headers())
+            resp = client.get(f"{base_url}/archive", headers=_auth_headers())
             if resp.status_code == 404:
                 return None
             resp.raise_for_status()
@@ -219,7 +213,8 @@ def _download_archive() -> Optional[str]:
 Result = Tuple[str, List[Image.Image], Optional[str], Optional[str]]
 
 
-def run_pipeline(prompt: str) -> Generator[Result, None, None]:
+def run_pipeline(prompt: str, backend_url: str) -> Generator[Result, None, None]:
+    base_url = (backend_url or "").strip().rstrip("/")
     log: List[str] = []
     _frames: List[Image.Image] = []
     _video: Optional[str] = None
@@ -233,25 +228,25 @@ def run_pipeline(prompt: str) -> Generator[Result, None, None]:
         yield emit()
         return
 
-    # --- Mock mod ---
-    if USE_MOCK:
+    # --- Mock mod (URL boşsa) ---
+    if not base_url or os.environ.get("GRADIO_MOCK", "").strip().lower() in ("1", "true", "yes"):
         for i in range(1, 6):
-            log.append(f"[MOCK] Adım {i}/5 — pipeline bağlantısı yok (BACKEND_URL tanımlı değil)\n")
+            log.append(f"[MOCK] Adım {i}/5 — pipeline bağlantısı yok (Backend URL boş)\n")
             time.sleep(0.15)
             yield emit()
-        log.append("[MOCK] Gerçek akış için Droplet .env dosyasına BACKEND_URL ekleyin.\n")
+        log.append("[MOCK] Gerçek akış için üstteki Backend URL alanını doldurun.\n")
         yield emit()
         return
 
     # --- Gerçek akış: SSE ---
-    log.append(f"[*] Backend bağlantısı: {BACKEND_URL}\n")
+    log.append(f"[*] Backend bağlantısı: {base_url}\n")
     yield emit()
 
     try:
         with httpx.Client(timeout=httpx.Timeout(None, connect=10.0)) as client:
             with client.stream(
                 "POST",
-                f"{BACKEND_URL}/generate",
+                f"{base_url}/generate",
                 json={"prompt": prompt.strip()},
                 headers={**_auth_headers(), "Accept": "text/event-stream"},
             ) as resp:
@@ -288,7 +283,7 @@ def run_pipeline(prompt: str) -> Generator[Result, None, None]:
                     yield emit()
 
     except httpx.ConnectError:
-        log.append(f"\n[ERROR] Backend'e bağlanılamadı: {BACKEND_URL}\n"
+        log.append(f"\n[ERROR] Backend'e bağlanılamadı: {base_url}\n"
                    "        RunPod pod'unun açık ve HTTP service'in etkin olduğundan emin olun.\n")
         yield emit()
         return
@@ -300,18 +295,18 @@ def run_pipeline(prompt: str) -> Generator[Result, None, None]:
     # --- Pipeline bitti: medyayı çek (SSE bağlantısı kapalı, RunPod hazır) ---
     log.append("[*] Kareler alınıyor...\n")
     yield emit()
-    _frames = _fetch_frames_after_run(log)
+    _frames = _fetch_frames_after_run(base_url, log)
     log.append(f"[*] {len(_frames)} kare alındı.\n")
     yield emit()
 
     log.append("[*] Video indiriliyor...\n")
     yield emit()
-    _video = _download_video()
+    _video = _download_video(base_url)
     log.append(f"[*] Video {'alındı' if _video else 'bulunamadı'}.\n")
 
     log.append("[*] Arşiv indiriliyor...\n")
     yield emit()
-    _archive = _download_archive()
+    _archive = _download_archive(base_url)
 
     log.append(f"[✓] {len(_frames)} kare, video={'var' if _video else 'yok'}, "
                f"arşiv={'var' if _archive else 'yok'}\n")
@@ -333,6 +328,14 @@ def build_ui() -> Tuple[gr.Blocks, gr.themes.Soft]:
         fill_width=True,
     ) as demo:
         gr.Markdown("### Endüstriyel Güvenlik — SDG Pipeline")
+
+        with gr.Row():
+            backend_url_tb = gr.Textbox(
+                label="Backend URL (RunPod)",
+                placeholder="https://<pod-id>-8000.proxy.runpod.net",
+                value=BACKEND_URL,
+                scale=1,
+            )
 
         with gr.Row(elem_id="dt-dashboard-row", equal_height=False):
             with gr.Column(scale=4, min_width=260, elem_id="dt-sidebar-col"):
@@ -381,12 +384,6 @@ def build_ui() -> Tuple[gr.Blocks, gr.themes.Soft]:
                     interactive=False,
                 )
 
-        if USE_MOCK:
-            gr.Markdown(
-                "⚠️ *Mock mod:* `BACKEND_URL` tanımlı değil. "
-                "Gerçek pipeline için Droplet `.env` dosyasına `BACKEND_URL` ekleyin."
-            )
-
         preset_dd.change(
             fn=lambda k: PRESETS.get(k, ""),
             inputs=preset_dd,
@@ -395,7 +392,7 @@ def build_ui() -> Tuple[gr.Blocks, gr.themes.Soft]:
 
         run_btn.click(
             fn=run_pipeline,
-            inputs=scene_tb,
+            inputs=[scene_tb, backend_url_tb],
             outputs=[log_tb, gallery, video, archive_fp],
         )
 
