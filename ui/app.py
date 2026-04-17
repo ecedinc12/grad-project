@@ -369,7 +369,7 @@ def build_ui() -> Tuple[gr.Blocks, gr.themes.Soft]:
         with gr.Tabs():
             with gr.Tab("Görsel Galeri"):
                 gallery = gr.Gallery(
-                    label="İlk 12 RGB kare",
+                    label="Rastgele 12 RGB kare",
                     columns=4,
                     rows=3,
                     height=420,

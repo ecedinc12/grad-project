@@ -71,8 +71,11 @@ def _verify_key(request: Request) -> None:
 # Helpers
 # ---------------------------------------------------------------------------
 def _rgb_frames(limit: int = 12) -> list[str]:
+    import random
     paths = sorted(glob.glob(str(DATASET_DIR / "rgb_*.png")))
-    return [p for p in paths[:limit]]
+    if len(paths) <= limit:
+        return paths
+    return sorted(random.sample(paths, limit))
 
 
 def _newest_archive() -> Optional[Path]:
