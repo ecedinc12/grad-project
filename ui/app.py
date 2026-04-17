@@ -1,24 +1,25 @@
-
 from __future__ import annotations
 
-import glob
 import os
-import subprocess
+import tempfile
 import time
 from pathlib import Path
-from typing import Generator, Iterable, List, Optional, Tuple
+from typing import Generator, List, Optional, Tuple
 
 import gradio as gr
+import httpx
+from dotenv import load_dotenv
 
-# -----------------------------------------------------------------------------
-# Paths & presets
-# -----------------------------------------------------------------------------
-PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-RUN_SCRIPT = os.path.join(PROJECT_ROOT, "scripts", "run_pipeline.sh")
-DATASET_DIR = "/tmp/dataset"
-RGB_GLOB = os.path.join(DATASET_DIR, "rgb_*.png")
-VIDEO_PATH = os.path.join(DATASET_DIR, "output.mp4")
-ARCHIVE_GLOB = os.path.join(PROJECT_ROOT, "dataset_*.tar.gz")
+load_dotenv()
+
+# ---------------------------------------------------------------------------
+# Config
+# ---------------------------------------------------------------------------
+BACKEND_URL = os.environ.get("BACKEND_URL", "").rstrip("/")
+API_KEY = os.environ.get("DROPLET_API_KEY", "")
+
+# BACKEND_URL yoksa mock mod
+USE_MOCK = not BACKEND_URL or os.environ.get("GRADIO_MOCK", "").strip().lower() in ("1", "true", "yes")
 
 PRESETS: dict[str, str] = {
     "PPE İhlali": (
@@ -36,23 +37,7 @@ PRESETS: dict[str, str] = {
     "Özel (aşağıdaki metni düzenleyin)": "",
 }
 
-
-def _use_mock_pipeline() -> bool:
-    """RunPod: /workspace genelde vardır. Yerel geliştirme: mock akış."""
-    m = os.environ.get("GRADIO_MOCK", "").strip().lower()
-    if m in ("1", "true", "yes"):
-        return True
-    if m in ("0", "false", "no"):
-        return False
-    return not os.path.isdir("/workspace")
-
-
-USE_MOCK_PIPELINE = _use_mock_pipeline()
-
-# Industrial / engineering dashboard — tam genişlik + responsive
-# fill_width=True + aşağıdaki kurallar: içerik tüm ekrana yayılır (yan siyah şerit kalkar).
 CUSTOM_CSS = """
-/* Viewport boyunca tam genişlik (Gradio’nun iç sınırlayıcıları gevşetilir) */
 .gradio-container {
     max-width: none !important;
     width: 100% !important;
@@ -62,7 +47,6 @@ CUSTOM_CSS = """
     padding-left: clamp(0.75rem, 2vw, 1.5rem) !important;
     padding-right: clamp(0.75rem, 2vw, 1.5rem) !important;
 }
-/* Üst seviye uygulama kabı — tam genişlik */
 gradio-app {
     width: 100% !important;
     max-width: 100% !important;
@@ -70,7 +54,6 @@ gradio-app {
 footer { display: none !important; }
 .gr-panel { border-radius: 10px !important; }
 
-/* Geniş ekranda iki sütun yan yana; oran korunur, üst sınır yok */
 @media (min-width: 901px) {
     #dt-dashboard-row {
         display: flex !important;
@@ -91,7 +74,6 @@ footer { display: none !important; }
     }
 }
 
-/* Tablet/telefon: tek sütun */
 @media (max-width: 900px) {
     #dt-dashboard-row {
         flex-direction: column !important;
@@ -108,7 +90,6 @@ footer { display: none !important; }
     }
 }
 
-/* Çok dar ekran: başlık ve boşluk */
 @media (max-width: 480px) {
     .gradio-container h3 { font-size: 1.05rem !important; line-height: 1.35 !important; }
     #dt-log-col textarea {
@@ -117,7 +98,6 @@ footer { display: none !important; }
     }
 }
 
-/* Galeri: sütun sayısını ekrana göre sıkıştır; DOM farklıysa yatay kaydırma */
 @media (max-width: 768px) {
     #dt-gallery {
         min-height: 280px !important;
@@ -136,7 +116,6 @@ footer { display: none !important; }
     }
 }
 
-/* Video ve dosya: taşma yok */
 #dt-video video,
 #dt-video .container {
     width: 100% !important;
@@ -146,101 +125,163 @@ footer { display: none !important; }
 """
 
 
-def _sorted_rgb_frames(limit: int = 12) -> List[str]:
-    paths = glob.glob(RGB_GLOB)
-    paths.sort()
-    return paths[:limit]
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+def _auth_headers() -> dict[str, str]:
+    if API_KEY:
+        return {"Authorization": f"Bearer {API_KEY}"}
+    return {}
 
 
-def _newest_archive() -> Optional[str]:
-    archives = glob.glob(ARCHIVE_GLOB)
-    if not archives:
+def _fetch_frames_after_run() -> List[str]:
+    """Backend'den kare URL'lerini çek."""
+    try:
+        with httpx.Client(timeout=10) as client:
+            resp = client.get(f"{BACKEND_URL}/frames", headers=_auth_headers())
+            resp.raise_for_status()
+            return resp.json().get("frames", [])
+    except Exception:
+        return []
+
+
+def _download_video() -> Optional[str]:
+    """output.mp4'ü geçici dosyaya indir, yolunu döndür."""
+    try:
+        with httpx.Client(timeout=60) as client:
+            resp = client.get(f"{BACKEND_URL}/video", headers=_auth_headers())
+            if resp.status_code == 404:
+                return None
+            resp.raise_for_status()
+            tmp = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False)
+            tmp.write(resp.content)
+            tmp.close()
+            return tmp.name
+    except Exception:
         return None
-    archives.sort(key=lambda p: os.path.getmtime(p))
-    return archives[-1]
 
 
-def _video_if_exists() -> Optional[str]:
-    return VIDEO_PATH if os.path.isfile(VIDEO_PATH) else None
+def _download_archive() -> Optional[str]:
+    """En son tar.gz arşivini geçici dosyaya indir, yolunu döndür."""
+    try:
+        with httpx.Client(timeout=120) as client:
+            resp = client.get(f"{BACKEND_URL}/archive", headers=_auth_headers())
+            if resp.status_code == 404:
+                return None
+            resp.raise_for_status()
+            suffix = ".tar.gz"
+            cd = resp.headers.get("content-disposition", "")
+            if "filename=" in cd:
+                suffix = "." + cd.split("filename=")[-1].strip('"').split(".")[-1]
+            tmp = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
+            tmp.write(resp.content)
+            tmp.close()
+            return tmp.name
+    except Exception:
+        return None
 
 
-def _stream_process_output(proc: subprocess.Popen[str]) -> Iterable[str]:
-    assert proc.stdout is not None
-    for line in iter(proc.stdout.readline, ""):
-        yield line
-    proc.wait()
-    if proc.returncode != 0:
-        yield f"\n[process exited with code {proc.returncode}]\n"
+# ---------------------------------------------------------------------------
+# Pipeline runner
+# ---------------------------------------------------------------------------
+Result = Tuple[str, List[str], Optional[str], Optional[str]]
 
 
-def run_pipeline(
-    prompt: str,
-) -> Generator[Tuple[str, List[str], Optional[str], Optional[str]], None, None]:
-    """
-    Logları satır satır biriktirip yield eder; bittiğinde galeri / video / arşiv yollarını günceller.
-    """
+def run_pipeline(prompt: str) -> Generator[Result, None, None]:
     log: List[str] = []
 
-    def emit(
-        chunk: str,
-    ) -> Tuple[str, List[str], Optional[str], Optional[str]]:
-        return "".join(log), _sorted_rgb_frames(), _video_if_exists(), _newest_archive()
+    def emit(extra: str = "") -> Result:
+        return "".join(log), [], None, None
 
     if not (prompt or "").strip():
-        log.append("Hata: Serbest sahne tanımı boş. Metin girin veya bir senaryo seçin.\n")
-        yield emit("")
+        log.append("Hata: Sahne tanımı boş. Metin girin veya bir senaryo seçin.\n")
+        yield emit()
         return
 
-    # --- Mock: RunPod dışı / GRADIO_MOCK=1 — gerçek subprocess yok ---
-    if USE_MOCK_PIPELINE:
+    # --- Mock mod ---
+    if USE_MOCK:
         for i in range(1, 6):
-            log.append(f"[MOCK] Log test {i}... pipeline çalışmıyor (USE_MOCK_PIPELINE=True)\n")
+            log.append(f"[MOCK] Adım {i}/5 — pipeline bağlantısı yok (BACKEND_URL tanımlı değil)\n")
             time.sleep(0.15)
-            yield emit("")
-        log.append("[MOCK] Tamamlandı. RunPod (/workspace) veya GRADIO_MOCK=0 ile gerçek akış.\n")
-        yield emit("")
+            yield emit()
+        log.append("[MOCK] Gerçek akış için Droplet .env dosyasına BACKEND_URL ekleyin.\n")
+        yield emit()
         return
 
-    # --- Gerçek çalıştırma ---
-    cmd = ["/bin/bash", RUN_SCRIPT, prompt.strip()]
-    # Yerelde subprocess yerine sahte log için: üstteki `if USE_MOCK_PIPELINE` bloğunu True kabul edin
-    # veya `export GRADIO_MOCK=1` kullanın.
-    proc: Optional[subprocess.Popen[str]] = None
+    # --- Gerçek akış: SSE ---
+    log.append(f"[*] Backend bağlantısı: {BACKEND_URL}\n")
+    yield emit()
+
     try:
-        proc = subprocess.Popen(
-            cmd,
-            cwd=PROJECT_ROOT,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
-            env={**os.environ, "PYTHONUNBUFFERED": "1"},
-        )
-    except OSError as e:
-        log.append(f"Pipeline başlatılamadı ({cmd[0]} {RUN_SCRIPT}): {e}\n")
-        yield emit("")
+        with httpx.Client(timeout=httpx.Timeout(None, connect=10.0)) as client:
+            with client.stream(
+                "POST",
+                f"{BACKEND_URL}/generate",
+                json={"prompt": prompt.strip()},
+                headers={**_auth_headers(), "Accept": "text/event-stream"},
+            ) as resp:
+                if resp.status_code == 409:
+                    log.append("[WARN] Pipeline zaten çalışıyor. Lütfen bekleyin.\n")
+                    yield emit()
+                    return
+                if resp.status_code == 401:
+                    log.append("[ERROR] API anahtarı geçersiz (401 Unauthorized).\n")
+                    yield emit()
+                    return
+                resp.raise_for_status()
+
+                done = False
+                for line in resp.iter_lines():
+                    if not line.startswith("data: "):
+                        continue
+                    chunk = line[6:]
+                    if chunk.startswith("[DONE]"):
+                        done = True
+                        ok = "ERROR" not in chunk
+                        log.append(
+                            "\n[✓] Pipeline tamamlandı.\n" if ok
+                            else f"\n[!] Pipeline hatayla bitti: {chunk}\n"
+                        )
+                        yield emit()
+                        break
+                    if chunk.startswith("[FATAL]"):
+                        log.append(f"\n[FATAL] {chunk}\n")
+                        yield emit()
+                        return
+                    log.append(chunk + "\n")
+                    yield emit()
+
+    except httpx.ConnectError:
+        log.append(f"\n[ERROR] Backend'e bağlanılamadı: {BACKEND_URL}\n"
+                   "        RunPod pod'unun açık ve HTTP service'in etkin olduğundan emin olun.\n")
+        yield emit()
+        return
+    except Exception as exc:
+        log.append(f"\n[ERROR] {exc}\n")
+        yield emit()
         return
 
-    assert proc is not None
-    p = proc
-    try:
-        for line in _stream_process_output(p):
-            log.append(line)
-            yield emit("")
-    except Exception as e:  # noqa: BLE001 — UI'da göstermek için
-        log.append(f"\n[runner error] {e}\n")
-        yield emit("")
-    finally:
-        if p.poll() is None:
-            p.terminate()
-            try:
-                p.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                p.kill()
+    # --- Pipeline bitti: medya indir / URL al ---
+    log.append("[*] Kareler alınıyor...\n")
+    yield emit()
+    frames = _fetch_frames_after_run()
 
-    yield emit("")
+    log.append("[*] Video indiriliyor...\n")
+    yield emit()
+    video_path = _download_video()
+
+    log.append("[*] Arşiv indiriliyor...\n")
+    yield emit()
+    archive_path = _download_archive()
+
+    log.append(f"[✓] {len(frames)} kare, video={'var' if video_path else 'yok'}, "
+               f"arşiv={'var' if archive_path else 'yok'}\n")
+    yield "".join(log), frames, video_path, archive_path
 
 
+# ---------------------------------------------------------------------------
+# Gradio UI
+# ---------------------------------------------------------------------------
 def build_ui() -> Tuple[gr.Blocks, gr.themes.Soft]:
     theme = gr.themes.Soft(
         primary_hue="slate",
@@ -253,6 +294,7 @@ def build_ui() -> Tuple[gr.Blocks, gr.themes.Soft]:
         fill_width=True,
     ) as demo:
         gr.Markdown("### Endüstriyel Güvenlik — SDG Pipeline")
+
         with gr.Row(elem_id="dt-dashboard-row", equal_height=False):
             with gr.Column(scale=4, min_width=260, elem_id="dt-sidebar-col"):
                 gr.Markdown("#### Kontrol Merkezi")
@@ -283,7 +325,7 @@ def build_ui() -> Tuple[gr.Blocks, gr.themes.Soft]:
         with gr.Tabs():
             with gr.Tab("Görsel Galeri"):
                 gallery = gr.Gallery(
-                    label="İlk 12 RGB kare (`/tmp/dataset/rgb_*.png`)",
+                    label="İlk 12 RGB kare",
                     columns=4,
                     rows=3,
                     height=420,
@@ -292,13 +334,19 @@ def build_ui() -> Tuple[gr.Blocks, gr.themes.Soft]:
                 )
             with gr.Tab("Video & İndirme"):
                 video = gr.Video(
-                    label="Özet video (`/tmp/dataset/output.mp4`)",
+                    label="Özet video",
                     elem_id="dt-video",
                 )
                 archive_fp = gr.File(
-                    label="Dataset arşivi (`dataset_*.tar.gz` — proje kökü)",
+                    label="Dataset arşivi (.tar.gz)",
                     interactive=False,
                 )
+
+        if USE_MOCK:
+            gr.Markdown(
+                "⚠️ *Mock mod:* `BACKEND_URL` tanımlı değil. "
+                "Gerçek pipeline için Droplet `.env` dosyasına `BACKEND_URL` ekleyin."
+            )
 
         preset_dd.change(
             fn=lambda k: PRESETS.get(k, ""),
@@ -312,12 +360,6 @@ def build_ui() -> Tuple[gr.Blocks, gr.themes.Soft]:
             outputs=[log_tb, gallery, video, archive_fp],
         )
 
-        if USE_MOCK_PIPELINE:
-            gr.Markdown(
-                "*Mock mod:* `/workspace` yok veya `GRADIO_MOCK=1`. "
-                "Gerçek pipeline için RunPod veya `GRADIO_MOCK=0` kullanın.*"
-            )
-
     return demo, theme
 
 
@@ -326,7 +368,7 @@ if __name__ == "__main__":
     app.launch(
         server_name="0.0.0.0",
         server_port=7860,
-        share=True,
+        share=False,
         theme=ui_theme,
         css=CUSTOM_CSS,
     )
