@@ -3,7 +3,7 @@ import sys
 import json
 import argparse
 import instructor
-from openai import OpenAI
+from google import genai
 from pydantic import ValidationError
 from schemas import SceneConfig, Entity, PPEState, WorkerBehavior, BehaviorCommand, ClutterZone, LayoutParams
 
@@ -38,15 +38,10 @@ def generate_scene_config(prompt: str, output_path: str):
         print("Please export your key: export GEMINI_API_KEY='your_api_key_here'", file=sys.stderr)
         sys.exit(1)
 
-    base_url = os.environ.get("GEMINI_BASE_URL", "https://generativelanguage.googleapis.com/v1beta/openai/")
+    model = os.environ.get("LLM_MODEL", "gemini-2.5-flash")
 
-    # Patch the OpenAI client with Instructor using JSON mode for Gemini compatibility
-    client = instructor.from_openai(
-        OpenAI(api_key=api_key, base_url=base_url),
-        mode=instructor.Mode.JSON
-    )
-    
-    model = os.environ.get("LLM_MODEL", "gemini-2.5-flash") # Or "gemini-2.5-flash-lite" if that is the exact model name
+    genai_client = genai.Client(api_key=api_key)
+    client = instructor.from_genai(genai_client, mode=instructor.Mode.GENAI_STRUCTURED_OUTPUTS)
     
     system_prompt = """
     You are an expert industrial safety simulation configurator.
@@ -124,7 +119,7 @@ def generate_scene_config(prompt: str, output_path: str):
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": prompt},
             ],
-            temperature=0.0
+            config={"temperature": 0.0},
         )
         
         # Ensure directory exists

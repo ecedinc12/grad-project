@@ -13,8 +13,8 @@ class Entity(BaseModel):
 
 class HazardZone(BaseModel):
     name: str = Field(..., description="Zone identifier matching entity.asset_id, e.g. 'forklift_aisle'")
-    bounds_min: tuple[float, float] = Field(..., description="Minimum (x, y) bounds of the zone in meters")
-    bounds_max: tuple[float, float] = Field(..., description="Maximum (x, y) bounds of the zone in meters")
+    bounds_min: list[float] = Field(..., description="Minimum (x, y) bounds of the zone in meters")
+    bounds_max: list[float] = Field(..., description="Maximum (x, y) bounds of the zone in meters")
     danger_level: Literal["warning", "restricted", "critical"] = Field(
         default="warning",
         description="Severity: warning (caution area), restricted (authorized only), critical (lethal hazard)"
@@ -34,8 +34,8 @@ class WorkerBehavior(BaseModel):
 
 class ClutterZone(BaseModel):
     area: str = Field(..., description="Zone name identifier, e.g. 'center_aisle', 'dock_bay'")
-    bounds_min: tuple[float, float] = Field(..., description="Minimum (x, y) bounds of the zone in meters")
-    bounds_max: tuple[float, float] = Field(..., description="Maximum (x, y) bounds of the zone in meters")
+    bounds_min: list[float] = Field(..., description="Minimum (x, y) bounds of the zone in meters")
+    bounds_max: list[float] = Field(..., description="Maximum (x, y) bounds of the zone in meters")
     density: Literal["low", "medium", "high"] = Field(default="medium", description="Clutter density within this zone")
     types: List[str] = Field(default_factory=lambda: ["box", "barrel", "cone", "pallet"], description="Clutter prop types for this zone")
 
@@ -46,8 +46,8 @@ class LayoutParams(BaseModel):
     rack_rows: int = Field(default=5, description="Number of rack rows (1-12)")
     rack_cols: int = Field(default=1, description="Number of rack columns (1-3)")
     aisle_width: float = Field(default=2.0, description="Distance between rack rows in meters (1.0-5.0)")
-    bounds_min: tuple[float, float] = Field(default=(-5.0, -5.0), description="Minimum (x, y) layout footprint in meters")
-    bounds_max: tuple[float, float] = Field(default=(5.0, 5.0), description="Maximum (x, y) layout footprint in meters")
+    bounds_min: list[float] = Field(default=(-5.0, -5.0), description="Minimum (x, y) layout footprint in meters")
+    bounds_max: list[float] = Field(default=(5.0, 5.0), description="Maximum (x, y) layout footprint in meters")
     clutter_density: Literal["low", "medium", "high"] = Field(
         default="medium", description="Global clutter density: low=5 props, medium=12 props, high=20 props"
     )
@@ -71,7 +71,7 @@ class SceneConfig(BaseModel):
         default="indoor",
         description="Camera placement: 'indoor' = single fixed position inside warehouse, 'orbit' = spherical orbit (legacy)"
     )
-    camera_position: Optional[tuple[float, float, float]] = Field(
+    camera_position: Optional[list[float]] = Field(
         default=None,
         description="Explicit camera (x, y, z) in meters. If None, auto-derived from scene. x,y clamped to warehouse interior."
     )
