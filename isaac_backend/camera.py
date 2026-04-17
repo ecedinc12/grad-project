@@ -19,20 +19,20 @@ import math
 import random
 import omni.replicator.core as rep
 
-WAREHOUSE_INTERIOR_X = (-7.0, 7.0)
-WAREHOUSE_INTERIOR_Y = (-7.0, 7.0)
+WAREHOUSE_INTERIOR_X = (-12.0, 12.0)
+WAREHOUSE_INTERIOR_Y = (-12.0, 12.0)
 INTERIOR_MARGIN = 0.5
-CEILING_Z = 6.0
+CEILING_Z = 12.0
 FLOOR_Z = 0.3
 MIN_INDOOR_HEIGHT = 3.0
 
 ANGLE_HEIGHT_MAP = {
-    "overhead":   (5.0, 6.0),
-    "high_angle": (4.0, 6.0),
-    "eye_level":  (2.5, 4.0),
-    "low_angle":  (2.0, 3.5),
+    "overhead":   (9.0, 11.5),
+    "high_angle": (7.0, 11.0),
+    "eye_level":  (2.5, 6.0),
+    "low_angle":  (2.0, 4.0),
 }
-DEFAULT_HEIGHT_RANGE = (2.5, 6.0)
+DEFAULT_HEIGHT_RANGE = (2.5, 11.0)
 
 ANGLE_ELEVATION_MAP = {
     "overhead":   (55, 70),

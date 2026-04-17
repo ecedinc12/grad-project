@@ -431,7 +431,9 @@ def main():
     _configure_sdg_settings()
 
     _progress("Loading warehouse zone...")
-    rep.create.from_usd(asset_library["zone"])
+    warehouse_prim = rep.create.from_usd(asset_library["zone"])
+    with warehouse_prim:
+        rep.modify.pose(scale=(1.7, 1.7, 2.0))
     _tick(5)
 
     _progress("Clearing semantics and spawning warehouse layout...")
@@ -522,6 +524,10 @@ def main():
         visible_bounds=visible_bounds,
     )
     _progress(f"Command injection: {injected} succeeded, {inj_failed} failed")
+
+    _progress("Final semantic sync (60 steps)...")
+    for _ in range(60):
+        world.step(render=True)
 
     _progress("Initializing CocoWriter...")
     writer = _setup_coco_writer()

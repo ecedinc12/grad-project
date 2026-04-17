@@ -14,7 +14,7 @@ Creates invisible USD volumes with hazard_zone semantics for zone detection.
 
 import random
 import omni.replicator.core as rep
-from pxr import UsdGeom, Gf, Sdf
+from pxr import UsdGeom, Gf, Sdf, UsdShade
 import omni.usd
 
 
@@ -140,7 +140,14 @@ def spawn_hazard_zones(hazard_zones, stage):
         xf.AddTranslateOp().Set(Gf.Vec3d(cx, cy, 0.5))
         xf.AddScaleOp().Set(Gf.Vec3d(sx, sy, 1.0))
 
-        UsdGeom.Imageable(prim).MakeInvisible()
+        # Make them visible to the renderer but effectively invisible to RGB
+        # by using a very low opacity. This ensures CocoWriter sees them.
+        color = (1.0, 0.0, 0.0) if danger == "critical" else (1.0, 1.0, 0.0)
+        
+        # Apply a basic display color with low opacity
+        geom = UsdGeom.Cube(prim)
+        geom.GetDisplayColorAttr().Set([Gf.Vec3f(*color)])
+        geom.GetDisplayOpacityAttr().Set([0.005])
 
         from pxr import Semantics
         sem_api = Semantics.SemanticsAPI.Apply(prim, "class")
