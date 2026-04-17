@@ -23,19 +23,6 @@ HAZARD_LABELS = {"hazard_zone_warning", "hazard_zone_restricted", "hazard_zone_c
 
 def _clear_semantic(prim):
     """Clear both old and new semantic attribute schemas."""
-    # Check if we or ANY parent has a valid label
-    curr = prim
-    while curr and curr.GetPath() != "/":
-        for attr_name in ("semantics:labels:class", "semantic:Semantics:params:semanticData", "semantic:class:params:semanticData"):
-            attr = curr.GetAttribute(attr_name)
-            if attr and attr.HasAuthoredValue():
-                val = attr.Get()
-                if isinstance(val, (list, tuple)) and len(val) > 0:
-                    val = str(val[0])
-                if str(val).lower() in VALID_SEMANTICS:
-                    return # Keep EVERYTHING under this branch
-        curr = curr.GetParent()
-
     for attr_name in (
         "semantics:labels:class",
         "semantic:Semantics:params:semanticData",

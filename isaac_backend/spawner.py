@@ -61,9 +61,8 @@ def spawn_at_fixed_position(asset_path, position, rotation=(0, 0, 0), semantic_c
     xf.AddRotateXYZOp().Set(Gf.Vec3d(float(rotation[0]), float(rotation[1]), float(rotation[2])))
 
     if semantic_class:
-        from pxr import Semantics
-        sem_api = Semantics.SemanticsAPI.Apply(prim, "class")
-        sem_api.CreateSemanticDataAttr().Set(semantic_class)
+        from isaac_backend.semantics import apply_usd_semantics
+        apply_usd_semantics(prim, semantic_class)
 
     spawn_pos = (float(position[0]), float(position[1]))
     print(f"[INFO] Fixed-spawn '{basename}' -> {prim_path} at ({position[0]:.2f}, {position[1]:.2f}, {position[2]:.2f}) sem='{semantic_class}'")
@@ -178,8 +177,7 @@ def spawn_hazard_zones(hazard_zones, stage):
             
         UsdShade.MaterialBindingAPI.Apply(prim).Bind(mat)
 
-        from pxr import Semantics
-        sem_api = Semantics.SemanticsAPI.Apply(prim, "class")
-        sem_api.CreateSemanticDataAttr().Set(f"hazard_zone_{danger}")
+        from isaac_backend.semantics import apply_usd_semantics
+        apply_usd_semantics(prim, f"hazard_zone_{danger}")
 
         print(f"[INFO] Hazard zone '{name}' at ({cx:.1f}, {cy:.1f}) size={sx:.1f}x{sy:.1f} danger={danger}")

@@ -436,8 +436,7 @@ def main():
         rep.modify.pose(scale=(1.7, 1.7, 2.0))
     _tick(5)
 
-    _progress("Clearing semantics and spawning warehouse layout...")
-    clear_unwanted_warehouse_semantics(stage)
+    _progress("Spawning warehouse layout...")
     spawn_bounds_min, spawn_bounds_max = spawn_warehouse_layout(scene_config, asset_library, stage)
     _tick(10)
 
@@ -521,6 +520,9 @@ def main():
         visible_bounds=visible_bounds,
     )
     _progress(f"Command injection: {injected} succeeded, {inj_failed} failed")
+
+    _progress("Clearing unwanted semantics before generation...")
+    clear_unwanted_warehouse_semantics(stage)
 
     _progress("Final semantic sync (60 steps)...")
     for _ in range(60):
