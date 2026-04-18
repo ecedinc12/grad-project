@@ -88,11 +88,10 @@ import omni.replicator.core as rep
 import omni.usd
 import omni.timeline
 from isaacsim.core.api import World
-from pxr import Usd, UsdGeom, Sdf
 
 from isaac_backend.config_loader import load_config
 from isaac_backend.camera import (
-    positions_for_angles, pick_indoor_position, clamp_to_warehouse,
+    positions_for_angles, clamp_to_warehouse,
     pick_look_at_target, pick_camera_placement, compute_ground_visible_area,
     fit_camera_to_entities,
 )
@@ -163,50 +162,6 @@ def intersect_bounds(spawn_min, spawn_max, visible_bounds):
     )
 
 
-def compute_scene_centroid(stage, known_positions=None):
-    """Compute average position of scene entities and collect positions for camera framing.
-
-    known_positions is an optional list of (x, y) tuples for entities whose
-    USD positions may not be resolved yet (e.g. Replicator-randomized prims).
-
-    Returns ((cx, cy, cz), entity_positions, worker_positions).
-    """
-    known_positions = known_positions or []
-    xs, ys, zs = [], [], []
-    entity_positions, worker_positions = [], []
-
-    for px, py in known_positions:
-        xs.append(px)
-        ys.append(py)
-        zs.append(0.0)
-        entity_positions.append((px, py))
-
-    for prim in stage.Traverse():
-        path = str(prim.GetPath())
-        if not (path.startswith("/World/Characters/") or path.startswith("/World/Entities/") or path.startswith("/Replicator/")):
-            continue
-        xf = UsdGeom.Xformable(prim)
-        if not xf:
-            continue
-        mat = xf.ComputeLocalToWorldTransform(Usd.TimeCode.Default())
-        pos = mat.ExtractTranslation()
-        dup = any(abs(pos[0] - ex) < 0.1 and abs(pos[1] - ey) < 0.1 for ex, ey in known_positions)
-        if dup:
-            continue
-        xs.append(pos[0])
-        ys.append(pos[1])
-        zs.append(pos[2])
-        entity_positions.append((pos[0], pos[1]))
-        if path.startswith("/World/Characters/"):
-            worker_positions.append((pos[0], pos[1]))
-
-    if not xs:
-        _progress("[WARN] No entities for centroid, defaulting to (0, 0, 1.2)")
-        return (0.0, 0.0, 1.2), entity_positions, worker_positions
-    cx, cy, cz = sum(xs) / len(xs), sum(ys) / len(ys), sum(zs) / len(zs)
-    _progress(f"Scene centroid: ({cx:.2f}, {cy:.2f}, {cz:.2f}) from {len(xs)} entities")
-    return (cx, cy, cz), entity_positions, worker_positions
-
 
 def _configure_sdg_settings():
     """Apply recommended settings for synthetic data generation."""
@@ -233,10 +188,11 @@ def _setup_coco_writer():
     return writer
 
 
-def _configure_camera_trigger(camera, scene_config, cam_pos, look_at_target):
+def _configure_camera_trigger(camera, scene_config, cam_pos, look_at_target, focal_length=None):
     """Set up the frame trigger with either fixed indoor position or orbit distribution.
 
     cam_pos and look_at_target are pre-computed from pick_camera_placement().
+    focal_length is the final computed focal length (mm) to apply to the camera prim.
     """
     angle_hints = scene_config.get("camera_angles", [])
     hazard_zones = scene_config.get("hazard_zones", [])
@@ -244,11 +200,14 @@ def _configure_camera_trigger(camera, scene_config, cam_pos, look_at_target):
 
     if camera_mode == "indoor":
         _progress(f"Camera indoor: ({cam_pos[0]:.2f}, {cam_pos[1]:.2f}, {cam_pos[2]:.2f}), "
-                  f"look_at=({look_at_target[0]:.2f}, {look_at_target[1]:.2f}, {look_at_target[2]:.2f})")
+                  f"look_at=({look_at_target[0]:.2f}, {look_at_target[1]:.2f}, {look_at_target[2]:.2f})"
+                  f" focal_length={focal_length}mm")
 
         with rep.trigger.on_frame(num_frames=NUM_FRAMES, interval=CAMERA_RANDOMIZE_INTERVAL):
             with camera:
                 rep.modify.pose(position=cam_pos, look_at=look_at_target)
+                if focal_length is not None:
+                    rep.modify.attribute("focalLength", focal_length)
     else:
         scene_positions = positions_for_angles(
             angle_hints, hazard_zones=hazard_zones,
@@ -493,17 +452,11 @@ def main():
 
     _progress("Adjusting camera look_at to center on all spawned entities...")
     all_known_positions = entity_known_positions + [(wx, wy) for _, wx, wy in _worker_known_positions]
-    _, post_entity_positions, post_worker_positions = compute_scene_centroid(
-        stage, known_positions=all_known_positions
+    look_at_target = pick_look_at_target(
+        entity_known_positions,
+        [(wx, wy) for _, wx, wy in _worker_known_positions],
+        hazard_zones,
     )
-    cam_pos, _ = pick_indoor_position(
-        scene_config.get("camera_angles", []),
-        hazard_zones=hazard_zones,
-        entity_positions=post_entity_positions,
-        worker_positions=post_worker_positions,
-        preferred_mount=chosen_mount,
-    )
-    look_at_target = pick_look_at_target(post_entity_positions, post_worker_positions, hazard_zones)
     cam_pos, focal_length = fit_camera_to_entities(
         cam_pos, look_at_target, all_known_positions, focal_length=focal_length
     )
@@ -537,7 +490,7 @@ def main():
     writer.attach([render_product])
 
     _progress("Configuring camera trigger...")
-    _configure_camera_trigger(camera, scene_config, cam_pos, look_at_target)
+    _configure_camera_trigger(camera, scene_config, cam_pos, look_at_target, focal_length=focal_length)
 
     _progress("Initializing vehicle animator...")
     vehicle_animator = VehicleAnimator(scene_config.get("vehicle_behaviors", []), stage, fps=30)
