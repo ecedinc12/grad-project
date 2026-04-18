@@ -149,28 +149,27 @@ def spawn_hazard_zones(hazard_zones, stage):
         prim_path = f"{parent_path}/hazard_volume"
         prim = stage.DefinePrim(prim_path, "Cube")
 
+        # Flat floor decal: 2cm thin so it never occludes workers or vehicles.
+        # Semantics still land on the rendered pixels for CocoWriter detection.
+        flat_pos = Gf.Vec3d(pos[0], pos[1], 0.01)
         xf = UsdGeom.Xformable(prim)
         xf.ClearXformOpOrder()
-        xf.AddTranslateOp().Set(pos)
-        xf.AddScaleOp().Set(Gf.Vec3d(sx, sy, 1.0))
+        xf.AddTranslateOp().Set(flat_pos)
+        xf.AddScaleOp().Set(Gf.Vec3d(sx, sy, 0.01))
 
-        # Make them visible to the renderer but effectively invisible to RGB
-        # by using a very low opacity. This ensures CocoWriter sees them.
         color = (1.0, 0.0, 0.0) if danger == "critical" else (1.0, 1.0, 0.0)
-        
-        # Create a faint transparent material so the insides aren't a solid block
+
         looks_path = "/World/Looks"
         if not stage.GetPrimAtPath(looks_path):
             stage.DefinePrim(looks_path, "Scope")
-            
+
         mat_path = f"{looks_path}/hazard_mat_{danger}"
         if not stage.GetPrimAtPath(mat_path):
             mat = UsdShade.Material.Define(stage, mat_path)
             shader = UsdShade.Shader.Define(stage, f"{mat_path}/shader")
             shader.CreateIdAttr().Set("UsdPreviewSurface")
             shader.CreateInput("diffuseColor", Sdf.ValueTypeNames.Color3f).Set(Gf.Vec3f(*color))
-            # Set opacity to a faint level so the forklift is visible inside
-            shader.CreateInput("opacity", Sdf.ValueTypeNames.Float).Set(0.05)
+            shader.CreateInput("opacity", Sdf.ValueTypeNames.Float).Set(0.6)
             mat.CreateSurfaceOutput().ConnectToSource(shader.ConnectableAPI(), "surface")
         else:
             mat = UsdShade.Material(stage.GetPrimAtPath(mat_path))

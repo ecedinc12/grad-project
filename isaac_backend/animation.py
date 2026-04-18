@@ -616,7 +616,9 @@ class VehicleAnimator:
             if len(waypoints) < 2:
                 print(f"[WARN] VehicleAnimator: Not enough waypoints for {v_id}")
                 continue
-                
+
+            waypoints = self._expand_via_navmesh(waypoints, v_id)
+
             self.vehicles.append({
                 "id": v_id,
                 "prim": prim,
@@ -624,6 +626,40 @@ class VehicleAnimator:
                 "current_wp": 0
             })
             print(f"[INFO] VehicleAnimator tracking {v_id} with {len(waypoints)} waypoints")
+
+    def _expand_via_navmesh(self, waypoints, v_id):
+        """Replace straight-line segments with navmesh-queried paths."""
+        try:
+            import omni.anim.navigation.core as nav_core
+            import carb
+            interface = nav_core.acquire_interface()
+            navmesh = interface.get_navmesh()
+            if navmesh is None:
+                print(f"[WARN] VehicleAnimator: navmesh not available for {v_id}, using straight-line paths")
+                return waypoints
+        except Exception as e:
+            print(f"[WARN] VehicleAnimator: could not acquire navmesh for {v_id}: {e}")
+            return waypoints
+
+        expanded = [waypoints[0]]
+        for i in range(len(waypoints) - 1):
+            p1, p2 = waypoints[i], waypoints[i + 1]
+            dx, dy = p2["x"] - p1["x"], p2["y"] - p1["y"]
+            if dx*dx + dy*dy < 0.01:
+                expanded.append(p2)
+                continue
+            try:
+                start = carb.Float3(p1["x"], p1["y"], 0.0)
+                end = carb.Float3(p2["x"], p2["y"], 0.0)
+                path = navmesh.query_path(start, end)
+                if path and len(path) > 2:
+                    for pt in path[1:-1]:
+                        expanded.append({"x": pt.x, "y": pt.y, "z": p2["z"], "rot": None})
+                    print(f"[INFO] VehicleAnimator: navmesh added {len(path)-2} intermediate points for {v_id}")
+            except Exception as e:
+                print(f"[WARN] VehicleAnimator: navmesh query failed for {v_id}: {e}")
+            expanded.append(p2)
+        return expanded
 
     def update(self, current_frame, total_frames):
         if not self.vehicles:
@@ -665,18 +701,24 @@ class VehicleAnimator:
             if not translate_op:
                 translate_op = xformable.AddTranslateOp()
                 
-            # If rotation is not provided, look towards the next waypoint
-            if p2.get("rot") is not None:
-                rot_deg = p1["rot"] + (p2["rot"] - p1["rot"]) * t if p1.get("rot") is not None else p2["rot"]
-            else:
-                dx = p2["x"] - p1["x"]
-                dy = p2["y"] - p1["y"]
-                if dx*dx + dy*dy > 0.001:
-                    # Asset faces +Y at 0° rotation; atan2(dy,dx) measures from +X,
-                    # so subtract 90° to align heading with the travel direction.
-                    rot_deg = math.degrees(math.atan2(dy, dx)) - 90.0
+            dx = p2["x"] - p1["x"]
+            dy = p2["y"] - p1["y"]
+            dist_sq = dx*dx + dy*dy
+
+            if dist_sq > 0.001:
+                # Asset faces +Y at 0°; subtract 90° to align with travel direction.
+                travel_rot = math.degrees(math.atan2(dy, dx)) - 90.0
+                dest_rot = p2.get("rot")
+                if dest_rot is not None and t >= 0.7:
+                    # Blend into docking orientation in the final 30% of the segment.
+                    blend_t = (t - 0.7) / 0.3
+                    diff = ((dest_rot - travel_rot + 180) % 360) - 180
+                    rot_deg = travel_rot + diff * blend_t
                 else:
-                    rot_deg = 0.0
+                    rot_deg = travel_rot
+            else:
+                # Stationary (Idle): hold the waypoint's explicit rotation.
+                rot_deg = p2.get("rot") if p2.get("rot") is not None else (p1.get("rot") if p1.get("rot") is not None else 0.0)
                     
             if not rotate_op:
                 rotate_op = xformable.AddRotateXYZOp()
