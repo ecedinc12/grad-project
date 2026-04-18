@@ -433,15 +433,15 @@ def _build_command_list(worker_behaviors, worker_name, visible_bounds=None):
                     if visible_bounds is not None:
                         x = max(visible_bounds[0], min(visible_bounds[1], x))
                         y = max(visible_bounds[2], min(visible_bounds[3], y))
-                    result.append(f"{worker_name} GoTo {x} {y} {z} {rotation}")
+                    result.append(f"GoTo {x} {y} {z} {rotation}")
                 elif cmd_type == "Idle":
                     duration = cmd.get("duration", 5.0)
-                    result.append(f"{worker_name} Idle {duration}")
+                    result.append(f"Idle {duration}")
                 elif cmd_type == "LookAround":
                     duration = cmd.get("duration", 3.0)
-                    result.append(f"{worker_name} LookAround {duration}")
-            return result if result else [f"{worker_name} Idle 10"]
-    return [f"{worker_name} Idle 10"]
+                    result.append(f"LookAround {duration}")
+            return result if result else [f"Idle 10"]
+    return [f"Idle 10"]
 
 
 def inject_commands_after_play(spawned_worker_names, worker_behaviors, simulation_app=None, visible_bounds=None):
@@ -554,13 +554,13 @@ def reinject_random_commands(spawned_worker_names, visible_bounds=None):
         for i in range(num_waypoints):
             wx = round(random.uniform(x_lo, x_hi), 1)
             wy = round(random.uniform(y_lo, y_hi), 1)
-            cmd_list.append(f"{worker_name} GoTo {wx} {wy} 0.0 0")
+            cmd_list.append(f"GoTo {wx} {wy} 0.0 0")
             if i < num_waypoints - 1:
                 if random.random() < 0.5:
-                    cmd_list.append(f"{worker_name} Idle {round(random.uniform(1, 4), 1)}")
+                    cmd_list.append(f"Idle {round(random.uniform(1, 4), 1)}")
                 else:
-                    cmd_list.append(f"{worker_name} LookAround {round(random.uniform(1, 3), 1)}")
-        cmd_list.append(f"{worker_name} Idle {round(random.uniform(3, 8), 1)}")
+                    cmd_list.append(f"LookAround {round(random.uniform(1, 3), 1)}")
+        cmd_list.append(f"Idle {round(random.uniform(3, 8), 1)}")
 
         try:
             agent_manager.inject_command(
@@ -672,7 +672,9 @@ class VehicleAnimator:
                 dx = p2["x"] - p1["x"]
                 dy = p2["y"] - p1["y"]
                 if dx*dx + dy*dy > 0.001:
-                    rot_deg = math.degrees(math.atan2(dy, dx))
+                    # Asset faces +Y at 0° rotation; atan2(dy,dx) measures from +X,
+                    # so subtract 90° to align heading with the travel direction.
+                    rot_deg = math.degrees(math.atan2(dy, dx)) - 90.0
                 else:
                     rot_deg = 0.0
                     
