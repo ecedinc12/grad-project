@@ -427,7 +427,9 @@ def _build_command_list(worker_behaviors, worker_name, visible_bounds=None):
                     x = cmd.get("x", 0.0)
                     y = cmd.get("y", 0.0)
                     z = cmd.get("z", 0.0)
-                    rotation = cmd.get("rotation", "_")
+                    rotation = cmd.get("rotation", 0)
+                    if rotation == "_" or rotation is None:
+                        rotation = 0
                     if visible_bounds is not None:
                         x = max(visible_bounds[0], min(visible_bounds[1], x))
                         y = max(visible_bounds[2], min(visible_bounds[3], y))
@@ -552,7 +554,7 @@ def reinject_random_commands(spawned_worker_names, visible_bounds=None):
         for i in range(num_waypoints):
             wx = round(random.uniform(x_lo, x_hi), 1)
             wy = round(random.uniform(y_lo, y_hi), 1)
-            cmd_list.append(f"{worker_name} GoTo {wx} {wy} 0.0 _")
+            cmd_list.append(f"{worker_name} GoTo {wx} {wy} 0.0 0")
             if i < num_waypoints - 1:
                 if random.random() < 0.5:
                     cmd_list.append(f"{worker_name} Idle {round(random.uniform(1, 4), 1)}")

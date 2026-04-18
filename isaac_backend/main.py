@@ -335,6 +335,9 @@ def _spawn_entities(scene_config, asset_library, stage, spawn_bounds_min, spawn_
             
             if spawn_x is not None and spawn_y is not None:
                 cx, cy = spawn_x, spawn_y
+                if visible_bounds is not None:
+                    cx = max(visible_bounds[0], min(visible_bounds[1], cx))
+                    cy = max(visible_bounds[2], min(visible_bounds[3], cy))
             else:
                 zone_bounds = resolve_anchor_zone_bounds(anchor_zone, hazard_zones)
                 if zone_bounds is not None:
