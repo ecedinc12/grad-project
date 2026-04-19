@@ -1,0 +1,167 @@
+{
+    "entities": [
+        {
+            "type": "worker",
+            "asset_id": "worker",
+            "ppe_state": {
+                "hardhat": true,
+                "vest": true
+            },
+            "anchor_zone": "walkway"
+        },
+        {
+            "type": "worker",
+            "asset_id": "worker",
+            "ppe_state": {
+                "hardhat": false,
+                "vest": false
+            },
+            "anchor_zone": "vehicle_lane"
+        },
+        {
+            "type": "vehicle",
+            "asset_id": "forklift",
+            "ppe_state": null,
+            "anchor_zone": "vehicle_lane"
+        }
+    ],
+    "hazard_zones": [
+        {
+            "name": "vehicle_lane",
+            "bounds_min": [-12.0, -2.0],
+            "bounds_max": [12.0, 2.0],
+            "danger_level": "critical"
+        },
+        {
+            "name": "pedestrian_crossing",
+            "bounds_min": [-2.0, -2.0],
+            "bounds_max": [2.0, 2.0],
+            "danger_level": "warning"
+        },
+        {
+            "name": "walkway",
+            "bounds_min": [-12.0, 3.0],
+            "bounds_max": [12.0, 12.0],
+            "danger_level": "warning"
+        }
+    ],
+    "camera_angles": ["high_angle", "eye_level"],
+    "camera_mode": "indoor",
+    "camera_position": null,
+    "focal_length": null,
+    "lighting_conditions": "daylight",
+    "worker_behaviors": [
+        {
+            "worker_id": "worker_01",
+            "commands": [
+                {
+                    "command": "GoTo",
+                    "x": -4.0,
+                    "y": 5.0,
+                    "z": 0.0,
+                    "rotation": 270.0,
+                    "duration": null
+                },
+                {
+                    "command": "GoTo",
+                    "x": 0.0,
+                    "y": 5.0,
+                    "z": 0.0,
+                    "rotation": 270.0,
+                    "duration": null
+                },
+                {
+                    "command": "GoTo",
+                    "x": 0.0,
+                    "y": 0.0,
+                    "z": 0.0,
+                    "rotation": 180.0,
+                    "duration": null
+                },
+                {
+                    "command": "GoTo",
+                    "x": 0.0,
+                    "y": -3.5,
+                    "z": 0.0,
+                    "rotation": 180.0,
+                    "duration": null
+                }
+            ]
+        },
+        {
+            "worker_id": "worker_02",
+            "commands": [
+                {
+                    "command": "GoTo",
+                    "x": -6.0,
+                    "y": 4.0,
+                    "z": 0.0,
+                    "rotation": 270.0,
+                    "duration": null
+                },
+                {
+                    "command": "GoTo",
+                    "x": -6.0,
+                    "y": 0.0,
+                    "z": 0.0,
+                    "rotation": 180.0,
+                    "duration": null
+                },
+                {
+                    "command": "GoTo",
+                    "x": -6.0,
+                    "y": -4.0,
+                    "z": 0.0,
+                    "rotation": 180.0,
+                    "duration": null
+                },
+                {
+                    "command": "Idle",
+                    "x": null,
+                    "y": null,
+                    "z": 0.0,
+                    "rotation": null,
+                    "duration": 2.0
+                },
+                {
+                    "command": "GoTo",
+                    "x": -3.0,
+                    "y": -4.0,
+                    "z": 0.0,
+                    "rotation": 90.0,
+                    "duration": null
+                }
+            ]
+        }
+    ],
+    "vehicle_behaviors": [
+        {
+            "vehicle_id": "forklift_01",
+            "commands": [
+                {
+                    "command": "GoTo",
+                    "x": -8.0,
+                    "y": 0.0,
+                    "z": 0.0,
+                    "rotation": 90.0
+                },
+                {
+                    "command": "GoTo",
+                    "x": 8.0,
+                    "y": 0.0,
+                    "z": 0.0,
+                    "rotation": 90.0
+                },
+                {
+                    "command": "GoTo",
+                    "x": 0.0,
+                    "y": 0.0,
+                    "z": 0.0,
+                    "rotation": 270.0
+                }
+            ]
+        }
+    ],
+    "layout": "pedestrian_crossing",
+    "layout_params": null
+}

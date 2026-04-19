@@ -122,8 +122,12 @@ def spawn_workers(workers, worker_behaviors, asset_library, stage, simulation_ap
     Returns a set of spawned worker names (e.g. {"worker_01", "worker_02"}).
     """
     def _initial_pos(worker_id):
+        # Accept both "worker_01" and bare "01" in worker_behaviors so configs
+        # work whether or not the "worker_" prefix is present on worker_id values.
+        short_id = worker_id.removeprefix("worker_")
         for wb in worker_behaviors:
-            if wb.get("worker_id") == worker_id:
+            wb_id = wb.get("worker_id", "")
+            if wb_id == worker_id or wb_id == short_id:
                 for cmd in wb.get("commands", []):
                     if cmd.get("command") == "GoTo":
                         x, y = cmd.get("x", 0.0), cmd.get("y", 0.0)

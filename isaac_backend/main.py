@@ -501,9 +501,11 @@ def main():
             _progress(f"Frame {step}/{NUM_FRAMES}")
         if step > 0 and step % REINJECT_INTERVAL == 0 and spawned_worker_names:
             reinject_random_commands(spawned_worker_names, visible_bounds=visible_bounds)
-        vehicle_animator.update(step, NUM_FRAMES)
         for _ in range(SIM_STEPS_PER_FRAME):
             world.step(render=False)
+        # Update vehicle after physics so the animated position is not overridden
+        # by rigid-body simulation before rep.orchestrator.step() captures the frame.
+        vehicle_animator.update(step, NUM_FRAMES)
         rep.orchestrator.step()
 
     _progress("Waiting for orchestrator to finish...")

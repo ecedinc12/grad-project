@@ -1,0 +1,175 @@
+{
+    "entities": [
+        {
+            "type": "worker",
+            "asset_id": "worker",
+            "ppe_state": {
+                "hardhat": true,
+                "vest": true
+            },
+            "anchor_zone": "ventilation_corridor"
+        },
+        {
+            "type": "worker",
+            "asset_id": "worker",
+            "ppe_state": {
+                "hardhat": false,
+                "vest": false
+            },
+            "anchor_zone": "drum_storage"
+        },
+        {
+            "type": "vehicle",
+            "asset_id": "forklift",
+            "ppe_state": null,
+            "anchor_zone": "chemical_spill_zone"
+        }
+    ],
+    "hazard_zones": [
+        {
+            "name": "chemical_spill_zone",
+            "bounds_min": [-4.0, -4.0],
+            "bounds_max": [4.0, 4.0],
+            "danger_level": "critical"
+        },
+        {
+            "name": "drum_storage",
+            "bounds_min": [-7.0, -7.0],
+            "bounds_max": [7.0, -4.0],
+            "danger_level": "restricted"
+        },
+        {
+            "name": "ventilation_corridor",
+            "bounds_min": [-12.0, 5.0],
+            "bounds_max": [12.0, 12.0],
+            "danger_level": "warning"
+        }
+    ],
+    "camera_angles": ["high_angle", "eye_level"],
+    "camera_mode": "indoor",
+    "camera_position": null,
+    "focal_length": null,
+    "lighting_conditions": "overcast",
+    "worker_behaviors": [
+        {
+            "worker_id": "worker_01",
+            "commands": [
+                {
+                    "command": "GoTo",
+                    "x": -5.0,
+                    "y": 7.0,
+                    "z": 0.0,
+                    "rotation": 0.0,
+                    "duration": null
+                },
+                {
+                    "command": "LookAround",
+                    "x": null,
+                    "y": null,
+                    "z": 0.0,
+                    "rotation": null,
+                    "duration": 2.5
+                },
+                {
+                    "command": "GoTo",
+                    "x": 5.0,
+                    "y": 7.0,
+                    "z": 0.0,
+                    "rotation": 180.0,
+                    "duration": null
+                },
+                {
+                    "command": "Idle",
+                    "x": null,
+                    "y": null,
+                    "z": 0.0,
+                    "rotation": null,
+                    "duration": 2.0
+                },
+                {
+                    "command": "GoTo",
+                    "x": 0.0,
+                    "y": 8.0,
+                    "z": 0.0,
+                    "rotation": 90.0,
+                    "duration": null
+                }
+            ]
+        },
+        {
+            "worker_id": "worker_02",
+            "commands": [
+                {
+                    "command": "GoTo",
+                    "x": -3.0,
+                    "y": -5.5,
+                    "z": 0.0,
+                    "rotation": 270.0,
+                    "duration": null
+                },
+                {
+                    "command": "LookAround",
+                    "x": null,
+                    "y": null,
+                    "z": 0.0,
+                    "rotation": null,
+                    "duration": 2.0
+                },
+                {
+                    "command": "GoTo",
+                    "x": 3.0,
+                    "y": -5.5,
+                    "z": 0.0,
+                    "rotation": 90.0,
+                    "duration": null
+                },
+                {
+                    "command": "Idle",
+                    "x": null,
+                    "y": null,
+                    "z": 0.0,
+                    "rotation": null,
+                    "duration": 3.0
+                },
+                {
+                    "command": "GoTo",
+                    "x": 0.0,
+                    "y": -6.0,
+                    "z": 0.0,
+                    "rotation": 0.0,
+                    "duration": null
+                }
+            ]
+        }
+    ],
+    "vehicle_behaviors": [
+        {
+            "vehicle_id": "forklift_01",
+            "commands": [
+                {
+                    "command": "GoTo",
+                    "x": -3.0,
+                    "y": 0.0,
+                    "z": 0.0,
+                    "rotation": 90.0
+                },
+                {
+                    "command": "GoTo",
+                    "x": 3.0,
+                    "y": 0.0,
+                    "z": 0.0,
+                    "rotation": 270.0
+                },
+                {
+                    "command": "GoTo",
+                    "x": 0.0,
+                    "y": -3.0,
+                    "z": 0.0,
+                    "rotation": 0.0
+                }
+            ]
+        }
+    ],
+    "layout": "hazmat_storage",
+    "layout_params": null
+}

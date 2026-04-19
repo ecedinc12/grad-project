@@ -371,11 +371,14 @@ def setup_all_behaviors_async(spawned_worker_names, worker_behaviors, stage):
     print(f"[DEBUG][SetupBehaviors] spawned_worker_names={spawned_worker_names}")
 
     all_workers = set(spawned_worker_names)
+    # Warn about behaviors whose worker_id doesn't match any spawned name,
+    # accepting both "worker_01" and bare "01" style IDs.
     for wb in worker_behaviors:
-        worker_id = wb.get("worker_id", "worker_01")
-        if worker_id not in all_workers:
-            print(f"[INFO] Skipping behavior for non-spawned worker: {worker_id}")
-            continue
+        worker_id = wb.get("worker_id", "")
+        short_id = worker_id.removeprefix("worker_")
+        canonical = f"worker_{short_id}" if short_id != worker_id else worker_id
+        if worker_id not in all_workers and canonical not in all_workers:
+            print(f"[INFO] No spawned worker matches behavior worker_id='{worker_id}' (tried '{canonical}')")
 
     for worker_name in sorted(all_workers):
         skelroot = _find_skelroot_for_worker(worker_name, stage)
@@ -414,9 +417,14 @@ def _build_command_list(worker_behaviors, worker_name, visible_bounds=None):
 
     If visible_bounds is provided, GoTo (x, y) targets are clamped to
     the camera-visible area (min_x, max_x, min_y, max_y).
+
+    Matches worker_id with or without "worker_" prefix so configs work
+    whether they use "worker_01" or bare "01" style IDs.
     """
+    short_name = worker_name.removeprefix("worker_")
     for wb in worker_behaviors:
-        if wb.get("worker_id") == worker_name:
+        wb_id = wb.get("worker_id", "")
+        if wb_id == worker_name or wb_id == short_name:
             commands = wb.get("commands", [])
             if not commands:
                 return [f"{worker_name} Idle 10"]
@@ -588,7 +596,7 @@ class VehicleAnimator:
         self.stage = stage
         self.fps = fps
         self.vehicles = []
-        
+
         for vb in vehicle_behaviors:
             v_id = vb.get("vehicle_id")
             commands = vb.get("commands", [])
@@ -597,7 +605,7 @@ class VehicleAnimator:
             if not prim or not prim.IsValid():
                 print(f"[WARN] VehicleAnimator: Prim not found for {v_id} at {prim_path}")
                 continue
-            
+
             # Extract waypoints
             waypoints = []
             for cmd in commands:
@@ -612,18 +620,37 @@ class VehicleAnimator:
                     # Just add a delay by duplicating last waypoint
                     if waypoints:
                         waypoints.append(waypoints[-1].copy())
-            
+
             if len(waypoints) < 2:
                 print(f"[WARN] VehicleAnimator: Not enough waypoints for {v_id}")
                 continue
 
             waypoints = self._expand_via_navmesh(waypoints, v_id)
 
+            # Cache XformOp references once at init — looking them up every frame
+            # via GetOrderedXformOps() can return stale or reordered results when
+            # Replicator flushes its USD layer at the camera trigger interval.
+            from pxr import UsdGeom, Gf
+            xformable = UsdGeom.Xformable(prim)
+            translate_op = None
+            rotate_op = None
+            for op in xformable.GetOrderedXformOps():
+                if op.GetOpType() == UsdGeom.XformOp.TypeTranslate:
+                    translate_op = op
+                elif op.GetOpType() in (UsdGeom.XformOp.TypeRotateXYZ, UsdGeom.XformOp.TypeOrient):
+                    rotate_op = op
+            if translate_op is None:
+                translate_op = xformable.AddTranslateOp()
+            if rotate_op is None:
+                rotate_op = xformable.AddRotateXYZOp()
+
             self.vehicles.append({
                 "id": v_id,
                 "prim": prim,
                 "waypoints": waypoints,
-                "current_wp": 0
+                "current_wp": 0,
+                "translate_op": translate_op,
+                "rotate_op": rotate_op,
             })
             print(f"[INFO] VehicleAnimator tracking {v_id} with {len(waypoints)} waypoints")
 
@@ -664,43 +691,35 @@ class VehicleAnimator:
     def update(self, current_frame, total_frames):
         if not self.vehicles:
             return
-            
-        from pxr import UsdGeom, Gf
-        
+
+        from pxr import Gf
+
         for v in self.vehicles:
             wps = v["waypoints"]
             if not wps:
                 continue
-                
+
             # Simple interpolation across total frames
             progress = current_frame / max(1, total_frames - 1)
             total_segments = len(wps) - 1
             segment_float = progress * total_segments
             segment_idx = min(int(segment_float), total_segments - 1)
             t = segment_float - segment_idx
-            
+
             p1 = wps[segment_idx]
             p2 = wps[segment_idx + 1]
-            
+
             cur_x = p1["x"] + (p2["x"] - p1["x"]) * t
             cur_y = p1["y"] + (p2["y"] - p1["y"]) * t
             cur_z = p1["z"] + (p2["z"] - p1["z"]) * t
-            
-            xformable = UsdGeom.Xformable(v["prim"])
-            xform_ops = xformable.GetOrderedXformOps()
-            
-            translate_op = None
-            rotate_op = None
-            
-            for op in xform_ops:
-                if op.GetOpType() == UsdGeom.XformOp.TypeTranslate:
-                    translate_op = op
-                elif op.GetOpType() in [UsdGeom.XformOp.TypeRotateXYZ, UsdGeom.XformOp.TypeOrient]:
-                    rotate_op = op
-                    
-            if not translate_op:
-                translate_op = xformable.AddTranslateOp()
-                
+
+            # Use cached op references — never re-query GetOrderedXformOps() here,
+            # because Replicator's layer flush at camera-trigger intervals can
+            # transiently reorder or hide ops, causing AddTranslateOp() to create
+            # a second op that composes with the first and breaks the trajectory.
+            translate_op = v["translate_op"]
+            rotate_op = v["rotate_op"]
+
             dx = p2["x"] - p1["x"]
             dy = p2["y"] - p1["y"]
             dist_sq = dx*dx + dy*dy
@@ -719,12 +738,10 @@ class VehicleAnimator:
             else:
                 # Stationary (Idle): hold the waypoint's explicit rotation.
                 rot_deg = p2.get("rot") if p2.get("rot") is not None else (p1.get("rot") if p1.get("rot") is not None else 0.0)
-                    
-            if not rotate_op:
-                rotate_op = xformable.AddRotateXYZOp()
-                
+
             translate_op.Set(Gf.Vec3d(cur_x, cur_y, cur_z))
-            
+
+            from pxr import UsdGeom
             if rotate_op.GetOpType() == UsdGeom.XformOp.TypeRotateXYZ:
                 rotate_op.Set(Gf.Vec3d(0, 0, rot_deg))
 
