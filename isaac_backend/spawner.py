@@ -157,24 +157,9 @@ def spawn_hazard_zones(hazard_zones, stage):
         xf.AddTranslateOp().Set(flat_pos)
         xf.AddScaleOp().Set(Gf.Vec3d(sx, sy, 0.01))
 
-        color = (1.0, 0.0, 0.0) if danger == "critical" else (1.0, 1.0, 0.0)
-
-        looks_path = "/World/Looks"
-        if not stage.GetPrimAtPath(looks_path):
-            stage.DefinePrim(looks_path, "Scope")
-
-        mat_path = f"{looks_path}/hazard_mat_{danger}"
-        if not stage.GetPrimAtPath(mat_path):
-            mat = UsdShade.Material.Define(stage, mat_path)
-            shader = UsdShade.Shader.Define(stage, f"{mat_path}/shader")
-            shader.CreateIdAttr().Set("UsdPreviewSurface")
-            shader.CreateInput("diffuseColor", Sdf.ValueTypeNames.Color3f).Set(Gf.Vec3f(*color))
-            shader.CreateInput("opacity", Sdf.ValueTypeNames.Float).Set(0.0)
-            mat.CreateSurfaceOutput().ConnectToSource(shader.ConnectableAPI(), "surface")
-        else:
-            mat = UsdShade.Material(stage.GetPrimAtPath(mat_path))
-            
-        UsdShade.MaterialBindingAPI.Apply(prim).Bind(mat)
+        # Hide from all render passes (RGB and segmentation) — zones are spatial
+        # logic helpers only; annotations come from worker/vehicle detections.
+        UsdGeom.Imageable(prim).MakeInvisible()
 
         from isaac_backend.semantics import apply_usd_semantics
         apply_usd_semantics(prim, f"hazard_zone_{danger}")

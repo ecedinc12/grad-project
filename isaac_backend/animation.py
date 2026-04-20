@@ -562,13 +562,13 @@ def reinject_random_commands(spawned_worker_names, visible_bounds=None):
         for i in range(num_waypoints):
             wx = round(random.uniform(x_lo, x_hi), 1)
             wy = round(random.uniform(y_lo, y_hi), 1)
-            cmd_list.append(f"GoTo {wx} {wy} 0.0 0")
+            cmd_list.append(f"{worker_name} GoTo {wx} {wy} 0.0 0")
             if i < num_waypoints - 1:
                 if random.random() < 0.5:
-                    cmd_list.append(f"Idle {round(random.uniform(1, 4), 1)}")
+                    cmd_list.append(f"{worker_name} Idle {round(random.uniform(1, 4), 1)}")
                 else:
-                    cmd_list.append(f"LookAround {round(random.uniform(1, 3), 1)}")
-        cmd_list.append(f"Idle {round(random.uniform(3, 8), 1)}")
+                    cmd_list.append(f"{worker_name} LookAround {round(random.uniform(1, 3), 1)}")
+        cmd_list.append(f"{worker_name} Idle {round(random.uniform(3, 8), 1)}")
 
         try:
             agent_manager.inject_command(
