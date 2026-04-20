@@ -169,7 +169,7 @@ def spawn_hazard_zones(hazard_zones, stage):
             shader = UsdShade.Shader.Define(stage, f"{mat_path}/shader")
             shader.CreateIdAttr().Set("UsdPreviewSurface")
             shader.CreateInput("diffuseColor", Sdf.ValueTypeNames.Color3f).Set(Gf.Vec3f(*color))
-            shader.CreateInput("opacity", Sdf.ValueTypeNames.Float).Set(0.6)
+            shader.CreateInput("opacity", Sdf.ValueTypeNames.Float).Set(0.0)
             mat.CreateSurfaceOutput().ConnectToSource(shader.ConnectableAPI(), "surface")
         else:
             mat = UsdShade.Material(stage.GetPrimAtPath(mat_path))

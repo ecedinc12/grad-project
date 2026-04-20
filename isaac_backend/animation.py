@@ -441,15 +441,15 @@ def _build_command_list(worker_behaviors, worker_name, visible_bounds=None):
                     if visible_bounds is not None:
                         x = max(visible_bounds[0], min(visible_bounds[1], x))
                         y = max(visible_bounds[2], min(visible_bounds[3], y))
-                    result.append(f"GoTo {x} {y} {z} {rotation}")
+                    result.append(f"{worker_name} GoTo {x} {y} {z} {rotation}")
                 elif cmd_type == "Idle":
                     duration = cmd.get("duration", 5.0)
-                    result.append(f"Idle {duration}")
+                    result.append(f"{worker_name} Idle {duration}")
                 elif cmd_type == "LookAround":
                     duration = cmd.get("duration", 3.0)
-                    result.append(f"LookAround {duration}")
-            return result if result else [f"Idle 10"]
-    return [f"Idle 10"]
+                    result.append(f"{worker_name} LookAround {duration}")
+            return result if result else [f"{worker_name} Idle 10"]
+    return [f"{worker_name} Idle 10"]
 
 
 def inject_commands_after_play(spawned_worker_names, worker_behaviors, simulation_app=None, visible_bounds=None):
