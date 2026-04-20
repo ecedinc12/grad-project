@@ -93,6 +93,7 @@ def enable_behavior_extensions(simulation_app=None):
         "omni.anim.graph.schema",
         "omni.anim.people",
         "omni.anim.navigation.schema",
+        "omni.anim.navigation.core",
     ]
     for ext in extensions:
         try:
@@ -156,6 +157,10 @@ def bake_navmesh(simulation_app=None):
         return True
     except Exception as e:
         print(f"[WARN] Navmesh baking failed (workers will use direct navigation): {e}")
+        settings = carb.settings.get_settings()
+        settings.set("/persistent/omni/anim/people/navmeshBasedNavigation", False)
+        settings.set("/exts/omni.anim.people/navigation_settings/navmesh_enabled", False)
+        settings.set("/exts/omni.anim.people/navigation_settings/dynamic_avoidance_enabled", False)
         return False
 
 
