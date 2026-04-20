@@ -46,8 +46,8 @@ class LayoutParams(BaseModel):
     rack_rows: int = Field(default=8, description="Number of rack rows (1-12)")
     rack_cols: int = Field(default=2, description="Number of rack columns (1-3)")
     aisle_width: float = Field(default=2.5, description="Distance between rack rows in meters (1.0-5.0)")
-    bounds_min: tuple[float, float] = Field(default=(-11.5, -11.5), description="Minimum (x, y) layout footprint in meters")
-    bounds_max: tuple[float, float] = Field(default=(11.5, 11.5), description="Maximum (x, y) layout footprint in meters")
+    bounds_min: tuple[float, float] = Field(default=(-6.0, -6.0), description="Minimum (x, y) layout footprint in meters. Must stay within ±6m.")
+    bounds_max: tuple[float, float] = Field(default=(6.0, 6.0), description="Maximum (x, y) layout footprint in meters. Must stay within ±6m.")
     clutter_density: Literal["low", "medium", "high"] = Field(
         default="high", description="Global clutter density: low=8 props, medium=18 props, high=30 props"
     )

@@ -31,6 +31,15 @@ def setup_camera_and_lighting(config):
             intensity=2500,
             color=(1.0, 0.95, 0.85),
         )
+        # Warehouse ceiling fluorescent banks — simulate industrial overhead lighting
+        for x, y in _CEILING_LAMP_XY:
+            rep.create.light(
+                light_type="Sphere",
+                intensity=350,
+                color=(1.0, 0.98, 0.92),
+                position=(x, y, _CEILING_Z),
+                scale=0.2,
+            )
 
     if condition == "overcast":
         rep.create.light(

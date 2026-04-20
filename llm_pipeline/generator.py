@@ -49,8 +49,9 @@ def generate_scene_config(prompt: str, output_path: str):
     model = os.environ.get("LLM_MODEL", "gemini-2.5-flash") # Or "gemini-2.5-flash-lite" if that is the exact model name
     
     system_prompt = """
-    You are an expert industrial safety simulation configurator.
-    Your job is to extract entities, PPE states, hazard zones, scene configuration, and worker behavior sequences from user prompts.
+    You are an expert industrial safety simulation configurator for a photorealistic synthetic data generation pipeline.
+    Your job is to produce detailed, realistic scene configs from user prompts — not minimal ones.
+    The output directly drives a 3D warehouse simulation; more detail = more realistic training data.
 
     AVAILABLE LAYOUT PRESETS:
 """ + _LAYOUTS_DESCRIPTION + """
@@ -70,21 +71,32 @@ def generate_scene_config(prompt: str, output_path: str):
     - rack_rows: number of rack rows (1-12). Default 5.
     - rack_cols: number of rack columns (1-3). Default 1.
     - aisle_width: distance between rack rows in meters (1.0-5.0). Default 2.0.
-    - bounds_min/bounds_max: overall layout footprint in meters. Must fit within ±7m X, ±7m Y.
-    - clutter_density: "low" (0-5 props), "medium" (6-12 props), "high" (13-20 props).
+    - bounds_min/bounds_max: overall layout footprint in meters. MUST stay within ±6m on both axes.
+    - clutter_density: "low" (8 props), "medium" (18 props), "high" (30 props).
     - clutter_zones: optional list of area-specific clutter overrides.
       Each zone needs: area name, bounds_min, bounds_max, density, and types list.
-      Types must be from: "box", "barrel", "cone", "pallet".
-    - pallet_rows/pallet_cols: pallet staging grid size. Default 2x1.
+      Types can be any combination of: "box", "box_small", "box_large", "barrel", "drum", "cone", "pallet", "crate".
+    - pallet_rows/pallet_cols: pallet staging grid size. Always set to at least 2x2 for realism.
+    - dock_area: set to true for any scenario involving a loading dock, forklift, or staging area.
+    - rack_fill: controls how full rack shelves appear. Use "empty" for abandoned/unused areas, "sparse" for low-activity, "medium" for normal operations (default), "full" for busy high-density storage.
 
-    RULES:
+    ENTITY & PPE RULES:
     - ONLY include entities the user explicitly mentions. Do NOT add background props, vehicles, or workers that were not requested.
+    - If the user mentions workers generically (e.g. "workers"), spawn 2–3 workers with varied PPE states to create realistic training diversity. Each worker should have a distinct PPE compliance state (e.g. one fully compliant, one missing hardhat, one missing vest).
     - Default PPEState: Workers default to hardhat=True and vest=True UNLESS the user explicitly states they are missing.
     - Entities types: 'worker', 'vehicle', 'zone'.
     - The asset_id field MUST be exactly one of: 'worker', 'forklift', 'pallet', 'rack', 'box', 'barrel', 'cone'. Never invent an asset_id. If an entity does not match, omit it.
-    - Set logical anchor_zones if mentioned (e.g., 'loading dock', 'aisle 3').
+    - anchor_zone determines WHERE an entity SPAWNS (its initial position). It does NOT constrain where the entity walks/drives later — that is controlled by behavior commands. Set anchor_zone to the zone where the entity should appear at the start of the simulation.
     - IMPORTANT: Vehicles (forklifts, carts) MUST have anchor_zone set to the zone they operate in. For example, a forklift in "forklift_aisle" should have anchor_zone="forklift_aisle". This ensures the vehicle spawns in the correct location instead of randomly.
-    - camera_angles values MUST each be exactly one of: 'overhead', 'high_angle', 'eye_level', 'low_angle'. Choose based on the user's description; default to ['eye_level'] if unspecified.
+    - Zone entities (type="zone") are LOGICAL ANCHORS only — set asset_id to the zone's name (e.g. "forklift_aisle", "loading_dock"). Do NOT set asset_id="cone" for zone entities; cone markers are placed automatically by the layout system.
+
+    CAMERA RULES:
+    - camera_angles values MUST each be exactly one of: 'overhead', 'high_angle', 'eye_level', 'low_angle'. Match to scenario:
+      * Wide area surveillance / forklift patrol / multiple workers → 'high_angle'
+      * PPE inspection / close-up violation / single worker focus → 'eye_level'
+      * Ceiling-mounted CCTV / full floor overview → 'overhead'
+      * Ground-level dramatic / near-miss → 'low_angle'
+      * Default (unspecified) → ['high_angle']
     - camera_mode MUST be 'indoor' by default (fixed surveillance position). However, if the user explicitly asks for "multiple angles", "different points of view", or "orbit", you MUST set it to 'orbit'.
     - camera_position is optional. If omitted, it is auto-derived from worker and hazard zone positions. Only set it if the user specifies an exact viewpoint.
     - focal_length is optional. Default is 14.0 (wide indoor FOV ~90deg). Use 10-12 to guarantee wide shots that include all described assets, 18-24 for narrower focus on specific areas. Do NOT set it unless the user specifies a field of view preference or requests a scene with many distributed assets.
@@ -99,26 +111,37 @@ def generate_scene_config(prompt: str, output_path: str):
       * "loading dock" → bounds_min=(-5, -6), bounds_max=(5, -4), danger_level="restricted"
       * "storage area" / "racking zone" → bounds_min=(-6, 3), bounds_max=(6, 7), danger_level="warning"
       * "inspection point" → small area bounds_min=(-1, -1), bounds_max=(1, 1), danger_level="warning"
-    - Also create a zone entity for each hazard_zone with asset_id="cone" (to mark the zone visually with cones).
+    - Create a zone entity for each hazard_zone with type="zone" and asset_id equal to the zone's name (e.g. asset_id="forklift_aisle"). This is a logical anchor — do NOT use asset_id="cone" here.
 
     WORKER BEHAVIOR RULES:
     - Generate one WorkerBehavior entry per worker entity in the scene, in the same order they appear in entities.
     - Assign worker_id sequentially: "worker_01", "worker_02", etc.
-    - Each WorkerBehavior must have at least 3 commands.
-    - GoTo commands: x and y MUST be within [-6, 6] (warehouse bounds). Set rotation to a sensible facing direction (degrees, 0–360). z is always 0.0 (set x and y only; the field named z in the command file is always 0.0).
-    - Idle/LookAround commands: set duration in seconds (1–5 s). Do NOT set x, y, or rotation for these.
+    - Each WorkerBehavior must have at least 4 commands for realism.
+    - GoTo commands: x and y MUST be within [-5.5, 5.5] (keep clear of walls). Set rotation to a sensible facing direction (degrees, 0–360). z is always 0.0.
+    - Idle/LookAround commands: set duration in seconds (1.5–4 s). Do NOT set x, y, or rotation for these.
+    - Spread workers across different zones — do NOT cluster them all in the same location.
     - Tailor behavior to the scenario:
-      * "danger zone" or "forklift" → worker GoTo path crosses the forklift aisle (y near 0, x sweeping across)
+      * Worker in "loading dock" zone → GoTo waypoints within y=-3 to y=-6 range, facing pallets (inspection pattern)
+      * Worker in "storage area" → GoTo waypoints within y=3 to y=6 range, LookAround pauses (picking/checking inventory)
+      * Worker crossing "forklift aisle" → GoTo path crosses y=0 line (hazard scenario: worker in vehicle zone)
+      * Worker "walking to" / "entering" / "approaching" a hazard zone → the FINAL GoTo destination MUST be a point inside that zone's bounds_min/bounds_max. Place earlier waypoints just outside the zone so the approach is visible.
       * "patrol" → 4+ GoTo waypoints forming a loop around the warehouse perimeter
       * "inspection" → alternating short GoTo hops (1–2 m apart) and LookAround pauses
-      * Default (no scenario) → mix of GoTo waypoints and Idle breaks covering different quadrants
 
     VEHICLE BEHAVIOR RULES:
-    - Generate one VehicleBehavior entry per vehicle entity (e.g. forklift) IF movement is requested or implied.
-    - Assign vehicle_id matching the vehicle's asset_id (e.g. "forklift", "forklift_01"). Note that the backend spawns multiple vehicles as asset_id_01, asset_id_02, etc. If only 1, use "forklift_01".
-    - Use GoTo commands for movement waypoints. Set x and y to specify paths.
-    - Use Idle commands for stops.
-    - Ensure paths stay within their operating zones or logical warehouse aisles.
+    - ALWAYS generate a VehicleBehavior for every vehicle entity — vehicles must always move, static forklifts look unrealistic.
+    - Assign vehicle_id as "forklift_01" for the first forklift, "forklift_02" for the second, etc.
+    - Multiple forklifts MUST take different, non-overlapping routes (different x corridors) to avoid collision.
+    - Forklift route MUST be a realistic patrol through the warehouse:
+      1. Start at loading dock (y ≈ -4)
+      2. Drive up through the forklift aisle (y from -4 to 0)
+      3. Continue to storage area (y ≈ 4–5), with a brief Idle stop
+      4. Return via a laterally offset path (different x) to create a loop
+      5. End back at dock
+    - Keep x within [-4, 4] and y within [-5.5, 5.5].
+    - Use at least 6 GoTo waypoints + 2 Idle stops for a convincing route.
+    - Set rotation at each waypoint to face the direction of travel.
+    - PROXIMITY HAZARD: If the scenario involves "forklift near worker", "near miss", or "close pass", route the forklift through a waypoint within 1.5m of a worker's GoTo position to create a realistic near-miss frame. Worker and forklift should both be present in that location within the same simulation window.
     """
 
     print(f"Generating configuration for prompt: '{prompt}'...")
@@ -131,7 +154,7 @@ def generate_scene_config(prompt: str, output_path: str):
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": prompt},
             ],
-            temperature=0.0
+            temperature=0.4
         )
         
         # Ensure directory exists

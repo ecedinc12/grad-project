@@ -526,15 +526,17 @@ WAREHOUSE_X_RANGE = (-5.5, 5.5)
 WAREHOUSE_Y_RANGE = (-5.5, 5.5)
 
 
-def reinject_random_commands(spawned_worker_names, visible_bounds=None):
+def reinject_random_commands(spawned_worker_names, visible_bounds=None, worker_zone_bounds=None):
     """Re-inject randomized commands to all registered agents.
 
     Prevents IRA behavior loop from repeating the same command sequence.
-    Generates varied GoTo targets within visible_bounds (or warehouse bounds
-    as fallback), plus Idle and LookAround with random durations.
+    Generates varied GoTo targets within each worker's assigned zone bounds
+    (from worker_zone_bounds), falling back to visible_bounds or warehouse
+    bounds when no zone is assigned.
 
-    visible_bounds: (min_x, max_x, min_y, max_y) constraining GoTo targets.
-                    If None, falls back to WAREHOUSE_X/Y_RANGE.
+    worker_zone_bounds: dict mapping worker_name → (x_lo, x_hi, y_lo, y_hi)
+                        derived from each worker's anchor_zone hazard bounds.
+    visible_bounds: (min_x, max_x, min_y, max_y) fallback when no zone bounds.
 
     Returns (injected, failed) counts.
     """
@@ -550,17 +552,19 @@ def reinject_random_commands(spawned_worker_names, visible_bounds=None):
     injected = 0
     failed = 0
 
-    if visible_bounds is not None:
-        x_lo, x_hi = visible_bounds[0], visible_bounds[1]
-        y_lo, y_hi = visible_bounds[2], visible_bounds[3]
-    else:
-        x_lo, x_hi = WAREHOUSE_X_RANGE
-        y_lo, y_hi = WAREHOUSE_Y_RANGE
+    default_x_lo, default_x_hi = (visible_bounds[0], visible_bounds[1]) if visible_bounds else WAREHOUSE_X_RANGE
+    default_y_lo, default_y_hi = (visible_bounds[2], visible_bounds[3]) if visible_bounds else WAREHOUSE_Y_RANGE
 
     for worker_name in sorted(spawned_worker_names):
         if not agent_manager.agent_registered(worker_name):
             failed += 1
             continue
+
+        # Use zone-specific bounds if available, otherwise fall back to full visible area
+        if worker_zone_bounds and worker_name in worker_zone_bounds:
+            x_lo, x_hi, y_lo, y_hi = worker_zone_bounds[worker_name]
+        else:
+            x_lo, x_hi, y_lo, y_hi = default_x_lo, default_x_hi, default_y_lo, default_y_hi
 
         num_waypoints = random.randint(2, 3)
         cmd_list = []

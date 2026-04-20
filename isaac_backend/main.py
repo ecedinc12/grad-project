@@ -495,12 +495,28 @@ def main():
     _progress("Initializing vehicle animator...")
     vehicle_animator = VehicleAnimator(scene_config.get("vehicle_behaviors", []), stage, fps=30)
 
+    # Build per-worker zone bounds for zone-aware re-injection.
+    # Maps worker_name → (x_lo, x_hi, y_lo, y_hi) from their anchor_zone hazard bounds.
+    worker_zone_bounds = {}
+    _entities = scene_config.get("entities", [])
+    _hz_map = {z["name"]: z for z in scene_config.get("hazard_zones", [])}
+    _worker_idx = 0
+    for _ent in _entities:
+        if _ent.get("type") == "worker":
+            _worker_idx += 1
+            _wname = f"worker_{_worker_idx:02d}"
+            _zone = _ent.get("anchor_zone")
+            if _zone and _zone in _hz_map:
+                _bmin = _hz_map[_zone]["bounds_min"]
+                _bmax = _hz_map[_zone]["bounds_max"]
+                worker_zone_bounds[_wname] = (_bmin[0], _bmax[0], _bmin[1], _bmax[1])
+
     _progress("Running simulation loop...")
     for step in range(NUM_FRAMES):
         if step % 100 == 0:
             _progress(f"Frame {step}/{NUM_FRAMES}")
         if step > 0 and step % REINJECT_INTERVAL == 0 and spawned_worker_names:
-            reinject_random_commands(spawned_worker_names, visible_bounds=visible_bounds)
+            reinject_random_commands(spawned_worker_names, visible_bounds=visible_bounds, worker_zone_bounds=worker_zone_bounds)
         for _ in range(SIM_STEPS_PER_FRAME):
             world.step(render=False)
         # Update vehicle after physics so the animated position is not overridden

@@ -248,32 +248,46 @@ def _spawn_pallets(params, asset_library, stage, idx):
 
     for r in range(pallet_rows_grid):
         for c in range(pallet_cols_grid):
-            x = x_start + c * spacing_x + random.uniform(-0.3, 0.3)
-            y = y_start - r * spacing_y + random.uniform(-0.3, 0.3)
-            rot = random.uniform(-20, 20)
+            x = x_start + c * spacing_x + random.uniform(-0.12, 0.12)
+            y = y_start - r * spacing_y + random.uniform(-0.12, 0.12)
+            rot = random.uniform(-8, 8)
             idx = _place("pallet", x, y, 0, rot, asset_library, stage, idx)
             count += 1
 
             cargo_roll = random.random()
-            if cargo_roll < 0.50:
+            if cargo_roll < 0.70:
                 cargo_prop = random.choice(["box", "box_small", "box_large", "crate"])
                 idx = _place(cargo_prop,
-                              x + random.uniform(-0.1, 0.1),
-                              y + random.uniform(-0.1, 0.1), 0.15,
-                              random.uniform(-30, 30), asset_library, stage, idx)
+                              x + random.uniform(-0.08, 0.08),
+                              y + random.uniform(-0.08, 0.08), 0.15,
+                              random.uniform(-15, 15), asset_library, stage, idx)
                 count += 1
-                if random.random() < 0.4:
+                if random.random() < 0.65:
                     second_prop = random.choice(["box", "box_small", "crate"])
                     idx = _place(second_prop,
-                                  x + random.uniform(-0.2, 0.2),
-                                  y + random.uniform(-0.2, 0.2), 0.45,
-                                  random.uniform(-30, 30), asset_library, stage, idx)
+                                  x + random.uniform(-0.1, 0.1),
+                                  y + random.uniform(-0.1, 0.1), 0.45,
+                                  random.uniform(-15, 15), asset_library, stage, idx)
                     count += 1
-            elif cargo_roll < 0.75:
+                    if random.random() < 0.35:
+                        third_prop = random.choice(["box_small", "crate"])
+                        idx = _place(third_prop,
+                                      x + random.uniform(-0.12, 0.12),
+                                      y + random.uniform(-0.12, 0.12), 0.72,
+                                      random.uniform(-10, 10), asset_library, stage, idx)
+                        count += 1
+            elif cargo_roll < 0.90:
                 barrel_prop = random.choice(["barrel", "drum"])
-                idx = _place(barrel_prop, x, y, 0.15,
+                idx = _place(barrel_prop, x + random.uniform(-0.05, 0.05),
+                              y + random.uniform(-0.05, 0.05), 0.15,
                               random.uniform(0, 360), asset_library, stage, idx)
                 count += 1
+                if random.random() < 0.4:
+                    idx = _place(random.choice(["barrel", "drum"]),
+                                  x + random.uniform(-0.05, 0.05),
+                                  y + random.uniform(-0.05, 0.05), 0.55,
+                                  random.uniform(0, 360), asset_library, stage, idx)
+                    count += 1
 
     return idx, count
 
@@ -352,18 +366,25 @@ def _spawn_dock_area(params, asset_library, stage, idx):
 
             cargo_prop = random.choice(["box", "box_small", "box_large", "crate"])
             idx = _place(cargo_prop,
-                          x + random.uniform(-0.15, 0.15),
-                          y + random.uniform(-0.15, 0.15), 0.15,
-                          random.uniform(-30, 30), asset_library, stage, idx)
+                          x + random.uniform(-0.10, 0.10),
+                          y + random.uniform(-0.10, 0.10), 0.15,
+                          random.uniform(-15, 15), asset_library, stage, idx)
             count += 1
 
-            if random.random() < 0.5:
+            if random.random() < 0.70:
                 second_prop = random.choice(["box", "box_small", "crate"])
                 idx = _place(second_prop,
-                              x + random.uniform(-0.2, 0.2),
-                              y + random.uniform(-0.2, 0.2), 0.45,
-                              random.uniform(-30, 30), asset_library, stage, idx)
+                              x + random.uniform(-0.12, 0.12),
+                              y + random.uniform(-0.12, 0.12), 0.45,
+                              random.uniform(-15, 15), asset_library, stage, idx)
                 count += 1
+                if random.random() < 0.40:
+                    third_prop = random.choice(["box_small", "crate"])
+                    idx = _place(third_prop,
+                                  x + random.uniform(-0.12, 0.12),
+                                  y + random.uniform(-0.12, 0.12), 0.72,
+                                  random.uniform(-10, 10), asset_library, stage, idx)
+                    count += 1
 
     for _ in range(random.randint(3, 6)):
         x = random.uniform(dock_x_start - 1.0, dock_x_end + 1.0)
