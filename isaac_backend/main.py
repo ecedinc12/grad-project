@@ -41,15 +41,15 @@ def _patch_kit_anim_schema():
         return
     with open(KIT_FILE, "r") as f:
         src = f.read()
-    if '"omni.anim.graph.schema"' in src:
+    if '"omni.anim.navigation.core"' in src:
         return
     patched = src.replace(
-        '"isaacsim.exp.base" = {}',
-        '"isaacsim.exp.base" = {}\n"omni.anim.graph.core" = {}\n"omni.anim.graph.schema" = {}',
+        '"omni.anim.graph.schema" = {}',
+        '"omni.anim.graph.schema" = {}\n"omni.anim.navigation.core" = {}\n"omni.anim.navigation.schema" = {}',
     )
     with open(KIT_FILE, "w") as f:
         f.write(patched)
-    _progress("Patched kit file with omni.anim.graph.core and omni.anim.graph.schema")
+    _progress("Patched kit file with omni.anim.navigation.core and omni.anim.navigation.schema")
 
 
 def _progress(msg):
@@ -98,7 +98,7 @@ from isaac_backend.camera import (
 from isaac_backend.lighting import setup_camera_and_lighting
 from isaac_backend.semantics import clear_unwanted_warehouse_semantics
 from isaac_backend.spawner import get_geofenced_spawner, spawn_hazard_zones, spawn_at_fixed_position, resolve_anchor_zone_bounds
-from isaac_backend.warehouse import spawn_warehouse_layout, hide_driver_prims
+from isaac_backend.warehouse import spawn_warehouse_layout, hide_driver_prims, hide_warehouse_rack_frames
 from isaac_backend.workers import spawn_workers
 from isaac_backend.animation import (
     enable_behavior_extensions,
@@ -401,6 +401,9 @@ def main():
     _progress("Spawning warehouse layout...")
     spawn_bounds_min, spawn_bounds_max = spawn_warehouse_layout(scene_config, asset_library, stage)
     _tick(10)
+
+    _progress("Hiding baked-in rack frames from warehouse.usd...")
+    hide_warehouse_rack_frames(stage)
 
     _progress("Baking navmesh for obstacle avoidance...")
     bake_navmesh(simulation_app=simulation_app)

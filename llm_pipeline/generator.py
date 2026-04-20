@@ -71,7 +71,7 @@ def generate_scene_config(prompt: str, output_path: str):
     - rack_rows: number of rack rows (1-12). Default 5.
     - rack_cols: number of rack columns (1-3). Default 1.
     - aisle_width: distance between rack rows in meters (1.0-5.0). Default 2.0.
-    - bounds_min/bounds_max: overall layout footprint in meters. MUST stay within ±6m on both axes.
+    - bounds_min/bounds_max: overall layout footprint in meters. The warehouse.usd is scaled 1.7× so the actual interior is ~±9m. Use bounds_min=(-9,-9) and bounds_max=(9,9) for standard layouts. NEVER exceed ±9m.
     - clutter_density: "low" (8 props), "medium" (18 props), "high" (30 props).
     - clutter_zones: optional list of area-specific clutter overrides.
       Each zone needs: area name, bounds_min, bounds_max, density, and types list.
@@ -104,12 +104,12 @@ def generate_scene_config(prompt: str, output_path: str):
 
     HAZARD ZONE RULES:
     - When the user mentions danger zones, restricted areas, or hazard areas, create HazardZone entries.
-    - Each HazardZone needs: name (snake_case identifier), bounds_min/bounds_max (x,y in meters, within warehouse bounds ±6m x, ±6m y), and danger_level.
+    - Each HazardZone needs: name (snake_case identifier), bounds_min/bounds_max (x,y in meters, within warehouse bounds ±9m x, ±9m y), and danger_level.
     - danger_level: "warning" for caution areas, "restricted" for authorized-only zones, "critical" for lethal hazards (e.g., active forklift aisle).
     - Common zone placements:
-      * "forklift aisle" / "vehicle path" → bounds_min=(-5, -2), bounds_max=(5, 2), danger_level="critical"
-      * "loading dock" → bounds_min=(-5, -6), bounds_max=(5, -4), danger_level="restricted"
-      * "storage area" / "racking zone" → bounds_min=(-6, 3), bounds_max=(6, 7), danger_level="warning"
+      * "forklift aisle" / "vehicle path" → bounds_min=(-8, -2.5), bounds_max=(8, 2.5), danger_level="critical"
+      * "loading dock" → bounds_min=(-8, -9), bounds_max=(8, -4), danger_level="restricted"
+      * "storage area" / "racking zone" → bounds_min=(-8, 3), bounds_max=(8, 9), danger_level="warning"
       * "inspection point" → small area bounds_min=(-1, -1), bounds_max=(1, 1), danger_level="warning"
     - Create a zone entity for each hazard_zone with type="zone" and asset_id equal to the zone's name (e.g. asset_id="forklift_aisle"). This is a logical anchor — do NOT use asset_id="cone" here.
 
@@ -117,7 +117,7 @@ def generate_scene_config(prompt: str, output_path: str):
     - Generate one WorkerBehavior entry per worker entity in the scene, in the same order they appear in entities.
     - Assign worker_id sequentially: "worker_01", "worker_02", etc.
     - Each WorkerBehavior must have at least 4 commands for realism.
-    - GoTo commands: x and y MUST be within [-5.5, 5.5] (keep clear of walls). Set rotation to a sensible facing direction (degrees, 0–360). z is always 0.0.
+    - GoTo commands: x and y MUST be within [-8.5, 8.5] (keep clear of walls). Set rotation to a sensible facing direction (degrees, 0–360). z is always 0.0.
     - Idle/LookAround commands: set duration in seconds (1.5–4 s). Do NOT set x, y, or rotation for these.
     - Spread workers across different zones — do NOT cluster them all in the same location.
     - Tailor behavior to the scenario:
@@ -138,7 +138,7 @@ def generate_scene_config(prompt: str, output_path: str):
       3. Continue to storage area (y ≈ 4–5), with a brief Idle stop
       4. Return via a laterally offset path (different x) to create a loop
       5. End back at dock
-    - Keep x within [-4, 4] and y within [-5.5, 5.5].
+    - Keep x within [-7, 7] and y within [-8.5, 8.5].
     - Use at least 6 GoTo waypoints + 2 Idle stops for a convincing route.
     - Set rotation at each waypoint to face the direction of travel.
     - PROXIMITY HAZARD: If the scenario involves "forklift near worker", "near miss", or "close pass", route the forklift through a waypoint within 1.5m of a worker's GoTo position to create a realistic near-miss frame. Worker and forklift should both be present in that location within the same simulation window.
