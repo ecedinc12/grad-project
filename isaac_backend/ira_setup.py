@@ -127,35 +127,28 @@ def bake_navmesh(simulation_app=None):
         print("[INFO] Navmesh baking started — waiting for completion...")
 
         baked = False
-        try:
-            event_stream = interface.get_navmesh_event_stream()
-            nav_updated_event = nav_core.EVENT_TYPE_NAVMESH_UPDATED
-
-            if simulation_app:
-                for tick in range(300):
-                    simulation_app.update()
-                    if tick % 50 == 0:
-                        print(f"[INFO] Navmesh baking... (event poll tick {tick}/300)")
-                        sys.stdout.flush()
-                    pending = event_stream.pop()
-                    while pending:
-                        if pending.type == nav_updated_event:
-                            baked = True
-                            break
-                        pending = event_stream.pop()
-                    if baked:
-                        print(f"[INFO] Navmesh bake event received at tick {tick}")
-                        break
-        except Exception as e:
-            print(f"[INFO] Navmesh event stream unavailable ({e}), falling back to tick poll")
+        if simulation_app:
+            for tick in range(300):
+                simulation_app.update()
+                if tick % 50 == 0:
+                    print(f"[INFO] Navmesh baking... (tick {tick}/300)")
+                    sys.stdout.flush()
+                if interface.get_navmesh() is not None:
+                    baked = True
+                    print(f"[INFO] Navmesh bake completed at tick {tick}")
+                    break
 
         if not baked and simulation_app:
-            print("[INFO] Polling with fixed ticks (200)...")
+            print("[INFO] Still waiting for navmesh (200 more ticks)...")
             for tick in range(200):
                 simulation_app.update()
                 if tick % 50 == 0:
                     print(f"[INFO] Navmesh baking... (fallback tick {tick}/200)")
                     sys.stdout.flush()
+                if interface.get_navmesh() is not None:
+                    baked = True
+                    print(f"[INFO] Navmesh bake completed at fallback tick {tick}")
+                    break
 
         navmesh_obj = interface.get_navmesh()
         if navmesh_obj is not None:
