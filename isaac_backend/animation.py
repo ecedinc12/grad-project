@@ -235,14 +235,23 @@ def pre_apply_animation_graph_overrides(planned_worker_names, asset_usd_path, st
     from pxr import Usd
 
     # --- Discover SkelRoot relative path from the asset USD ---
+    # USD references strip the asset's defaultPrim name from composed paths.
+    # E.g. if the asset defaultPrim is "Root" and SkelRoot is at "/Root/Char/ManRoot/Char",
+    # the composed path under the referencing prim is "Char/ManRoot/Char" (Root stripped).
     skelroot_rel = None
     try:
         temp_stage = Usd.Stage.Open(asset_usd_path)
         if temp_stage:
+            default_prim = temp_stage.GetDefaultPrim()
+            default_prefix = (default_prim.GetName() + "/") if default_prim and default_prim.IsValid() else ""
             for prim in temp_stage.Traverse():
                 if prim.GetTypeName() == "SkelRoot":
-                    # Strip leading "/" to get path relative to asset root
-                    skelroot_rel = str(prim.GetPath()).lstrip("/")
+                    rel = str(prim.GetPath()).lstrip("/")
+                    # Strip the defaultPrim prefix so the path matches what USD
+                    # composes when this asset is added as a reference.
+                    if default_prefix and rel.startswith(default_prefix):
+                        rel = rel[len(default_prefix):]
+                    skelroot_rel = rel
                     break
     except Exception as e:
         print(f"[WARN] pre_apply_animation_graph_overrides: could not open asset to find SkelRoot: {e}")
@@ -251,7 +260,7 @@ def pre_apply_animation_graph_overrides(planned_worker_names, asset_usd_path, st
         print("[WARN] pre_apply_animation_graph_overrides: SkelRoot not found in asset — skipping pre-apply")
         return
 
-    print(f"[INFO] pre_apply_animation_graph_overrides: SkelRoot rel path in asset = '{skelroot_rel}'")
+    print(f"[INFO] pre_apply_animation_graph_overrides: SkelRoot rel path (after defaultPrim strip) = '{skelroot_rel}'")
 
     # --- Find AnimationGraph on stage ---
     anim_graph_prim = None
