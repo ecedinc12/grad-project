@@ -518,6 +518,30 @@ def main():
     )
     _progress(f"Command injection: {injected} succeeded, {inj_failed} failed")
 
+    # If every worker failed, agents never registered during on_play() — likely because
+    # Replicator's flush and on_play() fired simultaneously on the first world.step(),
+    # overwriting AnimationGraphAPI before the animation graph plugin could cache it.
+    # Stop the timeline, re-apply AnimationGraphAPI, then restart so on_play() fires
+    # again with the API correctly in place.
+    if inj_failed > 0 and injected == 0 and spawned_worker_names:
+        _progress("All injections failed — stop/play cycle to re-trigger agent registration...")
+        omni.timeline.get_timeline_interface().stop()
+        for _ in range(10):
+            simulation_app.update()
+        link_workers_to_animation_graph(spawned_worker_names, stage, simulation_app)
+        for _ in range(20):
+            simulation_app.update()
+        omni.timeline.get_timeline_interface().play()
+        _progress("Re-warmup after stop/play (150 steps)...")
+        for _ in range(150):
+            world.step(render=True)
+        _progress("Re-injecting commands after stop/play...")
+        injected, inj_failed = inject_commands_after_play(
+            spawned_worker_names, worker_behaviors, simulation_app=simulation_app,
+            visible_bounds=visible_bounds,
+        )
+        _progress(f"Re-injection: {injected} succeeded, {inj_failed} failed")
+
     _progress("Clearing unwanted semantics before generation...")
     clear_unwanted_warehouse_semantics(stage)
 
