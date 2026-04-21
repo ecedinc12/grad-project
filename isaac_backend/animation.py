@@ -119,8 +119,14 @@ def bake_navmesh(simulation_app=None):
     is unavailable.
     """
     try:
+        print("[INFO] Navmesh bake: importing omni.anim.navigation.core...")
+        sys.stdout.flush()
         import omni.anim.navigation.core as nav_core
+        print("[INFO] Navmesh bake: acquiring interface...")
+        sys.stdout.flush()
         interface = nav_core.acquire_interface()
+        print("[INFO] Navmesh bake: calling start_navmesh_baking()...")
+        sys.stdout.flush()
         interface.start_navmesh_baking()
         print("[INFO] Navmesh baking started — waiting for completion...")
 
