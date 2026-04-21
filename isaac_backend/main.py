@@ -492,20 +492,17 @@ def main():
     _progress("Starting timeline for behavior scripts...")
     omni.timeline.get_timeline_interface().play()
 
-    # Re-apply AnimationGraphAPI immediately after play() before any world.step() calls.
-    # Replicator flushes its layer on play(), overwriting the pre-play AnimationGraphAPI
-    # application. Behavior scripts' on_play() fires on the first world.step(), so we
-    # must re-apply here (using simulation_app.update() which does not trigger on_play())
-    # to ensure Fabric has the API cached before character registration runs.
+    # Re-apply AnimationGraphAPI with ZERO updates between play() and the re-apply.
+    # Replicator flushes its layer synchronously inside play(), clearing Fabric's
+    # AnimationGraphAPI cache. on_play() fires on the very first simulation_app.update()
+    # after play(). Calling link_workers_to_animation_graph here (before any update)
+    # re-populates Fabric's cache via kit commands, so on_play() sees the API when
+    # it fires inside link_workers_to_animation_graph's trailing simulation_app.update()
+    # calls.
     if spawned_worker_names:
-        _progress("Re-applying AnimationGraphAPI immediately post-play (before on_play fires)...")
-        for _ in range(10):
-            simulation_app.update()
+        _progress("Re-applying AnimationGraphAPI directly after play() (zero updates between)...")
         linked, link_failed = link_workers_to_animation_graph(spawned_worker_names, stage, simulation_app)
         _progress(f"Post-play AnimationGraph re-link: {linked} linked, {link_failed} failed")
-        _progress("Letting Fabric sync AnimationGraphAPI (20 app updates, no physics)...")
-        for _ in range(20):
-            simulation_app.update()
 
     _progress("Warming up simulation for behavior initialization (300 steps)...")
     for _ in range(300):
@@ -528,10 +525,10 @@ def main():
         omni.timeline.get_timeline_interface().stop()
         for _ in range(10):
             simulation_app.update()
-        link_workers_to_animation_graph(spawned_worker_names, stage, simulation_app)
-        for _ in range(20):
-            simulation_app.update()
         omni.timeline.get_timeline_interface().play()
+        # Same zero-update rule: re-apply immediately after play() so Fabric cache is
+        # populated before on_play() fires inside the trailing simulation_app.update() calls.
+        link_workers_to_animation_graph(spawned_worker_names, stage, simulation_app)
         _progress("Re-warmup after stop/play (150 steps)...")
         for _ in range(150):
             world.step(render=True)
