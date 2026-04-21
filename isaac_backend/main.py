@@ -435,6 +435,12 @@ def main():
         visible_bounds=visible_bounds,
     )
 
+    # Bake navmesh after static clutter is spawned but before workers are set up.
+    # Calling bake after worker behavior scripts are attached causes start_navmesh_baking()
+    # to deadlock in native code. Workers are dynamic obstacles handled at runtime anyway.
+    _progress("Baking navmesh (static obstacles included, before worker setup)...")
+    bake_navmesh(simulation_app=simulation_app)
+
     spawned_worker_names, worker_behaviors = _setup_workers(
         scene_config, asset_library, stage, visible_bounds=visible_bounds,
     )
@@ -458,9 +464,6 @@ def main():
 
     _progress("Hiding driver prims...")
     hide_driver_prims(stage)
-
-    _progress("Baking navmesh (after clutter spawn, so obstacles are included)...")
-    bake_navmesh(simulation_app=simulation_app)
 
     _progress("Adjusting camera look_at to center on all spawned entities...")
     all_known_positions = entity_known_positions + [(wx, wy) for _, wx, wy in _worker_known_positions]
