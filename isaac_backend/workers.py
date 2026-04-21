@@ -77,8 +77,6 @@ def apply_ppe(worker_prim, ppe_state):
     hidden = []
     labeled = []
 
-    from isaac_backend.semantics import apply_usd_semantics
-
     for child in Usd.PrimRange(worker_prim):
         if child.GetTypeName() != "Mesh":
             continue
@@ -155,8 +153,6 @@ def spawn_workers(workers, worker_behaviors, asset_library, stage, simulation_ap
 
         prim = stage.DefinePrim(prim_path, "Xform")
         prim.GetReferences().AddReference(usd_path)
-        
-        from isaac_backend.semantics import apply_usd_semantics
         apply_usd_semantics(prim, "person")
 
         spawn_x, spawn_y = _initial_pos(name)
@@ -168,33 +164,23 @@ def spawn_workers(workers, worker_behaviors, asset_library, stage, simulation_ap
 
         print(f"[INFO] Spawned {name} @ ({spawn_x:.2f}, {spawn_y:.2f}, 0.0) ppe={ppe_state}")
 
-    # Wait for SkelRoots to resolve, then apply PPE visibility
-    if simulation_app is not None and workers:
-        for worker_idx, entity in enumerate(workers, 1):
-            name = f"worker_{worker_idx:02d}"
-            prim_path = f"/World/Characters/{name}"
-            skelroot = _wait_for_skelroot(prim_path, stage, simulation_app)
-            if skelroot is None:
-                print(f"[ERROR] SkelRoot not found for {name} after timeout.")
-                continue
+    # Wait for SkelRoots to resolve, then apply PPE visibility.
+    for worker_idx, entity in enumerate(workers, 1):
+        name = f"worker_{worker_idx:02d}"
+        prim_path = f"/World/Characters/{name}"
 
-            # Re-fetch the worker Xform prim for PPE application
-            worker_prim = stage.GetPrimAtPath(prim_path)
-            ppe_state = entity.get("ppe_state") or {}
-            apply_ppe(worker_prim, ppe_state)
-    else:
-        for worker_idx, entity in enumerate(workers, 1):
-            name = f"worker_{worker_idx:02d}"
-            prim_path = f"/World/Characters/{name}"
+        if simulation_app is not None:
+            skelroot = _wait_for_skelroot(prim_path, stage, simulation_app)
+        else:
             prim = stage.GetPrimAtPath(prim_path)
             skelroot = _find_skelroot(prim) if prim and prim.IsValid() else None
-            if skelroot is None:
-                print(f"[WARN] SkelRoot not found for {name} (no simulation_app for async wait).")
-                continue
 
-            worker_prim = stage.GetPrimAtPath(prim_path)
-            ppe_state = entity.get("ppe_state") or {}
-            apply_ppe(worker_prim, ppe_state)
+        if skelroot is None:
+            print(f"[WARN] SkelRoot not found for {name} — skipping PPE setup.")
+            continue
+
+        worker_prim = stage.GetPrimAtPath(prim_path)
+        apply_ppe(worker_prim, entity.get("ppe_state") or {})
 
     print(f"[INFO] Spawned {len(spawned_names)} workers: {sorted(spawned_names)}")
     return spawned_names

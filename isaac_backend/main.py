@@ -100,17 +100,16 @@ from isaac_backend.semantics import clear_unwanted_warehouse_semantics
 from isaac_backend.spawner import get_geofenced_spawner, spawn_hazard_zones, spawn_at_fixed_position, resolve_anchor_zone_bounds
 from isaac_backend.warehouse import spawn_warehouse_layout, hide_driver_prims, hide_warehouse_rack_frames
 from isaac_backend.workers import spawn_workers
-from isaac_backend.animation import (
+from isaac_backend.ira_setup import (
     enable_behavior_extensions,
     bake_navmesh,
-    setup_all_behaviors_async,
     ensure_biped_setup,
-    link_workers_to_animation_graph,
     create_character_wrapper_usd,
-    inject_commands_after_play,
-    reinject_random_commands,
-    VehicleAnimator,
+    setup_all_behaviors_async,
+    link_workers_to_animation_graph,
 )
+from isaac_backend.command_injection import inject_commands_after_play, reinject_random_commands
+from isaac_backend.vehicle_animation import VehicleAnimator
 
 COCO_CATEGORIES = {
     "person": {"name": "person", "id": 1, "supercategory": "worker", "color": (220, 20, 60)},
