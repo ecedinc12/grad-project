@@ -491,21 +491,25 @@ def main():
 
     _progress("Starting timeline for behavior scripts...")
     omni.timeline.get_timeline_interface().play()
+
+    # Re-apply AnimationGraphAPI immediately after play() before any world.step() calls.
+    # Replicator flushes its layer on play(), overwriting the pre-play AnimationGraphAPI
+    # application. Behavior scripts' on_play() fires on the first world.step(), so we
+    # must re-apply here (using simulation_app.update() which does not trigger on_play())
+    # to ensure Fabric has the API cached before character registration runs.
+    if spawned_worker_names:
+        _progress("Re-applying AnimationGraphAPI immediately post-play (before on_play fires)...")
+        for _ in range(10):
+            simulation_app.update()
+        linked, link_failed = link_workers_to_animation_graph(spawned_worker_names, stage, simulation_app)
+        _progress(f"Post-play AnimationGraph re-link: {linked} linked, {link_failed} failed")
+        _progress("Letting Fabric sync AnimationGraphAPI (20 app updates, no physics)...")
+        for _ in range(20):
+            simulation_app.update()
+
     _progress("Warming up simulation for behavior initialization (300 steps)...")
     for _ in range(300):
         world.step(render=True)
-
-    # Re-apply AnimationGraphAPI after Replicator has flushed its layer on play().
-    # Fabric re-syncs schema changes triggered by kit commands that arrive after the
-    # Replicator layer reset, so a second application here gives Fabric another chance
-    # to pick up the animationGraph relationship and register the characters.
-    if spawned_worker_names:
-        _progress("Re-applying AnimationGraphAPI post-play (Fabric re-sync)...")
-        linked, link_failed = link_workers_to_animation_graph(spawned_worker_names, stage, simulation_app)
-        _progress(f"Post-play AnimationGraph re-link: {linked} linked, {link_failed} failed")
-        _progress("Waiting 30 ticks for Fabric to re-sync AnimationGraphAPI...")
-        for _ in range(30):
-            world.step(render=True)
 
     _progress("Injecting commands via AgentManager...")
     injected, inj_failed = inject_commands_after_play(
