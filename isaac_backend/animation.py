@@ -130,8 +130,11 @@ def bake_navmesh(simulation_app=None):
             nav_updated_event = nav_core.EVENT_TYPE_NAVMESH_UPDATED
 
             if simulation_app:
-                for _ in range(300):
+                for tick in range(300):
                     simulation_app.update()
+                    if tick % 50 == 0:
+                        print(f"[INFO] Navmesh baking... (event poll tick {tick}/300)")
+                        sys.stdout.flush()
                     pending = event_stream.pop()
                     while pending:
                         if pending.type == nav_updated_event:
@@ -139,14 +142,18 @@ def bake_navmesh(simulation_app=None):
                             break
                         pending = event_stream.pop()
                     if baked:
+                        print(f"[INFO] Navmesh bake event received at tick {tick}")
                         break
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[INFO] Navmesh event stream unavailable ({e}), falling back to tick poll")
 
         if not baked and simulation_app:
-            print("[INFO] Event stream unavailable — polling with extended ticks (200)")
-            for _ in range(200):
+            print("[INFO] Polling with fixed ticks (200)...")
+            for tick in range(200):
                 simulation_app.update()
+                if tick % 50 == 0:
+                    print(f"[INFO] Navmesh baking... (fallback tick {tick}/200)")
+                    sys.stdout.flush()
 
         navmesh_obj = interface.get_navmesh()
         if navmesh_obj is not None:
