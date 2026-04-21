@@ -325,9 +325,11 @@ def link_workers_to_animation_graph(spawned_worker_names, stage, simulation_app=
             print(f"[INFO] AnimationGraphAPI applied to {linked} SkelRoots via CharacterUtil")
         except Exception as e:
             print(f"[WARN] CharacterUtil.setup_animation_graph_to_character() failed: {e}")
-            linked, failed = _link_animation_graph_fallback(skelroots, anim_graph_prim, stage)
-    else:
-        linked, failed = _link_animation_graph_fallback(skelroots, anim_graph_prim, stage)
+
+    # Always re-apply via kit commands so Fabric picks up the animationGraph attribute.
+    # CharacterUtil writes to the USD layer but omni.fabric.plugin reads its own
+    # attribute cache — the kit command path triggers the Fabric change notification.
+    linked, failed = _link_animation_graph_fallback(skelroots, anim_graph_prim, stage)
 
     if simulation_app:
         for _ in range(10):

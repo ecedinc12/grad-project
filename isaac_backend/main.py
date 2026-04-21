@@ -267,7 +267,7 @@ def _spawn_entities(scene_config, asset_library, stage, spawn_bounds_min, spawn_
 
     for entity in others:
         asset_id = entity.get("asset_id", "")
-        if asset_id == "zone":
+        if entity.get("type") == "zone":
             continue
         usd_path = asset_library.get(asset_id)
         if usd_path is None:
@@ -404,6 +404,9 @@ def main():
 
     _progress("Hiding baked-in rack frames from warehouse.usd...")
     hide_warehouse_rack_frames(stage)
+
+    _progress("Enabling behavior extensions (required for navmesh)...")
+    enable_behavior_extensions(simulation_app=simulation_app)
 
     _progress("Baking navmesh for obstacle avoidance...")
     bake_navmesh(simulation_app=simulation_app)
