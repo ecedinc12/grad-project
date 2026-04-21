@@ -349,9 +349,6 @@ def _setup_workers(scene_config, asset_library, stage, visible_bounds=None):
     if not workers:
         return set(), worker_behaviors
 
-    _progress("Enabling behavior extensions...")
-    enable_behavior_extensions(simulation_app=simulation_app)
-
     # Load Biped_Setup BEFORE spawning workers so we have the AnimationGraph prim path.
     # This lets us pre-apply AnimationGraphAPI as USD overrides at the expected SkelRoot
     # paths before the worker references load — Fabric then caches the API at first prim
@@ -438,6 +435,15 @@ def main():
         visible_bounds=visible_bounds,
     )
 
+    # Enable behavior extensions BEFORE baking the navmesh so omni.anim.navigation.core
+    # is imported and ready. Previously this was called inside _setup_workers() which ran
+    # after bake_navmesh(), causing the bake to fail with "No module named
+    # 'omni.anim.navigation.core'" and fall back to straight-line paths.
+    # Note: the deadlock we fixed earlier was caused by behavior *scripts* already being
+    # attached, not by the extension being enabled — so enabling here is safe.
+    _progress("Enabling behavior extensions (before navmesh bake)...")
+    enable_behavior_extensions(simulation_app=simulation_app)
+
     # Bake navmesh after static clutter is spawned but before workers are set up.
     # Calling bake after worker behavior scripts are attached causes start_navmesh_baking()
     # to deadlock in native code. Workers are dynamic obstacles handled at runtime anyway.
@@ -488,6 +494,18 @@ def main():
     _progress("Warming up simulation for behavior initialization (300 steps)...")
     for _ in range(300):
         world.step(render=True)
+
+    # Re-apply AnimationGraphAPI after Replicator has flushed its layer on play().
+    # Fabric re-syncs schema changes triggered by kit commands that arrive after the
+    # Replicator layer reset, so a second application here gives Fabric another chance
+    # to pick up the animationGraph relationship and register the characters.
+    if spawned_worker_names:
+        _progress("Re-applying AnimationGraphAPI post-play (Fabric re-sync)...")
+        linked, link_failed = link_workers_to_animation_graph(spawned_worker_names, stage, simulation_app)
+        _progress(f"Post-play AnimationGraph re-link: {linked} linked, {link_failed} failed")
+        _progress("Waiting 30 ticks for Fabric to re-sync AnimationGraphAPI...")
+        for _ in range(30):
+            world.step(render=True)
 
     _progress("Injecting commands via AgentManager...")
     injected, inj_failed = inject_commands_after_play(
