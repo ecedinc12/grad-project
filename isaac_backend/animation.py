@@ -204,6 +204,94 @@ def ensure_biped_setup(simulation_app=None):
     return biped_prim
 
 
+def pre_apply_animation_graph_overrides(planned_worker_names, asset_usd_path, stage):
+    """Pre-create USD overrides with AnimationGraphAPI at each worker's expected SkelRoot path.
+
+    Must be called BEFORE spawn_workers() adds the USD references.  When the
+    references load, Fabric processes the *composed* prim (override + reference),
+    so it sees AnimationGraphAPI in its attribute cache from the very first sync.
+    Calling after the reference loads is too late — Fabric caches prim data once and
+    does not re-sync applied API schemas added at runtime.
+
+    Steps:
+      1. Open the worker USD asset to find the SkelRoot path relative to the asset root.
+      2. Find the AnimationGraph prim already on stage (loaded by ensure_biped_setup).
+      3. For each planned worker name, create an OverridePrim at the expected SkelRoot
+         path and apply AnimationGraphAPI + set the animationGraph relationship.
+    """
+    from pxr import Usd
+
+    # --- Discover SkelRoot relative path from the asset USD ---
+    skelroot_rel = None
+    try:
+        temp_stage = Usd.Stage.Open(asset_usd_path)
+        if temp_stage:
+            for prim in temp_stage.Traverse():
+                if prim.GetTypeName() == "SkelRoot":
+                    # Strip leading "/" to get path relative to asset root
+                    skelroot_rel = str(prim.GetPath()).lstrip("/")
+                    break
+    except Exception as e:
+        print(f"[WARN] pre_apply_animation_graph_overrides: could not open asset to find SkelRoot: {e}")
+
+    if not skelroot_rel:
+        print("[WARN] pre_apply_animation_graph_overrides: SkelRoot not found in asset — skipping pre-apply")
+        return
+
+    print(f"[INFO] pre_apply_animation_graph_overrides: SkelRoot rel path in asset = '{skelroot_rel}'")
+
+    # --- Find AnimationGraph on stage ---
+    anim_graph_prim = None
+    biped_prim = stage.GetPrimAtPath("/World/Characters/Biped_Setup")
+    if biped_prim and biped_prim.IsValid():
+        anim_graph_prim = _find_animation_graph(biped_prim, stage)
+    if anim_graph_prim is None:
+        for prim in stage.Traverse():
+            if prim.GetTypeName() == "AnimationGraph":
+                anim_graph_prim = prim
+                break
+
+    if anim_graph_prim is None:
+        print("[WARN] pre_apply_animation_graph_overrides: no AnimationGraph on stage — skipping pre-apply")
+        return
+
+    print(f"[INFO] pre_apply_animation_graph_overrides: AnimationGraph at {anim_graph_prim.GetPath()}")
+
+    # --- Create overrides and apply AnimationGraphAPI ---
+    applied = 0
+    for name in sorted(planned_worker_names):
+        override_path = f"/World/Characters/{name}/{skelroot_rel}"
+        try:
+            override = stage.OverridePrim(override_path)
+            try:
+                import AnimGraphSchema
+                AnimGraphSchema.AnimationGraphAPI.Apply(override)
+                api = AnimGraphSchema.AnimationGraphAPI(override)
+                rel = api.GetAnimationGraphRel()
+                if rel:
+                    rel.SetTargets([anim_graph_prim.GetPath()])
+                print(f"[INFO] Pre-applied AnimationGraphAPI override at {override_path} (AnimGraphSchema)")
+            except ImportError:
+                # AnimGraphSchema not available — fall back to kit commands
+                if _HAS_KIT_COMMANDS and Sdf is not None:
+                    import omni.kit.commands
+                    paths = [Sdf.Path(override_path)]
+                    anim_graph_path = Sdf.Path(str(anim_graph_prim.GetPath()))
+                    omni.kit.commands.execute("RemoveAnimationGraphAPICommand", paths=paths)
+                    omni.kit.commands.execute(
+                        "ApplyAnimationGraphAPICommand", paths=paths, animation_graph_path=anim_graph_path
+                    )
+                    print(f"[INFO] Pre-applied AnimationGraphAPI override at {override_path} (kit commands)")
+                else:
+                    print(f"[WARN] Cannot pre-apply AnimationGraphAPI for {name}: no AnimGraphSchema or kit commands")
+                    continue
+            applied += 1
+        except Exception as e:
+            print(f"[WARN] pre_apply_animation_graph_overrides: failed for {name}: {e}")
+
+    print(f"[INFO] Pre-applied AnimationGraphAPI overrides for {applied}/{len(planned_worker_names)} workers")
+
+
 def _find_skelroot_for_worker(worker_name, stage):
     """Find the SkelRoot prim for a worker spawned under /World/Characters/{name}."""
     xform_path = f"/World/Characters/{worker_name}"
@@ -655,15 +743,30 @@ class VehicleAnimator:
             if rotate_op is None:
                 rotate_op = xformable.AddRotateXYZOp()
 
+            # Precompute cumulative distances for speed-consistent interpolation.
+            cum_dists = [0.0]
+            for i in range(1, len(waypoints)):
+                p1, p2 = waypoints[i - 1], waypoints[i]
+                d = math.sqrt((p2["x"] - p1["x"]) ** 2 + (p2["y"] - p1["y"]) ** 2)
+                cum_dists.append(cum_dists[-1] + d)
+            total_dist = cum_dists[-1]
+            if total_dist > 0:
+                cum_norm = [d / total_dist for d in cum_dists]
+            else:
+                n = len(waypoints) - 1
+                cum_norm = [i / n if n > 0 else 0.0 for i in range(len(waypoints))]
+
             self.vehicles.append({
                 "id": v_id,
                 "prim": prim,
                 "waypoints": waypoints,
+                "cum_norm": cum_norm,
                 "current_wp": 0,
                 "translate_op": translate_op,
                 "rotate_op": rotate_op,
+                "current_rot": None,  # tracked for smooth turning
             })
-            print(f"[INFO] VehicleAnimator tracking {v_id} with {len(waypoints)} waypoints")
+            print(f"[INFO] VehicleAnimator tracking {v_id} with {len(waypoints)} waypoints (total dist {total_dist:.1f}m)")
 
     def _expand_via_navmesh(self, waypoints, v_id):
         """Replace straight-line segments with navmesh-queried paths."""
@@ -694,6 +797,8 @@ class VehicleAnimator:
                     for pt in path[1:-1]:
                         expanded.append({"x": pt.x, "y": pt.y, "z": p2["z"], "rot": None})
                     print(f"[INFO] VehicleAnimator: navmesh added {len(path)-2} intermediate points for {v_id}")
+                else:
+                    print(f"[WARN] VehicleAnimator: navmesh returned straight-line path for {v_id} ({p1['x']:.1f},{p1['y']:.1f})->({p2['x']:.1f},{p2['y']:.1f}) — vehicle may clip through objects")
             except Exception as e:
                 print(f"[WARN] VehicleAnimator: navmesh query failed for {v_id}: {e}")
             expanded.append(p2)
@@ -705,17 +810,26 @@ class VehicleAnimator:
 
         from pxr import Gf
 
+        # Max yaw change per frame — limits turn speed to ~60 deg/s at 30 fps.
+        MAX_ROT_PER_FRAME = 2.0
+
         for v in self.vehicles:
             wps = v["waypoints"]
             if not wps:
                 continue
 
-            # Simple interpolation across total frames
+            # Distance-proportional interpolation: each segment's share of frames
+            # is proportional to its length, so the vehicle moves at consistent speed.
             progress = current_frame / max(1, total_frames - 1)
-            total_segments = len(wps) - 1
-            segment_float = progress * total_segments
-            segment_idx = min(int(segment_float), total_segments - 1)
-            t = segment_float - segment_idx
+            cum = v["cum_norm"]
+            segment_idx = len(wps) - 2
+            t = 1.0
+            for i in range(len(cum) - 1):
+                if progress <= cum[i + 1]:
+                    segment_idx = i
+                    span = cum[i + 1] - cum[i]
+                    t = (progress - cum[i]) / span if span > 1e-6 else 0.0
+                    break
 
             p1 = wps[segment_idx]
             p2 = wps[segment_idx + 1]
@@ -733,7 +847,7 @@ class VehicleAnimator:
 
             dx = p2["x"] - p1["x"]
             dy = p2["y"] - p1["y"]
-            dist_sq = dx*dx + dy*dy
+            dist_sq = dx * dx + dy * dy
 
             if dist_sq > 0.001:
                 # Asset faces +Y at 0°; subtract 90° to align with travel direction.
@@ -743,12 +857,21 @@ class VehicleAnimator:
                     # Blend into docking orientation in the final 30% of the segment.
                     blend_t = (t - 0.7) / 0.3
                     diff = ((dest_rot - travel_rot + 180) % 360) - 180
-                    rot_deg = travel_rot + diff * blend_t
+                    target_rot = travel_rot + diff * blend_t
                 else:
-                    rot_deg = travel_rot
+                    target_rot = travel_rot
             else:
                 # Stationary (Idle): hold the waypoint's explicit rotation.
-                rot_deg = p2.get("rot") if p2.get("rot") is not None else (p1.get("rot") if p1.get("rot") is not None else 0.0)
+                target_rot = p2.get("rot") if p2.get("rot") is not None else (p1.get("rot") if p1.get("rot") is not None else 0.0)
+
+            # Clamp yaw change per frame for smooth, realistic turns.
+            if v["current_rot"] is None:
+                v["current_rot"] = target_rot
+            else:
+                diff = ((target_rot - v["current_rot"] + 180) % 360) - 180
+                clamped = max(-MAX_ROT_PER_FRAME, min(MAX_ROT_PER_FRAME, diff))
+                v["current_rot"] = v["current_rot"] + clamped
+            rot_deg = v["current_rot"]
 
             translate_op.Set(Gf.Vec3d(cur_x, cur_y, cur_z))
 

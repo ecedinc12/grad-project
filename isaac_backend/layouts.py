@@ -9,7 +9,7 @@ and clutter props into the USD stage.
 import os
 import json
 import random
-from pxr import UsdGeom, Gf
+from pxr import UsdGeom, Gf, UsdPhysics
 import omni.usd
 import omni.kit.commands
 from isaac_backend.semantics import apply_usd_semantics
@@ -102,6 +102,10 @@ def _place(asset_id, x, y, z, rot_z, asset_library, stage, idx, scale=None):
         xf.SetScale(Gf.Vec3f(scale, scale, scale))
     semantic_class = SEMANTIC_MAP.get(asset_id, asset_id)
     apply_usd_semantics(prim, semantic_class)
+    # Static collision so navmesh routes workers and vehicles around layout items.
+    # CollisionAPI only (no RigidBodyAPI) keeps items stationary.
+    if not prim.HasAPI(UsdPhysics.CollisionAPI):
+        UsdPhysics.CollisionAPI.Apply(prim)
     return idx + 1
 
 
@@ -244,7 +248,7 @@ def _spawn_pallets(params, asset_library, stage, idx):
     total_x = (pallet_cols_grid - 1) * spacing_x
     total_y = (pallet_rows_grid - 1) * spacing_y
     x_start = (bmin[0] + bmax[0]) / 2.0 - total_x / 2.0
-    y_start = bmax[1] - 2.0
+    y_start = bmax[1] - 0.5
 
     for r in range(pallet_rows_grid):
         for c in range(pallet_cols_grid):

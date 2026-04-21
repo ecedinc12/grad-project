@@ -106,6 +106,7 @@ from isaac_backend.animation import (
     setup_all_behaviors_async,
     ensure_biped_setup,
     link_workers_to_animation_graph,
+    pre_apply_animation_graph_overrides,
     inject_commands_after_play,
     reinject_random_commands,
     VehicleAnimator,
@@ -352,17 +353,25 @@ def _setup_workers(scene_config, asset_library, stage, visible_bounds=None):
     _progress("Enabling behavior extensions...")
     enable_behavior_extensions(simulation_app=simulation_app)
 
+    # Load Biped_Setup BEFORE spawning workers so we have the AnimationGraph prim path.
+    # This lets us pre-apply AnimationGraphAPI as USD overrides at the expected SkelRoot
+    # paths before the worker references load — Fabric then caches the API at first prim
+    # load, rather than missing a post-load schema change it never re-syncs.
+    _progress("Loading Biped_Setup for AnimationGraph (before worker spawn)...")
+    ensure_biped_setup(simulation_app=simulation_app)
+
+    planned_names = {f"worker_{i + 1:02d}" for i in range(len(workers))}
+    _progress("Pre-applying AnimationGraphAPI overrides (before worker references load)...")
+    pre_apply_animation_graph_overrides(planned_names, asset_library["worker"], stage)
+
     _progress(f"Spawning {len(workers)} workers...")
     spawned_names = spawn_workers(workers, worker_behaviors, asset_library, stage, simulation_app, visible_bounds=visible_bounds)
-
-    _progress("Loading Biped_Setup for AnimationGraph...")
-    ensure_biped_setup(simulation_app=simulation_app)
 
     _progress("Attaching IRA behavior scripts to workers...")
     attached, failed = setup_all_behaviors_async(spawned_names, worker_behaviors, stage)
     _progress(f"IRA behaviors: {attached} attached, {failed} failed")
 
-    _progress("Linking workers to AnimationGraph...")
+    _progress("Verifying AnimationGraph links...")
     linked, link_failed = link_workers_to_animation_graph(spawned_names, stage, simulation_app)
     _progress(f"AnimationGraph linking: {linked} linked, {link_failed} failed")
 
@@ -404,12 +413,6 @@ def main():
 
     _progress("Hiding baked-in rack frames from warehouse.usd...")
     hide_warehouse_rack_frames(stage)
-
-    _progress("Enabling behavior extensions (required for navmesh)...")
-    enable_behavior_extensions(simulation_app=simulation_app)
-
-    _progress("Baking navmesh for obstacle avoidance...")
-    bake_navmesh(simulation_app=simulation_app)
 
     _progress("Computing camera placement (camera-first)...")
     hazard_zones = scene_config.get("hazard_zones", [])
@@ -455,6 +458,9 @@ def main():
 
     _progress("Hiding driver prims...")
     hide_driver_prims(stage)
+
+    _progress("Baking navmesh (after clutter spawn, so obstacles are included)...")
+    bake_navmesh(simulation_app=simulation_app)
 
     _progress("Adjusting camera look_at to center on all spawned entities...")
     all_known_positions = entity_known_positions + [(wx, wy) for _, wx, wy in _worker_known_positions]
