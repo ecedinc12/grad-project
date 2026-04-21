@@ -217,6 +217,100 @@ def ensure_biped_setup(simulation_app=None):
     return biped_prim
 
 
+def create_character_wrapper_usd(original_usd_path, stage):
+    """Create a temporary wrapper USD that references the worker asset with AnimationGraphAPI
+    baked in as a static file opinion on the SkelRoot.
+
+    Fabric populates its prim attribute cache at first load from the static layer stack.
+    Runtime USD overrides (OverridePrim / ApplyAPI calls) arrive after that cache is
+    sealed and are silently ignored by Fabric.  A wrapper USD file is processed as part
+    of the static stack, so Fabric sees AnimationGraphAPI from the very first sync.
+
+    Returns the path to the temp wrapper file, or original_usd_path if creation fails.
+    """
+    import tempfile
+    from pxr import Usd, Sdf
+
+    # --- Find SkelRoot relative path (strip defaultPrim prefix as references do) ---
+    skelroot_rel = None
+    try:
+        tmp_stage = Usd.Stage.Open(original_usd_path)
+        if tmp_stage:
+            dp = tmp_stage.GetDefaultPrim()
+            prefix = (dp.GetName() + "/") if dp and dp.IsValid() else ""
+            for prim in tmp_stage.Traverse():
+                if prim.GetTypeName() == "SkelRoot":
+                    rel = str(prim.GetPath()).lstrip("/")
+                    if prefix and rel.startswith(prefix):
+                        rel = rel[len(prefix):]
+                    skelroot_rel = rel
+                    break
+    except Exception as e:
+        print(f"[WARN] create_character_wrapper_usd: could not inspect asset: {e}")
+
+    if not skelroot_rel:
+        print("[WARN] create_character_wrapper_usd: no SkelRoot in asset — using original USD")
+        return original_usd_path
+
+    # --- Find AnimationGraph on the live stage ---
+    anim_graph_prim = None
+    biped_prim = stage.GetPrimAtPath("/World/Characters/Biped_Setup")
+    if biped_prim and biped_prim.IsValid():
+        anim_graph_prim = _find_animation_graph(biped_prim, stage)
+    if anim_graph_prim is None:
+        for prim in stage.Traverse():
+            if prim.GetTypeName() == "AnimationGraph":
+                anim_graph_prim = prim
+                break
+
+    if anim_graph_prim is None:
+        print("[WARN] create_character_wrapper_usd: no AnimationGraph on stage — using original USD")
+        return original_usd_path
+
+    # --- Build wrapper USD programmatically ---
+    try:
+        tmp_path = tempfile.mktemp(suffix=".usda")
+        wrapper = Usd.Stage.CreateNew(tmp_path)
+
+        root = wrapper.DefinePrim("/CharacterWrapper", "Xform")
+        wrapper.SetDefaultPrim(root)
+        root.GetReferences().AddReference(original_usd_path)
+
+        skelroot_abs = f"/CharacterWrapper/{skelroot_rel}"
+        sr_over = wrapper.OverridePrim(skelroot_abs)
+
+        try:
+            import AnimGraphSchema
+            AnimGraphSchema.AnimationGraphAPI.Apply(sr_over)
+            api = AnimGraphSchema.AnimationGraphAPI(sr_over)
+            rel = api.GetAnimationGraphRel()
+            if rel:
+                rel.SetTargets([anim_graph_prim.GetPath()])
+            print(f"[INFO] create_character_wrapper_usd: AnimationGraphAPI applied via AnimGraphSchema at {skelroot_abs}")
+        except ImportError:
+            if _HAS_KIT_COMMANDS and Sdf is not None:
+                import omni.kit.commands
+                paths = [Sdf.Path(skelroot_abs)]
+                omni.kit.commands.execute("RemoveAnimationGraphAPICommand", paths=paths)
+                omni.kit.commands.execute(
+                    "ApplyAnimationGraphAPICommand",
+                    paths=paths,
+                    animation_graph_path=Sdf.Path(str(anim_graph_prim.GetPath())),
+                )
+                print(f"[INFO] create_character_wrapper_usd: AnimationGraphAPI applied via kit commands at {skelroot_abs}")
+            else:
+                print("[WARN] create_character_wrapper_usd: no AnimGraphSchema or kit commands — using original USD")
+                return original_usd_path
+
+        wrapper.Save()
+        print(f"[INFO] create_character_wrapper_usd: wrapper saved to {tmp_path} (SkelRoot rel: {skelroot_rel})")
+        return tmp_path
+
+    except Exception as e:
+        print(f"[WARN] create_character_wrapper_usd: failed: {e}")
+        return original_usd_path
+
+
 def pre_apply_animation_graph_overrides(planned_worker_names, asset_usd_path, stage):
     """Pre-create USD overrides with AnimationGraphAPI at each worker's expected SkelRoot path.
 

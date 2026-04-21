@@ -106,7 +106,7 @@ from isaac_backend.animation import (
     setup_all_behaviors_async,
     ensure_biped_setup,
     link_workers_to_animation_graph,
-    pre_apply_animation_graph_overrides,
+    create_character_wrapper_usd,
     inject_commands_after_play,
     reinject_random_commands,
     VehicleAnimator,
@@ -360,12 +360,16 @@ def _setup_workers(scene_config, asset_library, stage, visible_bounds=None):
     _progress("Loading Biped_Setup for AnimationGraph (before worker spawn)...")
     ensure_biped_setup(simulation_app=simulation_app)
 
-    planned_names = {f"worker_{i + 1:02d}" for i in range(len(workers))}
-    _progress("Pre-applying AnimationGraphAPI overrides (before worker references load)...")
-    pre_apply_animation_graph_overrides(planned_names, asset_library["worker"], stage)
+    # Build a wrapper USD that has AnimationGraphAPI baked into the SkelRoot as a
+    # static file opinion.  Fabric populates its attribute cache at first prim load
+    # from the static USD layer stack — runtime USD overrides never reach that cache.
+    # Using a wrapper file ensures Fabric sees the API schema at load time.
+    worker_usd = create_character_wrapper_usd(asset_library["worker"], stage)
+    wrapped_library = dict(asset_library)
+    wrapped_library["worker"] = worker_usd
 
     _progress(f"Spawning {len(workers)} workers...")
-    spawned_names = spawn_workers(workers, worker_behaviors, asset_library, stage, simulation_app, visible_bounds=visible_bounds)
+    spawned_names = spawn_workers(workers, worker_behaviors, wrapped_library, stage, simulation_app, visible_bounds=visible_bounds)
 
     _progress("Attaching IRA behavior scripts to workers...")
     attached, failed = setup_all_behaviors_async(spawned_names, worker_behaviors, stage)
