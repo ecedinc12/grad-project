@@ -98,7 +98,7 @@ def enable_behavior_extensions(simulation_app=None):
             print(f"[WARN] Could not enable extension {ext}: {e}")
 
     if simulation_app:
-        for _ in range(30):
+        for _ in range(60):
             simulation_app.update()
 
     _refresh_ira_state()
@@ -232,6 +232,26 @@ def _find_stage_animation_graph(stage):
     return None
 
 
+def wait_for_animation_graph(stage, simulation_app, max_ticks=120):
+    """Poll until the AnimationGraph prim from Biped_Setup is fully resolved.
+
+    Biped_Setup contains nested USD references that load asynchronously.
+    The AnimationGraph prim may not be traversable immediately after
+    ensure_biped_setup() returns.  Returns the prim, or None on timeout.
+    """
+    for tick in range(max_ticks):
+        prim = _find_stage_animation_graph(stage)
+        if prim is not None:
+            print(f"[INFO] AnimationGraph resolved at {prim.GetPath()} after {tick} ticks")
+            return prim
+        simulation_app.update()
+        if tick > 0 and tick % 30 == 0:
+            print(f"[INFO] Waiting for AnimationGraph prim... ({tick}/{max_ticks} ticks)")
+    print("[ERROR] AnimationGraph prim never appeared on stage after "
+          f"{max_ticks} ticks — workers will not animate")
+    return None
+
+
 def _find_skelroot_for_worker(worker_name, stage):
     """Find the SkelRoot prim for a worker spawned under /World/Characters/{name}."""
     xform_path = f"/World/Characters/{worker_name}"
@@ -298,31 +318,75 @@ def create_character_wrapper_usd(original_usd_path, stage):
         skelroot_abs = f"/CharacterWrapper/{skelroot_rel}"
         sr_over = wrapper.OverridePrim(skelroot_abs)
 
+        anim_graph_path = anim_graph_prim.GetPath()
+        applied = False
+
+        # --- Strategy 1: AnimGraphSchema Python bindings (best) ---
         try:
             import AnimGraphSchema
             AnimGraphSchema.AnimationGraphAPI.Apply(sr_over)
             api = AnimGraphSchema.AnimationGraphAPI(sr_over)
             rel = api.GetAnimationGraphRel()
             if rel:
-                rel.SetTargets([anim_graph_prim.GetPath()])
-            print(f"[INFO] create_character_wrapper_usd: AnimationGraphAPI applied via AnimGraphSchema at {skelroot_abs}")
-        except ImportError:
-            if _HAS_KIT_COMMANDS and Sdf is not None:
-                import omni.kit.commands
-                paths = [Sdf.Path(skelroot_abs)]
-                omni.kit.commands.execute("RemoveAnimationGraphAPICommand", paths=paths)
-                omni.kit.commands.execute(
-                    "ApplyAnimationGraphAPICommand",
-                    paths=paths,
-                    animation_graph_path=Sdf.Path(str(anim_graph_prim.GetPath())),
-                )
-                print(f"[INFO] create_character_wrapper_usd: AnimationGraphAPI applied via kit commands at {skelroot_abs}")
-            else:
-                print("[WARN] create_character_wrapper_usd: no AnimGraphSchema or kit commands — using original USD")
+                rel.SetTargets([anim_graph_path])
+                # Capture the actual relationship name for diagnostics
+                print(f"[INFO] create_character_wrapper_usd: AnimationGraphAPI applied via "
+                      f"AnimGraphSchema at {skelroot_abs} (rel={rel.GetName()})")
+            applied = True
+        except (ImportError, AttributeError) as e:
+            print(f"[INFO] create_character_wrapper_usd: AnimGraphSchema unavailable ({e}), "
+                  "using Sdf layer fallback")
+
+        # --- Strategy 2: Raw Sdf layer API on the wrapper stage ---
+        # CRITICAL: Do NOT use omni.kit.commands here — kit commands always
+        # operate on the main simulation stage, not this wrapper stage.
+        if not applied:
+            layer = wrapper.GetRootLayer()
+            prim_spec = layer.GetPrimAtPath(skelroot_abs)
+            if prim_spec is None:
+                print(f"[WARN] create_character_wrapper_usd: prim spec not found at {skelroot_abs}")
+                return original_usd_path
+
+            # Add AnimationGraphAPI to apiSchemas
+            schemas = _Sdf.TokenListOp()
+            schemas.prependedItems = ["AnimationGraphAPI"]
+            prim_spec.SetInfo("apiSchemas", schemas)
+
+            # Create the animationGraph relationship.
+            # Try the two known property names used across Omniverse versions.
+            anim_graph_sdf_path = _Sdf.Path(str(anim_graph_path))
+            for rel_name in ("animationGraph:animationGraph", "animationGraphs:animationGraph"):
+                try:
+                    rel_spec = _Sdf.RelationshipSpec(prim_spec, rel_name, custom=False)
+                    rel_spec.targetPathList.explicitItems = [anim_graph_sdf_path]
+                    applied = True
+                    print(f"[INFO] create_character_wrapper_usd: AnimationGraphAPI applied via "
+                          f"Sdf layer at {skelroot_abs} (rel={rel_name})")
+                    break
+                except Exception as rel_err:
+                    print(f"[INFO] create_character_wrapper_usd: rel name '{rel_name}' failed: {rel_err}")
+
+            if not applied:
+                print("[WARN] create_character_wrapper_usd: could not create animationGraph "
+                      "relationship — using original USD")
                 return original_usd_path
 
         wrapper.Save()
-        print(f"[INFO] create_character_wrapper_usd: wrapper saved to {tmp_path} (SkelRoot rel: {skelroot_rel})")
+
+        # --- Verify the saved wrapper actually contains AnimationGraphAPI ---
+        verify = Usd.Stage.Open(tmp_path)
+        if verify:
+            vp = verify.GetPrimAtPath(skelroot_abs)
+            api_schemas = vp.GetMetadata("apiSchemas") if vp else None
+            rels = [r.GetName() for r in vp.GetRelationships()] if vp else []
+            print(f"[INFO] create_character_wrapper_usd: verification — "
+                  f"apiSchemas={api_schemas}, relationships={rels}")
+            if api_schemas is None:
+                print("[WARN] create_character_wrapper_usd: wrapper verification FAILED — "
+                      "AnimationGraphAPI not present in saved file")
+
+        print(f"[INFO] create_character_wrapper_usd: wrapper saved to {tmp_path} "
+              f"(SkelRoot rel: {skelroot_rel})")
         return tmp_path
 
     except Exception as e:

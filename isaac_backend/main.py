@@ -107,6 +107,7 @@ from isaac_backend.ira_setup import (
     create_character_wrapper_usd,
     setup_all_behaviors_async,
     link_workers_to_animation_graph,
+    wait_for_animation_graph,
 )
 from isaac_backend.command_injection import inject_commands_after_play, reinject_random_commands
 from isaac_backend.vehicle_animation import VehicleAnimator
@@ -350,11 +351,15 @@ def _setup_workers(scene_config, asset_library, stage, visible_bounds=None):
         return set(), worker_behaviors
 
     # Load Biped_Setup BEFORE spawning workers so we have the AnimationGraph prim path.
-    # This lets us pre-apply AnimationGraphAPI as USD overrides at the expected SkelRoot
-    # paths before the worker references load — Fabric then caches the API at first prim
-    # load, rather than missing a post-load schema change it never re-syncs.
     _progress("Loading Biped_Setup for AnimationGraph (before worker spawn)...")
     ensure_biped_setup(simulation_app=simulation_app)
+
+    # Biped_Setup has nested USD references — the AnimationGraph prim may not be
+    # traversable yet.  Poll until it appears so the wrapper can reference it.
+    _progress("Waiting for AnimationGraph prim to resolve...")
+    anim_graph_prim = wait_for_animation_graph(stage, simulation_app)
+    if anim_graph_prim is None:
+        _progress("[ERROR] AnimationGraph not found — workers will spawn without animation")
 
     # Build a wrapper USD that has AnimationGraphAPI baked into the SkelRoot as a
     # static file opinion.  Fabric populates its attribute cache at first prim load
