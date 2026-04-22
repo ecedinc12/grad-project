@@ -12,6 +12,9 @@ pydantic>=2.0.0
 numpy>=1.24.0
 Pillow>=10.0.0
 
+# Gradio UI (ui/app.py) — kurulum: aynı yorumlayıcı ile `python3 -m pip install -r requirements.txt`
+gradio>=6.0,<7
+
 # RAG system (rag_system/)
 chromadb>=0.4.0
 sentence-transformers>=2.2.0
