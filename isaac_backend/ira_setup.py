@@ -111,33 +111,32 @@ def _disable_navmesh_settings():
     settings.set("/exts/omni.anim.people/navigation_settings/dynamic_avoidance_enabled", False)
 
 
-def bake_navmesh(simulation_app=None, max_ticks=300, fallback_ticks=180):
-    """Bake navmesh after the warehouse layout is loaded so workers path around obstacles.
+def bake_navmesh(simulation_app=None, max_ticks=240):
+    """Wait for the navigation extension's auto-bake to produce a navmesh.
 
-    Waits for completion via the navigation interface's event stream
-    (EVENT_TYPE_NAVMESH_UPDATED). get_navmesh() returns a handle — it is not a
-    completion signal and polling it as one is what caused previous runs to
-    time out after 500 ticks.
+    The extension auto-bakes from static stage geometry when
+    /exts/omni.anim.people/navigation_settings/navmesh_enabled is True (set in
+    enable_behavior_extensions). We do NOT call interface.start_navmesh_baking()
+    — in this kit build it is a blocking native call that hangs the process
+    (Ctrl-C ineffective because the GIL is held). Reference code in
+    references/isaac_sim_pod/utils.py also never calls it.
 
-    IMPORTANT: Must be called BEFORE worker behavior scripts are attached.
-    start_navmesh_baking() is a blocking native C++ call that deadlocks if
-    IRA behavior scripts are already running on the stage.
+    Poll interface.get_navmesh() each tick; return True once it returns a
+    non-None handle, False on timeout.
 
-    Returns True on successful bake (event received), False on timeout or failure.
+    IMPORTANT: Must be called BEFORE worker behavior scripts are attached so
+    the static geometry scan completes without IRA behavior scripts churning
+    the stage.
     """
     try:
-        print("[INFO] Navmesh bake: importing omni.anim.navigation.core...")
+        print("[INFO] Navmesh: importing omni.anim.navigation.core...")
         sys.stdout.flush()
         import omni.anim.navigation.core as nav_core
-        print("[INFO] Navmesh bake: acquiring interface...")
+        print("[INFO] Navmesh: acquiring interface...")
         sys.stdout.flush()
         interface = nav_core.acquire_interface()
-        print("[INFO] Navmesh bake: calling start_navmesh_baking()...")
-        sys.stdout.flush()
-        interface.start_navmesh_baking()
-        print("[INFO] Navmesh baking started — waiting for EVENT_TYPE_NAVMESH_UPDATED...")
     except Exception as e:
-        print(f"[WARN] Navmesh baking failed to start (workers will use direct navigation): {e}")
+        print(f"[WARN] Navmesh interface unavailable ({e}) — workers will use direct navigation")
         _disable_navmesh_settings()
         return False
 
@@ -145,33 +144,25 @@ def bake_navmesh(simulation_app=None, max_ticks=300, fallback_ticks=180):
         print("[WARN] No simulation_app provided — cannot tick for bake completion")
         return False
 
-    # Primary path: event-stream completion signal.
-    try:
-        event_stream = interface.get_navmesh_event_stream()
-        nav_updated_event = nav_core.EVENT_TYPE_NAVMESH_UPDATED
-    except (AttributeError, Exception) as e:
-        print(f"[WARN] Navmesh event stream unavailable ({e}) — "
-              f"bake completion not verified, warming up for {fallback_ticks} ticks")
-        for tick in range(fallback_ticks):
-            simulation_app.update()
-            if tick > 0 and tick % 60 == 0:
-                print(f"[INFO] Navmesh warmup... ({tick}/{fallback_ticks})")
-                sys.stdout.flush()
-        return interface.get_navmesh() is not None
+    print(f"[INFO] Navmesh: waiting for auto-bake to produce a navmesh "
+          f"(up to {max_ticks} ticks)...")
+    sys.stdout.flush()
 
     for tick in range(max_ticks):
         simulation_app.update()
-        if tick > 0 and tick % 50 == 0:
-            print(f"[INFO] Navmesh baking... (tick {tick}/{max_ticks})")
+        if tick > 0 and tick % 40 == 0:
+            print(f"[INFO] Navmesh: waiting... ({tick}/{max_ticks})")
             sys.stdout.flush()
-        pending = event_stream.pop()
-        while pending is not None:
-            if pending.type == nav_updated_event:
-                print(f"[INFO] Navmesh bake event received at tick {tick}")
-                return True
-            pending = event_stream.pop()
+        try:
+            navmesh = interface.get_navmesh()
+        except Exception as e:
+            print(f"[WARN] Navmesh: get_navmesh() raised {e} at tick {tick}")
+            navmesh = None
+        if navmesh is not None:
+            print(f"[INFO] Navmesh: auto-bake produced a navmesh at tick {tick}")
+            return True
 
-    print(f"[ERROR] Navmesh bake did not complete within {max_ticks} ticks — "
+    print(f"[ERROR] Navmesh: auto-bake did not produce a navmesh within {max_ticks} ticks — "
           "disabling navmesh navigation; workers and vehicles will use direct paths")
     _disable_navmesh_settings()
     return False
