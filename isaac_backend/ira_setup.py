@@ -264,6 +264,7 @@ def _define_navmesh_volume(stage, bounds_min, bounds_max, height=4.0,
     sz = max(height, 1.0)
 
     cmd = nav.CreateNavMeshVolumeCommand(
+        parent_prim_path=Sdf.Path("/World"),
         volume_type=nav.NAVMESH_VOLUME_INCLUDE,
         position=Gf.Vec3d(cx, cy, cz),
     )
@@ -326,7 +327,19 @@ def bake_navmesh(simulation_app=None, bounds_min=None, bounds_max=None,
         _disable_navmesh_settings()
         return False
 
+    # Enable nav settings BEFORE creating the volume so the extension's stage
+    # observer is already running when CreateNavMeshVolumeCommand fires. Prior
+    # attempts (see commits 94bfc2b, b28a1f6, 85dcc2f) enabled settings after
+    # volume creation; the extension never saw the volume and the bake became
+    # a no-op.
+    _enable_navmesh_settings()
+
     stage = omni.usd.get_context().get_stage()
+
+    if simulation_app is not None:
+        for _ in range(10):
+            simulation_app.update()
+
     try:
         vol = _define_navmesh_volume(stage, bounds_min, bounds_max, height=height,
                                       simulation_app=simulation_app)
@@ -335,53 +348,51 @@ def bake_navmesh(simulation_app=None, bounds_min=None, bounds_max=None,
         _disable_navmesh_settings()
         return False
 
-    _enable_navmesh_settings()
-
-    # Let the nav extension observe the new volume prim before we ask it to
-    # bake — start_navmesh_baking() returns immediately with no work if the
-    # volume hasn't been seen by the extension's stage observer yet.
+    # Let the extension observe the new volume prim before requesting a bake.
     if simulation_app is not None:
         for _ in range(60):
             simulation_app.update()
 
     interface = nav.acquire_interface()
+
+    # Subscribe to the event stream so we can see bake-state transitions in
+    # the log even when is_navmesh_baking() races with the bake thread.
     try:
-        interface.start_navmesh_baking()
+        event_stream = interface.get_navmesh_event_stream()
     except Exception as e:
-        print(f"[ERROR] start_navmesh_baking() raised: {e}")
+        print(f"[WARN] get_navmesh_event_stream() unavailable: {e}")
+        event_stream = None
+
+    # Blocking bake. Prior attempts used async start_navmesh_baking() + poll
+    # loops on is_navmesh_baking(); the flag never flipped reliably, causing
+    # the grace-window heuristic to misdiagnose a slow bake as "extension did
+    # not see the volume." The probe confirms start_navmesh_baking_and_wait
+    # exists on this build.
+    try:
+        print("[INFO] Calling start_navmesh_baking_and_wait()...")
+        sys.stdout.flush()
+        interface.start_navmesh_baking_and_wait()
+        print("[INFO] start_navmesh_baking_and_wait() returned")
+    except Exception as e:
+        print(f"[ERROR] start_navmesh_baking_and_wait() raised: {e}")
         _disable_navmesh_settings()
         return False
 
-    baking_saw_true = False
-    if simulation_app is not None:
-        for tick in range(max_ticks):
-            simulation_app.update()
-            baking = interface.is_navmesh_baking()
-            if baking:
-                baking_saw_true = True
-            else:
-                if baking_saw_true:
-                    print(f"[INFO] Navmesh bake settled after {tick + 1} ticks")
-                    break
-                # bake never transitioned to True — give it a grace window in
-                # case is_navmesh_baking() only flips mid-frame.
-                if tick >= 30:
-                    print(f"[WARN] is_navmesh_baking() stayed False for {tick + 1} "
-                          "ticks — extension did not see the volume")
-                    break
-            if tick > 0 and tick % 60 == 0:
-                print(f"[INFO] Still baking navmesh ({tick}/{max_ticks} ticks)...")
-        else:
-            print(f"[WARN] Navmesh bake did not settle in {max_ticks} ticks — cancelling")
-            try:
-                interface.cancel_navmesh_baking()
-            except Exception:
-                pass
-            _disable_navmesh_settings()
-            return False
+    if event_stream is not None:
+        updated_type = getattr(nav, "EVENT_TYPE_NAVMESH_UPDATED", None)
+        drained = 0
+        saw_update = False
+        while True:
+            evt = event_stream.pop()
+            if evt is None:
+                break
+            drained += 1
+            if updated_type is not None and evt.type == updated_type:
+                saw_update = True
+        print(f"[INFO] Navmesh event stream drained: {drained} events, "
+              f"EVENT_TYPE_NAVMESH_UPDATED seen={saw_update}")
 
-        # get_navmesh() may not be populated on the exact same tick the bake
-        # flag clears; give it a handful of extra ticks.
+    if simulation_app is not None:
         for _ in range(30):
             if interface.get_navmesh() is not None:
                 break
