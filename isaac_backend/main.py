@@ -444,7 +444,11 @@ def main():
     # Calling bake after worker behavior scripts are attached causes start_navmesh_baking()
     # to deadlock in native code. Workers are dynamic obstacles handled at runtime anyway.
     _progress("Baking navmesh (static obstacles included, before worker setup)...")
-    bake_navmesh(simulation_app=simulation_app)
+    bake_navmesh(
+        simulation_app=simulation_app,
+        bounds_min=spawn_bounds_min,
+        bounds_max=spawn_bounds_max,
+    )
 
     spawned_worker_names, worker_behaviors = _setup_workers(
         scene_config, asset_library, stage, visible_bounds=visible_bounds,

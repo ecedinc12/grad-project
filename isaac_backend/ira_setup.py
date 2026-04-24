@@ -220,12 +220,122 @@ def _probe_navmesh_environment():
     print("[DIAG-NAVMESH] ---- end probe ----")
 
 
-def bake_navmesh(simulation_app=None):
-    """No-op. Kept as a call-site stub; see enable_behavior_extensions for rationale."""
+def _enable_navmesh_settings():
+    settings = carb.settings.get_settings()
+    settings.set("/persistent/omni/anim/people/navmeshBasedNavigation", True)
+    settings.set("/exts/omni.anim.people/navigation_settings/navmesh_enabled", True)
+    settings.set("/exts/omni.anim.people/navigation_settings/dynamic_avoidance_enabled", True)
+
+
+def _define_navmesh_volume(stage, bounds_min, bounds_max, height=4.0):
+    """Create /World/NavMeshVolume sized to encompass the warehouse footprint.
+
+    NavSchema.NavMeshVolume is a unit cube in local space (HALF_EXTENT=0.5);
+    a translate+scale xform sizes it to the requested bounds. navVolumeType
+    is set to "include" so the bake region matches this volume.
+    """
+    from pxr import Gf, UsdGeom, Sdf
+    import omni.anim.navigation.core as nav
+    NavSchema = nav.NavSchema
+
+    path = "/World/NavMeshVolume"
+    existing = stage.GetPrimAtPath(path)
+    if existing and existing.IsValid():
+        stage.RemovePrim(path)
+
+    vol = NavSchema.NavMeshVolume.Define(stage, Sdf.Path(path))
+
+    min_x, min_y = bounds_min
+    max_x, max_y = bounds_max
+    pad = 2.0
+    min_x -= pad; min_y -= pad; max_x += pad; max_y += pad
+    cx = (min_x + max_x) * 0.5
+    cy = (min_y + max_y) * 0.5
+    cz = height * 0.5
+    sx = max(max_x - min_x, 1.0)
+    sy = max(max_y - min_y, 1.0)
+    sz = max(height, 1.0)
+
+    xf = UsdGeom.Xformable(vol.GetPrim())
+    xf.ClearXformOpOrder()
+    xf.AddTranslateOp().Set(Gf.Vec3d(cx, cy, cz))
+    xf.AddScaleOp().Set(Gf.Vec3f(sx, sy, sz))
+
+    vol.CreateNavVolumeTypeAttr().Set(NavSchema.Tokens.include)
+    print(f"[INFO] NavMeshVolume defined at {path} "
+          f"center=({cx:.2f},{cy:.2f},{cz:.2f}) size=({sx:.2f},{sy:.2f},{sz:.2f})")
+    return vol
+
+
+def bake_navmesh(simulation_app=None, bounds_min=None, bounds_max=None,
+                 height=4.0, max_ticks=600):
+    """Define a NavMeshVolume covering the warehouse and bake the navmesh.
+
+    Non-blocking: calls start_navmesh_baking() then polls is_navmesh_baking()
+    each tick with a bounded budget so a failed bake can't hang the process.
+    Returns True if get_navmesh() is non-None after the bake settles.
+    """
     _probe_navmesh_environment()
-    print("[INFO] Navmesh bake skipped (navmesh disabled; using direct navigation).")
-    _disable_navmesh_settings()
-    return False
+
+    if bounds_min is None or bounds_max is None:
+        print("[WARN] bake_navmesh: no bounds provided — skipping bake, using direct nav.")
+        _disable_navmesh_settings()
+        return False
+
+    try:
+        import omni.anim.navigation.core as nav
+    except ImportError as e:
+        print(f"[WARN] omni.anim.navigation.core unavailable: {e} — using direct nav.")
+        _disable_navmesh_settings()
+        return False
+
+    stage = omni.usd.get_context().get_stage()
+    try:
+        vol = _define_navmesh_volume(stage, bounds_min, bounds_max, height=height)
+    except Exception as e:
+        print(f"[ERROR] Failed to define NavMeshVolume: {e}")
+        _disable_navmesh_settings()
+        return False
+
+    _enable_navmesh_settings()
+
+    if simulation_app is not None:
+        for _ in range(10):
+            simulation_app.update()
+
+    interface = nav.acquire_interface()
+    try:
+        interface.start_navmesh_baking()
+    except Exception as e:
+        print(f"[ERROR] start_navmesh_baking() raised: {e}")
+        _disable_navmesh_settings()
+        return False
+
+    if simulation_app is not None:
+        for tick in range(max_ticks):
+            simulation_app.update()
+            if not interface.is_navmesh_baking():
+                print(f"[INFO] Navmesh bake settled after {tick + 1} ticks")
+                break
+            if tick > 0 and tick % 60 == 0:
+                print(f"[INFO] Still baking navmesh ({tick}/{max_ticks} ticks)...")
+        else:
+            print(f"[WARN] Navmesh bake did not settle in {max_ticks} ticks — cancelling")
+            try:
+                interface.cancel_navmesh_baking()
+            except Exception:
+                pass
+            _disable_navmesh_settings()
+            return False
+
+    navmesh = interface.get_navmesh()
+    if navmesh is None:
+        print("[WARN] Navmesh bake completed but get_navmesh() returned None — using direct nav")
+        _disable_navmesh_settings()
+        return False
+
+    print(f"[INFO] Navmesh baked successfully: {navmesh}")
+    return True
 
 
 def ensure_biped_setup(simulation_app=None):
