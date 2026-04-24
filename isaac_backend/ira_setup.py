@@ -355,14 +355,6 @@ def bake_navmesh(simulation_app=None, bounds_min=None, bounds_max=None,
 
     interface = nav.acquire_interface()
 
-    # Subscribe to the event stream so we can see bake-state transitions in
-    # the log even when is_navmesh_baking() races with the bake thread.
-    try:
-        event_stream = interface.get_navmesh_event_stream()
-    except Exception as e:
-        print(f"[WARN] get_navmesh_event_stream() unavailable: {e}")
-        event_stream = None
-
     # Blocking bake. Prior attempts used async start_navmesh_baking() + poll
     # loops on is_navmesh_baking(); the flag never flipped reliably, causing
     # the grace-window heuristic to misdiagnose a slow bake as "extension did
@@ -380,27 +372,9 @@ def bake_navmesh(simulation_app=None, bounds_min=None, bounds_max=None,
         _disable_navmesh_settings()
         return False
 
-    # Drain events with a hard cap so a pop()-that-never-returns-None can't
-    # hang the process. Every print is flushed so we can see where we hang.
-    if event_stream is not None:
-        updated_type = getattr(nav, "EVENT_TYPE_NAVMESH_UPDATED", None)
-        drained = 0
-        saw_update = False
-        print("[INFO] Draining navmesh event stream...")
-        sys.stdout.flush()
-        try:
-            for _ in range(1000):
-                evt = event_stream.pop()
-                if evt is None:
-                    break
-                drained += 1
-                if updated_type is not None and evt.type == updated_type:
-                    saw_update = True
-        except Exception as e:
-            print(f"[WARN] event_stream.pop() raised: {e}")
-        print(f"[INFO] Navmesh event stream drained: {drained} events, "
-              f"EVENT_TYPE_NAVMESH_UPDATED seen={saw_update}")
-        sys.stdout.flush()
+    # Event-stream drain was removed: in this kit build event_stream.pop()
+    # blocks natively (hangs with no exception, no Ctrl-C), even when called
+    # after start_navmesh_baking_and_wait() has returned.
 
     print("[INFO] Polling get_navmesh() for up to 30 ticks...")
     sys.stdout.flush()
