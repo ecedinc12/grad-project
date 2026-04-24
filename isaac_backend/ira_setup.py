@@ -190,6 +190,30 @@ def _probe_navmesh_environment():
         print(f"[DIAG-NAVMESH] nav interface: {interface}")
         members = [m for m in dir(interface) if not m.startswith("_")]
         print(f"[DIAG-NAVMESH]   interface members: {members}")
+        ns = getattr(nav, "NavSchema", None)
+        if ns is not None:
+            ns_attrs = [a for a in dir(ns) if not a.startswith("_")]
+            print(f"[DIAG-NAVMESH]   NavSchema attrs: {ns_attrs}")
+            for a in ns_attrs:
+                obj = getattr(ns, a)
+                if isinstance(obj, type):
+                    print(f"[DIAG-NAVMESH]     NavSchema.{a} members: "
+                          f"{[m for m in dir(obj) if not m.startswith('_')]}")
+        cmd_cls = getattr(nav, "CreateNavMeshVolumeCommand", None)
+        if cmd_cls is not None:
+            print(f"[DIAG-NAVMESH]   CreateNavMeshVolumeCommand: {cmd_cls}")
+            init = getattr(cmd_cls, "__init__", None)
+            if init is not None:
+                import inspect
+                try:
+                    print(f"[DIAG-NAVMESH]     __init__ sig: {inspect.signature(init)}")
+                except Exception as e:
+                    print(f"[DIAG-NAVMESH]     __init__ sig: <unreadable: {e}>")
+        for const in ("NAVMESH_VOLUME_INCLUDE", "NAVMESH_VOLUME_EXCLUDE",
+                      "NAVMESH_VOLUME_NAME", "HALF_EXTENT",
+                      "INCLUDE_SCALE", "EXCLUDE_SCALE"):
+            if hasattr(nav, const):
+                print(f"[DIAG-NAVMESH]   const {const} = {getattr(nav, const)!r}")
     except Exception as e:
         print(f"[DIAG-NAVMESH] nav interface probe failed: {e}")
 
