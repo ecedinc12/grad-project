@@ -230,20 +230,19 @@ def _enable_navmesh_settings():
 def _define_navmesh_volume(stage, bounds_min, bounds_max, height=4.0):
     """Create /World/NavMeshVolume sized to encompass the warehouse footprint.
 
-    NavSchema.NavMeshVolume is a unit cube in local space (HALF_EXTENT=0.5);
-    a translate+scale xform sizes it to the requested bounds. navVolumeType
-    is set to "include" so the bake region matches this volume.
+    Uses CreateNavMeshVolumeCommand (the same entry point the nav extension's
+    UI uses) so every attribute the extension expects is populated via the
+    schema's own command. We then rescale the resulting unit-cube volume to
+    cover the warehouse bounds (HALF_EXTENT=0.5, so size=1 in local space).
     """
     from pxr import Gf, UsdGeom, Sdf
     import omni.anim.navigation.core as nav
-    NavSchema = nav.NavSchema
+    import omni.kit.undo
 
     path = "/World/NavMeshVolume"
     existing = stage.GetPrimAtPath(path)
     if existing and existing.IsValid():
         stage.RemovePrim(path)
-
-    vol = NavSchema.NavMeshVolume.Define(stage, Sdf.Path(path))
 
     min_x, min_y = bounds_min
     max_x, max_y = bounds_max
@@ -256,15 +255,35 @@ def _define_navmesh_volume(stage, bounds_min, bounds_max, height=4.0):
     sy = max(max_y - min_y, 1.0)
     sz = max(height, 1.0)
 
-    xf = UsdGeom.Xformable(vol.GetPrim())
-    xf.ClearXformOpOrder()
-    xf.AddTranslateOp().Set(Gf.Vec3d(cx, cy, cz))
-    xf.AddScaleOp().Set(Gf.Vec3f(sx, sy, sz))
+    cmd = nav.CreateNavMeshVolumeCommand(
+        parent_prim_path=Sdf.Path("/World"),
+        volume_type=nav.NAVMESH_VOLUME_INCLUDE,
+        position=Gf.Vec3d(cx, cy, cz),
+    )
+    cmd.do()
 
-    vol.CreateNavVolumeTypeAttr().Set(NavSchema.Tokens.include)
-    print(f"[INFO] NavMeshVolume defined at {path} "
+    vol_prim = stage.GetPrimAtPath(path)
+    if not vol_prim or not vol_prim.IsValid():
+        for child in stage.GetPrimAtPath("/World").GetChildren():
+            if nav.NAVMESH_VOLUME_NAME in child.GetName():
+                vol_prim = child
+                break
+    if not vol_prim or not vol_prim.IsValid():
+        raise RuntimeError("CreateNavMeshVolumeCommand did not produce a prim")
+
+    xf = UsdGeom.Xformable(vol_prim)
+    scale_op = None
+    for op in xf.GetOrderedXformOps():
+        if op.GetOpType() == UsdGeom.XformOp.TypeScale:
+            scale_op = op
+            break
+    if scale_op is None:
+        scale_op = xf.AddScaleOp()
+    scale_op.Set(Gf.Vec3f(sx, sy, sz))
+
+    print(f"[INFO] NavMeshVolume created at {vol_prim.GetPath()} "
           f"center=({cx:.2f},{cy:.2f},{cz:.2f}) size=({sx:.2f},{sy:.2f},{sz:.2f})")
-    return vol
+    return vol_prim
 
 
 def bake_navmesh(simulation_app=None, bounds_min=None, bounds_max=None,
@@ -299,8 +318,11 @@ def bake_navmesh(simulation_app=None, bounds_min=None, bounds_max=None,
 
     _enable_navmesh_settings()
 
+    # Let the nav extension observe the new volume prim before we ask it to
+    # bake — start_navmesh_baking() returns immediately with no work if the
+    # volume hasn't been seen by the extension's stage observer yet.
     if simulation_app is not None:
-        for _ in range(10):
+        for _ in range(60):
             simulation_app.update()
 
     interface = nav.acquire_interface()
@@ -311,12 +333,23 @@ def bake_navmesh(simulation_app=None, bounds_min=None, bounds_max=None,
         _disable_navmesh_settings()
         return False
 
+    baking_saw_true = False
     if simulation_app is not None:
         for tick in range(max_ticks):
             simulation_app.update()
-            if not interface.is_navmesh_baking():
-                print(f"[INFO] Navmesh bake settled after {tick + 1} ticks")
-                break
+            baking = interface.is_navmesh_baking()
+            if baking:
+                baking_saw_true = True
+            else:
+                if baking_saw_true:
+                    print(f"[INFO] Navmesh bake settled after {tick + 1} ticks")
+                    break
+                # bake never transitioned to True — give it a grace window in
+                # case is_navmesh_baking() only flips mid-frame.
+                if tick >= 30:
+                    print(f"[WARN] is_navmesh_baking() stayed False for {tick + 1} "
+                          "ticks — extension did not see the volume")
+                    break
             if tick > 0 and tick % 60 == 0:
                 print(f"[INFO] Still baking navmesh ({tick}/{max_ticks} ticks)...")
         else:
@@ -327,6 +360,13 @@ def bake_navmesh(simulation_app=None, bounds_min=None, bounds_max=None,
                 pass
             _disable_navmesh_settings()
             return False
+
+        # get_navmesh() may not be populated on the exact same tick the bake
+        # flag clears; give it a handful of extra ticks.
+        for _ in range(30):
+            if interface.get_navmesh() is not None:
+                break
+            simulation_app.update()
 
     navmesh = interface.get_navmesh()
     if navmesh is None:
