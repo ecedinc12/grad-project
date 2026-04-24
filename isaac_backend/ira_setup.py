@@ -168,6 +168,31 @@ def _probe_navmesh_environment():
             print(f"[DIAG-NAVMESH] setting {key} = {settings.get(key)!r}")
     except Exception as e:
         print(f"[DIAG-NAVMESH] settings probe failed: {e}")
+
+    for mod_name in ("NavigationSchema", "omni.anim.navigation.schema",
+                     "omni.anim.navigation.core"):
+        try:
+            mod = __import__(mod_name, fromlist=["*"])
+            attrs = [a for a in dir(mod) if not a.startswith("_")]
+            print(f"[DIAG-NAVMESH] module {mod_name}: attrs={attrs}")
+            for candidate in ("NavMeshVolume", "NavMeshVolumeAPI",
+                              "NavMeshAPI", "Volume"):
+                if hasattr(mod, candidate):
+                    cls = getattr(mod, candidate)
+                    members = [m for m in dir(cls) if not m.startswith("_")]
+                    print(f"[DIAG-NAVMESH]   {mod_name}.{candidate}: {members}")
+        except Exception as e:
+            print(f"[DIAG-NAVMESH] module {mod_name}: import failed: {e}")
+
+    try:
+        import omni.anim.navigation.core as nav
+        interface = nav.acquire_interface()
+        print(f"[DIAG-NAVMESH] nav interface: {interface}")
+        members = [m for m in dir(interface) if not m.startswith("_")]
+        print(f"[DIAG-NAVMESH]   interface members: {members}")
+    except Exception as e:
+        print(f"[DIAG-NAVMESH] nav interface probe failed: {e}")
+
     print("[DIAG-NAVMESH] ---- end probe ----")
 
 
