@@ -227,22 +227,30 @@ def _enable_navmesh_settings():
     settings.set("/exts/omni.anim.people/navigation_settings/dynamic_avoidance_enabled", True)
 
 
-def _define_navmesh_volume(stage, bounds_min, bounds_max, height=4.0):
-    """Create /World/NavMeshVolume sized to encompass the warehouse footprint.
+def _find_any_navmesh_volume(stage):
+    """Return the first NavMeshVolume-typed prim on the stage, or None."""
+    for prim in stage.Traverse():
+        if prim.GetTypeName() == "NavMeshVolume":
+            return prim
+    return None
+
+
+def _define_navmesh_volume(stage, bounds_min, bounds_max, height=4.0,
+                            simulation_app=None):
+    """Create a NavMeshVolume sized to encompass the warehouse footprint.
 
     Uses CreateNavMeshVolumeCommand (the same entry point the nav extension's
     UI uses) so every attribute the extension expects is populated via the
-    schema's own command. We then rescale the resulting unit-cube volume to
-    cover the warehouse bounds (HALF_EXTENT=0.5, so size=1 in local space).
+    schema's own command. The command places the prim under the stage's
+    default-prim path, which is Isaac-variant-specific — we then scan the
+    stage to locate it and rescale it to cover the warehouse bounds.
     """
     from pxr import Gf, UsdGeom, Sdf
     import omni.anim.navigation.core as nav
-    import omni.kit.undo
 
-    path = "/World/NavMeshVolume"
-    existing = stage.GetPrimAtPath(path)
-    if existing and existing.IsValid():
-        stage.RemovePrim(path)
+    existing = _find_any_navmesh_volume(stage)
+    if existing is not None:
+        stage.RemovePrim(existing.GetPath())
 
     min_x, min_y = bounds_min
     max_x, max_y = bounds_max
@@ -256,20 +264,30 @@ def _define_navmesh_volume(stage, bounds_min, bounds_max, height=4.0):
     sz = max(height, 1.0)
 
     cmd = nav.CreateNavMeshVolumeCommand(
-        parent_prim_path=Sdf.Path("/World"),
         volume_type=nav.NAVMESH_VOLUME_INCLUDE,
         position=Gf.Vec3d(cx, cy, cz),
     )
-    cmd.do()
+    cmd_result = cmd.do()
+    print(f"[INFO] CreateNavMeshVolumeCommand.do() returned: {cmd_result!r}")
 
-    vol_prim = stage.GetPrimAtPath(path)
-    if not vol_prim or not vol_prim.IsValid():
-        for child in stage.GetPrimAtPath("/World").GetChildren():
-            if nav.NAVMESH_VOLUME_NAME in child.GetName():
-                vol_prim = child
-                break
-    if not vol_prim or not vol_prim.IsValid():
-        raise RuntimeError("CreateNavMeshVolumeCommand did not produce a prim")
+    if simulation_app is not None:
+        for _ in range(5):
+            simulation_app.update()
+
+    vol_prim = _find_any_navmesh_volume(stage)
+    if vol_prim is None:
+        # Dump /World children so we can see what the command actually created.
+        try:
+            world = stage.GetPrimAtPath("/World")
+            children = [(c.GetName(), c.GetTypeName())
+                        for c in (world.GetChildren() if world else [])]
+            print(f"[DIAG-NAVMESH] /World children after command: {children}")
+            roots = [(c.GetName(), c.GetTypeName())
+                     for c in stage.GetPseudoRoot().GetChildren()]
+            print(f"[DIAG-NAVMESH] stage roots after command: {roots}")
+        except Exception as e:
+            print(f"[DIAG-NAVMESH] failed to dump stage post-command: {e}")
+        raise RuntimeError("CreateNavMeshVolumeCommand did not produce a NavMeshVolume prim")
 
     xf = UsdGeom.Xformable(vol_prim)
     scale_op = None
@@ -310,7 +328,8 @@ def bake_navmesh(simulation_app=None, bounds_min=None, bounds_max=None,
 
     stage = omni.usd.get_context().get_stage()
     try:
-        vol = _define_navmesh_volume(stage, bounds_min, bounds_max, height=height)
+        vol = _define_navmesh_volume(stage, bounds_min, bounds_max, height=height,
+                                      simulation_app=simulation_app)
     except Exception as e:
         print(f"[ERROR] Failed to define NavMeshVolume: {e}")
         _disable_navmesh_settings()
