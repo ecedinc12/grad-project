@@ -67,13 +67,21 @@ def _refresh_ira_state():
 
 
 def enable_behavior_extensions(simulation_app=None):
-    """Enable extensions required for IRA behavior scripts and configure navmesh settings."""
+    """Enable extensions required for IRA behavior scripts and configure navmesh settings.
+
+    Navmesh baking has been unreliable in this build across multiple attempts
+    (see git log: 2a976cb, e67a435, 1077877, current HEAD). start_navmesh_baking()
+    hangs the process natively and auto-bake never produces a navmesh. We run
+    without navmesh — GoTo uses straight-line paths with dynamic avoidance
+    handling inter-agent collisions. Vehicle path curving falls back gracefully
+    in VehicleAnimator._expand_via_navmesh.
+    """
     settings = carb.settings.get_settings()
-    settings.set("/persistent/omni/anim/people/navmeshBasedNavigation", True)
-    settings.set("/exts/omni.anim.people/navigation_settings/navmesh_enabled", True)
+    settings.set("/persistent/omni/anim/people/navmeshBasedNavigation", False)
+    settings.set("/exts/omni.anim.people/navigation_settings/navmesh_enabled", False)
     settings.set("/exts/omni.anim.people/navigation_settings/dynamic_avoidance_enabled", True)
     settings.set("/persistent/exts/omni.anim.people/character_prim_path", "/World/Characters")
-    print("[INFO] Navmesh enabled — GoTo uses navmesh pathfinding with dynamic avoidance")
+    print("[INFO] Navmesh disabled — GoTo uses direct navigation with dynamic avoidance")
     print("[INFO] CHARACTER_PRIM_PATH set to /World/Characters")
 
     manager = omni.kit.app.get_app().get_extension_manager()
@@ -111,59 +119,9 @@ def _disable_navmesh_settings():
     settings.set("/exts/omni.anim.people/navigation_settings/dynamic_avoidance_enabled", False)
 
 
-def bake_navmesh(simulation_app=None, max_ticks=240):
-    """Wait for the navigation extension's auto-bake to produce a navmesh.
-
-    The extension auto-bakes from static stage geometry when
-    /exts/omni.anim.people/navigation_settings/navmesh_enabled is True (set in
-    enable_behavior_extensions). We do NOT call interface.start_navmesh_baking()
-    — in this kit build it is a blocking native call that hangs the process
-    (Ctrl-C ineffective because the GIL is held). Reference code in
-    references/isaac_sim_pod/utils.py also never calls it.
-
-    Poll interface.get_navmesh() each tick; return True once it returns a
-    non-None handle, False on timeout.
-
-    IMPORTANT: Must be called BEFORE worker behavior scripts are attached so
-    the static geometry scan completes without IRA behavior scripts churning
-    the stage.
-    """
-    try:
-        print("[INFO] Navmesh: importing omni.anim.navigation.core...")
-        sys.stdout.flush()
-        import omni.anim.navigation.core as nav_core
-        print("[INFO] Navmesh: acquiring interface...")
-        sys.stdout.flush()
-        interface = nav_core.acquire_interface()
-    except Exception as e:
-        print(f"[WARN] Navmesh interface unavailable ({e}) — workers will use direct navigation")
-        _disable_navmesh_settings()
-        return False
-
-    if simulation_app is None:
-        print("[WARN] No simulation_app provided — cannot tick for bake completion")
-        return False
-
-    print(f"[INFO] Navmesh: waiting for auto-bake to produce a navmesh "
-          f"(up to {max_ticks} ticks)...")
-    sys.stdout.flush()
-
-    for tick in range(max_ticks):
-        simulation_app.update()
-        if tick > 0 and tick % 40 == 0:
-            print(f"[INFO] Navmesh: waiting... ({tick}/{max_ticks})")
-            sys.stdout.flush()
-        try:
-            navmesh = interface.get_navmesh()
-        except Exception as e:
-            print(f"[WARN] Navmesh: get_navmesh() raised {e} at tick {tick}")
-            navmesh = None
-        if navmesh is not None:
-            print(f"[INFO] Navmesh: auto-bake produced a navmesh at tick {tick}")
-            return True
-
-    print(f"[ERROR] Navmesh: auto-bake did not produce a navmesh within {max_ticks} ticks — "
-          "disabling navmesh navigation; workers and vehicles will use direct paths")
+def bake_navmesh(simulation_app=None):
+    """No-op. Kept as a call-site stub; see enable_behavior_extensions for rationale."""
+    print("[INFO] Navmesh bake skipped (navmesh disabled; using direct navigation).")
     _disable_navmesh_settings()
     return False
 
