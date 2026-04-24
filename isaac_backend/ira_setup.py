@@ -104,15 +104,26 @@ def enable_behavior_extensions(simulation_app=None):
     _refresh_ira_state()
 
 
-def bake_navmesh(simulation_app=None):
+def _disable_navmesh_settings():
+    settings = carb.settings.get_settings()
+    settings.set("/persistent/omni/anim/people/navmeshBasedNavigation", False)
+    settings.set("/exts/omni.anim.people/navigation_settings/navmesh_enabled", False)
+    settings.set("/exts/omni.anim.people/navigation_settings/dynamic_avoidance_enabled", False)
+
+
+def bake_navmesh(simulation_app=None, max_ticks=300, fallback_ticks=180):
     """Bake navmesh after the warehouse layout is loaded so workers path around obstacles.
 
-    Uses event-stream polling to wait for the bake to complete, falling back to
-    fixed tick polling if the event API is unavailable.
+    Waits for completion via the navigation interface's event stream
+    (EVENT_TYPE_NAVMESH_UPDATED). get_navmesh() returns a handle — it is not a
+    completion signal and polling it as one is what caused previous runs to
+    time out after 500 ticks.
 
     IMPORTANT: Must be called BEFORE worker behavior scripts are attached.
     start_navmesh_baking() is a blocking native C++ call that deadlocks if
     IRA behavior scripts are already running on the stage.
+
+    Returns True on successful bake (event received), False on timeout or failure.
     """
     try:
         print("[INFO] Navmesh bake: importing omni.anim.navigation.core...")
@@ -124,46 +135,46 @@ def bake_navmesh(simulation_app=None):
         print("[INFO] Navmesh bake: calling start_navmesh_baking()...")
         sys.stdout.flush()
         interface.start_navmesh_baking()
-        print("[INFO] Navmesh baking started — waiting for completion...")
-
-        baked = False
-        if simulation_app:
-            for tick in range(300):
-                simulation_app.update()
-                if tick % 50 == 0:
-                    print(f"[INFO] Navmesh baking... (tick {tick}/300)")
-                    sys.stdout.flush()
-                if interface.get_navmesh() is not None:
-                    baked = True
-                    print(f"[INFO] Navmesh bake completed at tick {tick}")
-                    break
-
-        if not baked and simulation_app:
-            print("[INFO] Still waiting for navmesh (200 more ticks)...")
-            for tick in range(200):
-                simulation_app.update()
-                if tick % 50 == 0:
-                    print(f"[INFO] Navmesh baking... (fallback tick {tick}/200)")
-                    sys.stdout.flush()
-                if interface.get_navmesh() is not None:
-                    baked = True
-                    print(f"[INFO] Navmesh bake completed at fallback tick {tick}")
-                    break
-
-        navmesh_obj = interface.get_navmesh()
-        if navmesh_obj is not None:
-            print("[INFO] Navmesh bake succeeded — navmesh object available")
-        else:
-            print("[WARN] Navmesh bake returned None — workers may use direct navigation")
-
-        return True
+        print("[INFO] Navmesh baking started — waiting for EVENT_TYPE_NAVMESH_UPDATED...")
     except Exception as e:
-        print(f"[WARN] Navmesh baking failed (workers will use direct navigation): {e}")
-        settings = carb.settings.get_settings()
-        settings.set("/persistent/omni/anim/people/navmeshBasedNavigation", False)
-        settings.set("/exts/omni.anim.people/navigation_settings/navmesh_enabled", False)
-        settings.set("/exts/omni.anim.people/navigation_settings/dynamic_avoidance_enabled", False)
+        print(f"[WARN] Navmesh baking failed to start (workers will use direct navigation): {e}")
+        _disable_navmesh_settings()
         return False
+
+    if simulation_app is None:
+        print("[WARN] No simulation_app provided — cannot tick for bake completion")
+        return False
+
+    # Primary path: event-stream completion signal.
+    try:
+        event_stream = interface.get_navmesh_event_stream()
+        nav_updated_event = nav_core.EVENT_TYPE_NAVMESH_UPDATED
+    except (AttributeError, Exception) as e:
+        print(f"[WARN] Navmesh event stream unavailable ({e}) — "
+              f"bake completion not verified, warming up for {fallback_ticks} ticks")
+        for tick in range(fallback_ticks):
+            simulation_app.update()
+            if tick > 0 and tick % 60 == 0:
+                print(f"[INFO] Navmesh warmup... ({tick}/{fallback_ticks})")
+                sys.stdout.flush()
+        return interface.get_navmesh() is not None
+
+    for tick in range(max_ticks):
+        simulation_app.update()
+        if tick > 0 and tick % 50 == 0:
+            print(f"[INFO] Navmesh baking... (tick {tick}/{max_ticks})")
+            sys.stdout.flush()
+        pending = event_stream.pop()
+        while pending is not None:
+            if pending.type == nav_updated_event:
+                print(f"[INFO] Navmesh bake event received at tick {tick}")
+                return True
+            pending = event_stream.pop()
+
+    print(f"[ERROR] Navmesh bake did not complete within {max_ticks} ticks — "
+          "disabling navmesh navigation; workers and vehicles will use direct paths")
+    _disable_navmesh_settings()
+    return False
 
 
 def ensure_biped_setup(simulation_app=None):
@@ -554,5 +565,17 @@ def link_workers_to_animation_graph(spawned_worker_names, stage, simulation_app=
     if simulation_app:
         for _ in range(10):
             simulation_app.update()
+
+    try:
+        import AnimGraphSchema
+        for sr in skelroots:
+            is_skelroot = sr.GetTypeName() == "SkelRoot"
+            has_ag = sr.HasAPI(AnimGraphSchema.AnimationGraphAPI)
+            schemas = sr.GetAppliedSchemas()
+            print(f"[DIAG] {sr.GetPath()} typeName={sr.GetTypeName()} "
+                  f"IsA(SkelRoot)={is_skelroot} HasAPI(AnimationGraphAPI)={has_ag} "
+                  f"appliedSchemas={list(schemas)}")
+    except Exception as e:
+        print(f"[DIAG] apiSchema inspection failed: {e}")
 
     return linked, kit_failed + missing

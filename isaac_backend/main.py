@@ -104,7 +104,6 @@ from isaac_backend.ira_setup import (
     enable_behavior_extensions,
     bake_navmesh,
     ensure_biped_setup,
-    create_character_wrapper_usd,
     setup_all_behaviors_async,
     link_workers_to_animation_graph,
     wait_for_animation_graph,
@@ -361,16 +360,8 @@ def _setup_workers(scene_config, asset_library, stage, visible_bounds=None):
     if anim_graph_prim is None:
         _progress("[ERROR] AnimationGraph not found — workers will spawn without animation")
 
-    # Build a wrapper USD that has AnimationGraphAPI baked into the SkelRoot as a
-    # static file opinion.  Fabric populates its attribute cache at first prim load
-    # from the static USD layer stack — runtime USD overrides never reach that cache.
-    # Using a wrapper file ensures Fabric sees the API schema at load time.
-    worker_usd = create_character_wrapper_usd(asset_library["worker"], stage)
-    wrapped_library = dict(asset_library)
-    wrapped_library["worker"] = worker_usd
-
     _progress(f"Spawning {len(workers)} workers...")
-    spawned_names = spawn_workers(workers, worker_behaviors, wrapped_library, stage, simulation_app, visible_bounds=visible_bounds)
+    spawned_names = spawn_workers(workers, worker_behaviors, asset_library, stage, simulation_app, visible_bounds=visible_bounds)
 
     _progress("Attaching IRA behavior scripts to workers...")
     attached, failed = setup_all_behaviors_async(spawned_names, worker_behaviors, stage)
