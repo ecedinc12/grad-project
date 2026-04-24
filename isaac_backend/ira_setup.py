@@ -119,8 +119,61 @@ def _disable_navmesh_settings():
     settings.set("/exts/omni.anim.people/navigation_settings/dynamic_avoidance_enabled", False)
 
 
+def _probe_navmesh_environment():
+    """Probe extension registry, kit command registry, and navmesh settings.
+
+    Prints a [DIAG-NAVMESH] block so we can decide between a real bake and
+    direct-navigation fallback without trial-and-error runs.
+    """
+    print("[DIAG-NAVMESH] ---- begin probe ----")
+    try:
+        import omni.kit.app
+        manager = omni.kit.app.get_app().get_extension_manager()
+        for ext_name in ("omni.nav.mesh", "omni.anim.navigation.core", "omni.anim.navigation.schema"):
+            try:
+                ext_id = manager.get_extension_id(ext_name)
+            except Exception as e:
+                ext_id = f"<error: {e}>"
+            try:
+                enabled = manager.is_extension_enabled(ext_name)
+            except Exception as e:
+                enabled = f"<error: {e}>"
+            print(f"[DIAG-NAVMESH] ext {ext_name}: id={ext_id!r} enabled={enabled}")
+    except Exception as e:
+        print(f"[DIAG-NAVMESH] extension manager probe failed: {e}")
+
+    try:
+        import omni.kit.commands
+        commands = omni.kit.commands.get_commands()
+        command_names = set()
+        if isinstance(commands, dict):
+            for v in commands.values():
+                if isinstance(v, dict):
+                    command_names.update(v.keys())
+                else:
+                    command_names.add(str(v))
+        for cmd in ("RebuildNavMesh", "CreateNavMesh", "AddNavMeshVolume"):
+            present = cmd in command_names
+            print(f"[DIAG-NAVMESH] command {cmd}: registered={present}")
+    except Exception as e:
+        print(f"[DIAG-NAVMESH] kit command probe failed: {e}")
+
+    try:
+        settings = carb.settings.get_settings()
+        for key in (
+            "/persistent/omni/anim/people/navmeshBasedNavigation",
+            "/exts/omni.anim.people/navigation_settings/navmesh_enabled",
+            "/exts/omni.anim.people/navigation_settings/dynamic_avoidance_enabled",
+        ):
+            print(f"[DIAG-NAVMESH] setting {key} = {settings.get(key)!r}")
+    except Exception as e:
+        print(f"[DIAG-NAVMESH] settings probe failed: {e}")
+    print("[DIAG-NAVMESH] ---- end probe ----")
+
+
 def bake_navmesh(simulation_app=None):
     """No-op. Kept as a call-site stub; see enable_behavior_extensions for rationale."""
+    _probe_navmesh_environment()
     print("[INFO] Navmesh bake skipped (navmesh disabled; using direct navigation).")
     _disable_navmesh_settings()
     return False
