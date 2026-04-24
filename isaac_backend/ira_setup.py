@@ -373,30 +373,53 @@ def bake_navmesh(simulation_app=None, bounds_min=None, bounds_max=None,
         sys.stdout.flush()
         interface.start_navmesh_baking_and_wait()
         print("[INFO] start_navmesh_baking_and_wait() returned")
+        sys.stdout.flush()
     except Exception as e:
         print(f"[ERROR] start_navmesh_baking_and_wait() raised: {e}")
+        sys.stdout.flush()
         _disable_navmesh_settings()
         return False
 
+    # Drain events with a hard cap so a pop()-that-never-returns-None can't
+    # hang the process. Every print is flushed so we can see where we hang.
     if event_stream is not None:
         updated_type = getattr(nav, "EVENT_TYPE_NAVMESH_UPDATED", None)
         drained = 0
         saw_update = False
-        while True:
-            evt = event_stream.pop()
-            if evt is None:
-                break
-            drained += 1
-            if updated_type is not None and evt.type == updated_type:
-                saw_update = True
+        print("[INFO] Draining navmesh event stream...")
+        sys.stdout.flush()
+        try:
+            for _ in range(1000):
+                evt = event_stream.pop()
+                if evt is None:
+                    break
+                drained += 1
+                if updated_type is not None and evt.type == updated_type:
+                    saw_update = True
+        except Exception as e:
+            print(f"[WARN] event_stream.pop() raised: {e}")
         print(f"[INFO] Navmesh event stream drained: {drained} events, "
               f"EVENT_TYPE_NAVMESH_UPDATED seen={saw_update}")
+        sys.stdout.flush()
 
+    print("[INFO] Polling get_navmesh() for up to 30 ticks...")
+    sys.stdout.flush()
     if simulation_app is not None:
-        for _ in range(30):
-            if interface.get_navmesh() is not None:
+        for tick in range(30):
+            try:
+                nm = interface.get_navmesh()
+            except Exception as e:
+                print(f"[WARN] get_navmesh() raised at tick {tick}: {e}")
+                sys.stdout.flush()
+                nm = None
+            if nm is not None:
+                print(f"[INFO] get_navmesh() returned non-None at tick {tick}")
+                sys.stdout.flush()
                 break
             simulation_app.update()
+        else:
+            print("[INFO] get_navmesh() still None after 30 ticks")
+            sys.stdout.flush()
 
     navmesh = interface.get_navmesh()
     if navmesh is None:
