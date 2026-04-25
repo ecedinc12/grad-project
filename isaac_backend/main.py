@@ -406,6 +406,16 @@ def main():
     scene_config, asset_library = load_config(args.config, args.library)
     _progress(f"Layout: {scene_config.get('layout', 'standard_warehouse')}")
 
+    # Fire StageEventType.OPENED so omni.anim.graph.core's CharacterManager auto-init
+    # runs. IAnimGraph::initialize is normally triggered by the stage-open event;
+    # without this, getCharacter() returns None for every prim (workers AND Biped_Setup),
+    # which is what produced the "is not a SkelRoot prim or does not apply
+    # AnimationGraphAPI" warning even though USD/Fabric had the API correctly applied.
+    _progress("Opening empty stage to trigger CharacterManager auto-init...")
+    omni.usd.get_context().new_stage()
+    for _ in range(5):
+        simulation_app.update()
+
     _progress("Creating World...")
     world = World(stage_units_in_meters=1.0)
     _tick(5)
