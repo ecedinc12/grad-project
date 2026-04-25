@@ -795,24 +795,37 @@ def link_workers_to_animation_graph(spawned_worker_names, stage, simulation_app=
         for _ in range(10):
             simulation_app.update()
 
-    # Phase B2: force Fabric prim-cache resync on each SkelRoot.
-    # Fabric seals its apiSchema cache at first prim sync, so the
-    # ApplyAnimationGraphAPICommand above is invisible to omni.anim.graph.core.
-    # Toggling the prim's active state forces Fabric to evict and re-compose
-    # the prim, which causes it to re-read the (now-present) AnimationGraphAPI.
-    if simulation_app:
-        try:
-            for sr in skelroots:
-                sr.SetActive(False)
-            for _ in range(2):
+    # Fabric prefetch: ApplyAnimationGraphAPICommand only writes USD; Fabric's
+    # apiSchema list for these SkelRoots was sealed at first prefetch and is now
+    # stale. omni/anim/graph/core/scripts/variables_service.py:95 discovers
+    # characters via usdrt's GetPrimsWithAppliedAPIName("AnimationGraphAPI"),
+    # which reads from Fabric — so until Fabric re-syncs the prim, ag.get_character()
+    # returns None even though USD says HasAPI(AnimationGraphAPI)=True. Re-prefetching
+    # via usdrt forces Fabric to re-read the SkelRoot, picking up the new apiSchemas.
+    try:
+        import usdrt
+        stage_id = omni.usd.get_context().get_stage_id()
+        rt_stage = usdrt.Usd.Stage.Attach(stage_id)
+        prefetched = 0
+        for sr in skelroots:
+            sr_path = str(sr.GetPath())
+            try:
+                if hasattr(rt_stage, "PrefetchPrim"):
+                    rt_stage.PrefetchPrim(sr_path)
+                elif hasattr(rt_stage, "prefetchPrim"):
+                    rt_stage.prefetchPrim(sr_path)
+                else:
+                    # Touch the prim through usdrt so Fabric resyncs it.
+                    rt_stage.GetPrimAtPath(sr_path)
+                prefetched += 1
+            except Exception as _pe:
+                print(f"[WARN] Fabric prefetch failed for {sr_path}: {_pe}")
+        if simulation_app:
+            for _ in range(5):
                 simulation_app.update()
-            for sr in skelroots:
-                sr.SetActive(True)
-            for _ in range(10):
-                simulation_app.update()
-            print(f"[INFO] Fabric resync: toggled SetActive on {len(skelroots)} SkelRoots")
-        except Exception as e:
-            print(f"[WARN] Fabric resync via SetActive failed: {e}")
+        print(f"[INFO] Fabric prefetch: re-synced {prefetched}/{len(skelroots)} SkelRoots via usdrt")
+    except Exception as e:
+        print(f"[WARN] usdrt prefetch unavailable: {e}")
 
     try:
         import AnimGraphSchema
