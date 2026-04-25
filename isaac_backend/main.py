@@ -107,6 +107,7 @@ from isaac_backend.ira_setup import (
     setup_all_behaviors_async,
     link_workers_to_animation_graph,
     wait_for_animation_graph,
+    force_register_agents,
 )
 from isaac_backend.command_injection import inject_commands_after_play, reinject_random_commands
 from isaac_backend.vehicle_animation import VehicleAnimator
@@ -492,17 +493,15 @@ def main():
     _progress("Starting timeline for behavior scripts...")
     omni.timeline.get_timeline_interface().play()
 
-    # Re-apply AnimationGraphAPI with ZERO updates between play() and the re-apply.
-    # Replicator flushes its layer synchronously inside play(), clearing Fabric's
-    # AnimationGraphAPI cache. on_play() fires on the very first simulation_app.update()
-    # after play(). Calling link_workers_to_animation_graph here (before any update)
-    # re-populates Fabric's cache via kit commands, so on_play() sees the API when
-    # it fires inside link_workers_to_animation_graph's trailing simulation_app.update()
-    # calls.
+    # Let BehaviorScript instances populate ScriptManager before force-register.
+    # IRA's own test waits 2 ticks; we match that and let force_register_agents
+    # extend if needed.
+    for _ in range(2):
+        simulation_app.update()
+
     if spawned_worker_names:
-        _progress("Re-applying AnimationGraphAPI directly after play() (zero updates between)...")
-        linked, link_failed = link_workers_to_animation_graph(spawned_worker_names, stage, simulation_app)
-        _progress(f"Post-play AnimationGraph re-link: {linked} linked, {link_failed} failed")
+        _progress("Force-registering agents with AgentManager (IRA test pattern)...")
+        force_register_agents(stage, simulation_app=simulation_app)
 
     _progress("Warming up simulation for behavior initialization (300 steps)...")
     for _ in range(300):
@@ -514,30 +513,6 @@ def main():
         visible_bounds=visible_bounds,
     )
     _progress(f"Command injection: {injected} succeeded, {inj_failed} failed")
-
-    # If every worker failed, agents never registered during on_play() — likely because
-    # Replicator's flush and on_play() fired simultaneously on the first world.step(),
-    # overwriting AnimationGraphAPI before the animation graph plugin could cache it.
-    # Stop the timeline, re-apply AnimationGraphAPI, then restart so on_play() fires
-    # again with the API correctly in place.
-    if inj_failed > 0 and injected == 0 and spawned_worker_names:
-        _progress("All injections failed — stop/play cycle to re-trigger agent registration...")
-        omni.timeline.get_timeline_interface().stop()
-        for _ in range(10):
-            simulation_app.update()
-        omni.timeline.get_timeline_interface().play()
-        # Same zero-update rule: re-apply immediately after play() so Fabric cache is
-        # populated before on_play() fires inside the trailing simulation_app.update() calls.
-        link_workers_to_animation_graph(spawned_worker_names, stage, simulation_app)
-        _progress("Re-warmup after stop/play (150 steps)...")
-        for _ in range(150):
-            world.step(render=True)
-        _progress("Re-injecting commands after stop/play...")
-        injected, inj_failed = inject_commands_after_play(
-            spawned_worker_names, worker_behaviors, simulation_app=simulation_app,
-            visible_bounds=visible_bounds,
-        )
-        _progress(f"Re-injection: {injected} succeeded, {inj_failed} failed")
 
     _progress("Clearing unwanted semantics before generation...")
     clear_unwanted_warehouse_semantics(stage)

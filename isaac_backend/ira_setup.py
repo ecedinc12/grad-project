@@ -807,3 +807,63 @@ def link_workers_to_animation_graph(spawned_worker_names, stage, simulation_app=
         print(f"[DIAG] apiSchema inspection failed: {e}")
 
     return linked, kit_failed + missing
+
+
+def force_register_agents(stage, simulation_app=None, max_wait_ticks=10):
+    """Manually register every attached BehaviorScript with AgentManager.
+
+    Bypasses character_behavior.py's on_update -> init_character -> dispatch
+    chain. In this kit build omni.anim.graph.core.plugin reads AnimationGraphAPI
+    via Fabric, which ignores runtime ApplyAnimationGraphAPICommand edits — so
+    ag.get_character() returns None inside init_character(), the self-register
+    event never fires, and AgentManager stays empty.
+
+    Mirrors IRA's own test_command_injection workaround
+    (references/ira_test_command_injection.py:82-96): walks
+    ScriptManager._prim_to_scripts, calls init_character(), then
+    AgentManager.register_agent() unconditionally. After this, command
+    injection works even if init_character() returned False — the agent_name
+    -> instance mapping exists and inject_command() appends to inst.commands,
+    which on_update eventually drains once Fabric settles.
+
+    Must be called AFTER timeline.play(). Returns (registered, total).
+    """
+    try:
+        from omni.kit.scripting.scripts.script_manager import ScriptManager
+    except ImportError as e:
+        print(f"[ERROR] force_register_agents: ScriptManager unavailable: {e}")
+        return 0, 0
+
+    if not _HAS_IRA_CORE or AgentManager is None:
+        print("[ERROR] force_register_agents: AgentManager unavailable")
+        return 0, 0
+
+    script_manager = ScriptManager.get_instance()
+    agent_manager = AgentManager.get_instance()
+
+    if simulation_app is not None:
+        for _ in range(max_wait_ticks):
+            if script_manager._prim_to_scripts:
+                break
+            simulation_app.update()
+
+    registered = 0
+    total = 0
+    for scripts in script_manager._prim_to_scripts.values():
+        for _, inst in scripts.items():
+            if not inst:
+                continue
+            total += 1
+            try:
+                if hasattr(inst, "init_character"):
+                    inst.init_character()
+                agent_name = inst.get_agent_name()
+                agent_path = inst.prim_path
+                agent_manager.register_agent(agent_name, agent_path)
+                registered += 1
+                print(f"[INFO] force_register_agents: registered {agent_name} @ {agent_path}")
+            except Exception as e:
+                print(f"[WARN] force_register_agents: failed on {inst}: {e}")
+
+    print(f"[INFO] force_register_agents: {registered}/{total} agents registered")
+    return registered, total
