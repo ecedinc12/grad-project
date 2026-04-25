@@ -5,6 +5,7 @@ Extension enabling, navmesh baking, Biped_Setup loading, character wrapper USD
 creation, behavior script attachment, and AnimationGraph linking.
 """
 
+import os
 import sys
 import time
 import carb
@@ -847,6 +848,13 @@ def force_register_agents(stage, simulation_app=None, max_wait_ticks=10):
                 break
             simulation_app.update()
 
+    debug_tick = bool(os.environ.get("DEBUG_BEHAVIOR_TICK"))
+    try:
+        import omni.anim.graph.core as _ag_core
+    except Exception as _ag_err:
+        _ag_core = None
+        print(f"[DIAG] omni.anim.graph.core import failed: {_ag_err}")
+
     registered = 0
     total = 0
     for scripts in script_manager._prim_to_scripts.values():
@@ -862,8 +870,70 @@ def force_register_agents(stage, simulation_app=None, max_wait_ticks=10):
                 agent_manager.register_agent(agent_name, agent_path)
                 registered += 1
                 print(f"[INFO] force_register_agents: registered {agent_name} @ {agent_path}")
+
+                # --- Phase A diagnostics ---
+                char = getattr(inst, "character", None)
+                ncmds = len(getattr(inst, "commands", []) or [])
+                nav = getattr(inst, "navigation_manager", None)
+                print(f"[DIAG] post-init {agent_name}: character={char!r} "
+                      f"commands={ncmds} nav_mgr_set={nav is not None}")
+                if _ag_core is not None:
+                    try:
+                        ext_char = _ag_core.get_character(str(agent_path))
+                        print(f"[DIAG] ag.get_character({agent_path}) = {ext_char!r}")
+                    except Exception as _probe_err:
+                        print(f"[DIAG] ag.get_character probe failed: {_probe_err}")
+
+                if debug_tick and not getattr(inst, "_diag_tick_wrapped", False):
+                    _orig_on_update = inst.on_update
+                    _state = {"n": 0, "last_log": -1.0}
+
+                    def _wrapped_on_update(current_time, delta_time,
+                                           _orig=_orig_on_update, _s=_state, _name=agent_name, _inst=inst):
+                        _s["n"] += 1
+                        if _s["last_log"] < 0 or current_time - _s["last_log"] > 1.0:
+                            print(f"[DIAG] on_update {_name}: ticks={_s['n']} t={current_time:.2f} "
+                                  f"character={_inst.character is not None} cmds={len(_inst.commands or [])}")
+                            _s["last_log"] = current_time
+                        return _orig(current_time, delta_time)
+
+                    inst.on_update = _wrapped_on_update
+                    inst._diag_tick_wrapped = True
             except Exception as e:
                 print(f"[WARN] force_register_agents: failed on {inst}: {e}")
 
     print(f"[INFO] force_register_agents: {registered}/{total} agents registered")
     return registered, total
+
+
+def diagnose_behavior_state(label):
+    """Phase A checkpoint: print per-script BehaviorScript state.
+
+    Walks ScriptManager._prim_to_scripts and reports whether each instance has
+    its anim graph character set, command queue length, current command, and
+    navigation manager — so we can tell from the log whether init_character()
+    has succeeded by a given point in the pipeline.
+    """
+    try:
+        from omni.kit.scripting.scripts.script_manager import ScriptManager
+    except ImportError as e:
+        print(f"[DIAG] diagnose_behavior_state({label}): ScriptManager unavailable: {e}")
+        return
+    sm = ScriptManager.get_instance()
+    if not sm or not sm._prim_to_scripts:
+        print(f"[DIAG] diagnose_behavior_state({label}): no scripts registered")
+        return
+    for scripts in sm._prim_to_scripts.values():
+        for _, inst in scripts.items():
+            if not inst:
+                continue
+            try:
+                name = inst.get_agent_name() if hasattr(inst, "get_agent_name") else "?"
+                char = getattr(inst, "character", None)
+                ncmds = len(getattr(inst, "commands", []) or [])
+                cur = getattr(inst, "current_command", None)
+                nav = getattr(inst, "navigation_manager", None)
+                print(f"[DIAG] {label} {name}: character_set={char is not None} "
+                      f"commands={ncmds} current_command={cur!r} nav_mgr_set={nav is not None}")
+            except Exception as e:
+                print(f"[DIAG] {label}: inst probe failed: {e}")

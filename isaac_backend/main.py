@@ -108,6 +108,7 @@ from isaac_backend.ira_setup import (
     link_workers_to_animation_graph,
     wait_for_animation_graph,
     force_register_agents,
+    diagnose_behavior_state,
 )
 from isaac_backend.command_injection import inject_commands_after_play, reinject_random_commands
 from isaac_backend.vehicle_animation import VehicleAnimator
@@ -507,6 +508,8 @@ def main():
     for _ in range(300):
         world.step(render=True)
 
+    diagnose_behavior_state("post-warmup")
+
     _progress("Injecting commands via AgentManager...")
     injected, inj_failed = inject_commands_after_play(
         spawned_worker_names, worker_behaviors, simulation_app=simulation_app,
@@ -546,6 +549,8 @@ def main():
                 _bmin = _hz_map[_zone]["bounds_min"]
                 _bmax = _hz_map[_zone]["bounds_max"]
                 worker_zone_bounds[_wname] = (_bmin[0], _bmax[0], _bmin[1], _bmax[1])
+
+    diagnose_behavior_state("pre-loop")
 
     _progress("Running simulation loop...")
     for step in range(NUM_FRAMES):
