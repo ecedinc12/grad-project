@@ -795,6 +795,25 @@ def link_workers_to_animation_graph(spawned_worker_names, stage, simulation_app=
         for _ in range(10):
             simulation_app.update()
 
+    # Phase B2: force Fabric prim-cache resync on each SkelRoot.
+    # Fabric seals its apiSchema cache at first prim sync, so the
+    # ApplyAnimationGraphAPICommand above is invisible to omni.anim.graph.core.
+    # Toggling the prim's active state forces Fabric to evict and re-compose
+    # the prim, which causes it to re-read the (now-present) AnimationGraphAPI.
+    if simulation_app:
+        try:
+            for sr in skelroots:
+                sr.SetActive(False)
+            for _ in range(2):
+                simulation_app.update()
+            for sr in skelroots:
+                sr.SetActive(True)
+            for _ in range(10):
+                simulation_app.update()
+            print(f"[INFO] Fabric resync: toggled SetActive on {len(skelroots)} SkelRoots")
+        except Exception as e:
+            print(f"[WARN] Fabric resync via SetActive failed: {e}")
+
     try:
         import AnimGraphSchema
         for sr in skelroots:
