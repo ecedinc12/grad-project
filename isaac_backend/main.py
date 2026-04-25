@@ -406,12 +406,17 @@ def main():
     scene_config, asset_library = load_config(args.config, args.library)
     _progress(f"Layout: {scene_config.get('layout', 'standard_warehouse')}")
 
-    # Fire StageEventType.OPENED so omni.anim.graph.core's CharacterManager auto-init
-    # runs. IAnimGraph::initialize is normally triggered by the stage-open event;
-    # without this, getCharacter() returns None for every prim (workers AND Biped_Setup),
-    # which is what produced the "is not a SkelRoot prim or does not apply
-    # AnimationGraphAPI" warning even though USD/Fabric had the API correctly applied.
-    _progress("Opening empty stage to trigger CharacterManager auto-init...")
+    # Enable behavior extensions FIRST, before any stage event fires.
+    # omni.anim.graph.core boots ~21s after SimulationApp init even when listed
+    # in the eager extensions list, so without this its CharacterManager misses
+    # the StageEventType.OPENED from new_stage()/World() and never calls
+    # Initialize(). The downstream symptom: getCharacter() returns None, the
+    # behavior script's character binding fails, and workers T-pose forever.
+    _progress("Enabling behavior extensions (must precede stage open)...")
+    enable_behavior_extensions(simulation_app=simulation_app)
+
+    # Now fire the stage-open event with the plugin's observers in place.
+    _progress("Opening empty stage so CharacterManager observes the open event...")
     omni.usd.get_context().new_stage()
     for _ in range(5):
         simulation_app.update()
@@ -457,15 +462,6 @@ def main():
         scene_config, asset_library, stage, spawn_bounds_min, spawn_bounds_max,
         visible_bounds=visible_bounds,
     )
-
-    # Enable behavior extensions BEFORE baking the navmesh so omni.anim.navigation.core
-    # is imported and ready. Previously this was called inside _setup_workers() which ran
-    # after bake_navmesh(), causing the bake to fail with "No module named
-    # 'omni.anim.navigation.core'" and fall back to straight-line paths.
-    # Note: the deadlock we fixed earlier was caused by behavior *scripts* already being
-    # attached, not by the extension being enabled — so enabling here is safe.
-    _progress("Enabling behavior extensions (before navmesh bake)...")
-    enable_behavior_extensions(simulation_app=simulation_app)
 
     # Bake navmesh after static clutter is spawned but before workers are set up.
     # Calling bake after worker behavior scripts are attached causes start_navmesh_baking()
