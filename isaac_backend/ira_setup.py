@@ -990,6 +990,35 @@ def force_register_agents(stage, simulation_app=None, max_wait_ticks=10):
     return registered, total
 
 
+def diagnose_usdrt_view(prim_paths, label="usdrt"):
+    """Print what usdrt (Fabric-backed scenegraph) sees for each given prim path.
+    Use to compare against pxr.Usd to see whether Fabric's apiSchemas list reflects
+    the AnimationGraphAPI we've authored in USD.
+    """
+    try:
+        import usdrt
+    except Exception as e:
+        print(f"[DIAG-USDRT] {label}: usdrt import failed: {e}")
+        return
+    try:
+        sid = omni.usd.get_context().get_stage_id()
+        rt = usdrt.Usd.Stage.Attach(sid)
+    except Exception as e:
+        print(f"[DIAG-USDRT] {label}: stage attach failed: {e}")
+        return
+    for p in prim_paths:
+        try:
+            prim = rt.GetPrimAtPath(p)
+            valid = prim.IsValid()
+            tn = prim.GetTypeName() if valid else None
+            schemas = list(prim.GetAppliedSchemas()) if valid else None
+            has_ag = prim.HasAPI("AnimationGraphAPI") if valid else None
+            print(f"[DIAG-USDRT] {label} {p}: valid={valid} typeName={tn!r} "
+                  f"appliedSchemas={schemas} hasAPI(AnimationGraphAPI)={has_ag}")
+        except Exception as e:
+            print(f"[DIAG-USDRT] {label} {p}: probe failed: {e}")
+
+
 def diagnose_behavior_state(label):
     """Phase A checkpoint: print per-script BehaviorScript state.
 

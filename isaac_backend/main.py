@@ -109,6 +109,7 @@ from isaac_backend.ira_setup import (
     wait_for_animation_graph,
     force_register_agents,
     diagnose_behavior_state,
+    diagnose_usdrt_view,
     bake_animation_graph_into_asset,
 )
 from isaac_backend.command_injection import inject_commands_after_play, reinject_random_commands
@@ -514,15 +515,23 @@ def main():
     for _ in range(2):
         simulation_app.update()
 
+    _worker_skelroot_paths = [
+        f"/World/Characters/{n}/male_adult_construction_03/ManRoot/male_adult_construction_03"
+        for n in sorted(spawned_worker_names)
+    ]
+    diagnose_usdrt_view(_worker_skelroot_paths, "after-play-2-ticks")
+
     if spawned_worker_names:
         _progress("Force-registering agents with AgentManager (IRA test pattern)...")
         force_register_agents(stage, simulation_app=simulation_app)
+        diagnose_usdrt_view(_worker_skelroot_paths, "after-force-register")
 
     _progress("Warming up simulation for behavior initialization (300 steps)...")
     for _ in range(300):
         world.step(render=True)
 
     diagnose_behavior_state("post-warmup")
+    diagnose_usdrt_view(_worker_skelroot_paths, "post-warmup")
 
     _progress("Injecting commands via AgentManager...")
     injected, inj_failed = inject_commands_after_play(
