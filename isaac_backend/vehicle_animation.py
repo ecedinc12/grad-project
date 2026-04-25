@@ -119,11 +119,12 @@ class VehicleAnimator:
             try:
                 start = carb.Float3(p1["x"], p1["y"], 0.0)
                 end = carb.Float3(p2["x"], p2["y"], 0.0)
-                path = navmesh.query_path(start, end)
-                if path and len(path) > 2:
-                    for pt in path[1:-1]:
-                        expanded.append({"x": pt.x, "y": pt.y, "z": p2["z"], "rot": None})
-                    print(f"[INFO] VehicleAnimator: navmesh added {len(path)-2} intermediate points for {v_id}")
+                nav_path = navmesh.query_shortest_path(start, end, agent_radius=0.5)
+                pts = nav_path.get_points() if nav_path else None
+                if pts and len(pts) > 2:
+                    for pt in pts[1:-1]:
+                        expanded.append({"x": pt[0], "y": pt[1], "z": p2["z"], "rot": None})
+                    print(f"[INFO] VehicleAnimator: navmesh added {len(pts)-2} intermediate points for {v_id}")
                 else:
                     print(f"[WARN] VehicleAnimator: navmesh returned straight-line path for {v_id} "
                           f"({p1['x']:.1f},{p1['y']:.1f})->({p2['x']:.1f},{p2['y']:.1f}) — vehicle may clip through objects")
