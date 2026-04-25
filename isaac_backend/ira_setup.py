@@ -1006,6 +1006,12 @@ def diagnose_usdrt_view(prim_paths, label="usdrt"):
     except Exception as e:
         print(f"[DIAG-USDRT] {label}: stage attach failed: {e}")
         return
+    # Stage-wide index lookup — same call variables_service.py:95 uses.
+    try:
+        ag_paths = list(rt.GetPrimsWithAppliedAPIName("AnimationGraphAPI"))
+        print(f"[DIAG-USDRT] {label} GetPrimsWithAppliedAPIName('AnimationGraphAPI') = {ag_paths}")
+    except Exception as e:
+        print(f"[DIAG-USDRT] {label}: GetPrimsWithAppliedAPIName failed: {e}")
     for p in prim_paths:
         try:
             prim = rt.GetPrimAtPath(p)
