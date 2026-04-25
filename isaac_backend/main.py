@@ -109,6 +109,7 @@ from isaac_backend.ira_setup import (
     wait_for_animation_graph,
     force_register_agents,
     diagnose_behavior_state,
+    bake_animation_graph_into_asset,
 )
 from isaac_backend.command_injection import inject_commands_after_play, reinject_random_commands
 from isaac_backend.vehicle_animation import VehicleAnimator
@@ -362,8 +363,21 @@ def _setup_workers(scene_config, asset_library, stage, visible_bounds=None):
     if anim_graph_prim is None:
         _progress("[ERROR] AnimationGraph not found — workers will spawn without animation")
 
+    # Bake AnimationGraphAPI into a copy of the worker asset before any prim references
+    # it on the live stage. Fabric seals apiSchemas at first prefetch, and ApplyAPI at
+    # runtime never reaches Fabric — so the API has to be a layer-baked opinion in the
+    # USD file the spawner references.
+    spawn_library = asset_library
+    if anim_graph_prim is not None:
+        baked_path = bake_animation_graph_into_asset(
+            asset_library["worker"], str(anim_graph_prim.GetPath())
+        )
+        if baked_path != asset_library["worker"]:
+            spawn_library = dict(asset_library)
+            spawn_library["worker"] = baked_path
+
     _progress(f"Spawning {len(workers)} workers...")
-    spawned_names = spawn_workers(workers, worker_behaviors, asset_library, stage, simulation_app, visible_bounds=visible_bounds)
+    spawned_names = spawn_workers(workers, worker_behaviors, spawn_library, stage, simulation_app, visible_bounds=visible_bounds)
 
     _progress("Attaching IRA behavior scripts to workers...")
     attached, failed = setup_all_behaviors_async(spawned_names, worker_behaviors, stage)

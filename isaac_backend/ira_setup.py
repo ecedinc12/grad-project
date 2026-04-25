@@ -505,7 +505,91 @@ def _find_skelroot_for_worker(worker_name, stage):
     return None
 
 
-# --- Wrapper USD creation ---
+# --- Asset-self bake (B1): write AnimationGraphAPI into the asset's own root layer ---
+
+def bake_animation_graph_into_asset(asset_usd_path, anim_graph_prim_path):
+    """Open the worker asset, apply AnimationGraphAPI directly on its SkelRoot in
+    the asset's own root layer, and Export() to a temp .usda. Returns the temp
+    path, or asset_usd_path if anything fails.
+
+    Why: omni/anim/graph/core/plugin reads apiSchemas from Fabric, and Fabric
+    seals the apiSchema list at first prim prefetch. ApplyAnimationGraphAPICommand
+    runs at runtime — too late, and PrefetchPrim does not refresh apiSchemas.
+    Test assets that work (data/tests/usd/*.usda) all have
+    `prepend apiSchemas = ["AnimationGraphAPI"]` baked into the SkelRoot at
+    author time. This function does the same: writes the API onto the SkelRoot
+    in a copy of the asset, so when the live stage references the temp file
+    Fabric sees AnimationGraphAPI from the very first sync.
+
+    Different from the abandoned create_character_wrapper_usd: that wrote an
+    `over` in a separate wrapper layer; this writes the API on the SkelRoot's
+    own def in a copy of the asset's root layer (no override, no parent xform).
+    """
+    import tempfile
+    from pxr import Usd, Sdf
+
+    try:
+        src_stage = Usd.Stage.Open(asset_usd_path)
+        if src_stage is None:
+            print(f"[WARN] bake_animation_graph_into_asset: could not open {asset_usd_path}")
+            return asset_usd_path
+    except Exception as e:
+        print(f"[WARN] bake_animation_graph_into_asset: open failed: {e}")
+        return asset_usd_path
+
+    skelroot = None
+    for prim in src_stage.Traverse():
+        if prim.GetTypeName() == "SkelRoot":
+            skelroot = prim
+            break
+    if skelroot is None:
+        print(f"[WARN] bake_animation_graph_into_asset: no SkelRoot in {asset_usd_path}")
+        return asset_usd_path
+
+    # Apply AnimationGraphAPI on the SkelRoot's own def. This writes apiSchemas
+    # into the same prim spec the asset ships, so Fabric sees it as a layer-baked
+    # opinion rather than a runtime mutation.
+    try:
+        import AnimGraphSchema
+        if not skelroot.HasAPI(AnimGraphSchema.AnimationGraphAPI):
+            AnimGraphSchema.AnimationGraphAPI.Apply(skelroot)
+        api = AnimGraphSchema.AnimationGraphAPI(skelroot)
+        rel = api.GetAnimationGraphRel()
+        if rel is not None:
+            rel.SetTargets([Sdf.Path(anim_graph_prim_path)])
+        print(f"[INFO] bake_animation_graph_into_asset: applied AnimationGraphAPI on "
+              f"{skelroot.GetPath()} → {anim_graph_prim_path}")
+    except Exception as e:
+        print(f"[WARN] bake_animation_graph_into_asset: AnimGraphSchema apply failed: {e}")
+        return asset_usd_path
+
+    try:
+        tmp_path = tempfile.mktemp(suffix=".usda")
+        ok = src_stage.Export(tmp_path)
+        if not ok:
+            print(f"[WARN] bake_animation_graph_into_asset: Export to {tmp_path} returned False")
+            return asset_usd_path
+
+        # Verify the export
+        verify = Usd.Stage.Open(tmp_path)
+        if verify is not None:
+            for prim in verify.Traverse():
+                if prim.GetTypeName() == "SkelRoot":
+                    schemas = list(prim.GetAppliedSchemas())
+                    print(f"[INFO] bake_animation_graph_into_asset: verified {tmp_path} "
+                          f"SkelRoot={prim.GetPath()} appliedSchemas={schemas}")
+                    if "AnimationGraphAPI" not in schemas:
+                        print("[WARN] bake_animation_graph_into_asset: AnimationGraphAPI "
+                              "missing in exported file — falling back to original asset")
+                        return asset_usd_path
+                    break
+        return tmp_path
+    except Exception as e:
+        print(f"[WARN] bake_animation_graph_into_asset: export failed: {e}")
+        return asset_usd_path
+
+
+# --- Wrapper USD creation (legacy, kept for reference; not called) ---
 
 def create_character_wrapper_usd(original_usd_path, stage):
     """Create a temporary wrapper USD with AnimationGraphAPI baked into the SkelRoot.
@@ -794,38 +878,6 @@ def link_workers_to_animation_graph(spawned_worker_names, stage, simulation_app=
     if simulation_app:
         for _ in range(10):
             simulation_app.update()
-
-    # Fabric prefetch: ApplyAnimationGraphAPICommand only writes USD; Fabric's
-    # apiSchema list for these SkelRoots was sealed at first prefetch and is now
-    # stale. omni/anim/graph/core/scripts/variables_service.py:95 discovers
-    # characters via usdrt's GetPrimsWithAppliedAPIName("AnimationGraphAPI"),
-    # which reads from Fabric — so until Fabric re-syncs the prim, ag.get_character()
-    # returns None even though USD says HasAPI(AnimationGraphAPI)=True. Re-prefetching
-    # via usdrt forces Fabric to re-read the SkelRoot, picking up the new apiSchemas.
-    try:
-        import usdrt
-        stage_id = omni.usd.get_context().get_stage_id()
-        rt_stage = usdrt.Usd.Stage.Attach(stage_id)
-        prefetched = 0
-        for sr in skelroots:
-            sr_path = str(sr.GetPath())
-            try:
-                if hasattr(rt_stage, "PrefetchPrim"):
-                    rt_stage.PrefetchPrim(sr_path)
-                elif hasattr(rt_stage, "prefetchPrim"):
-                    rt_stage.prefetchPrim(sr_path)
-                else:
-                    # Touch the prim through usdrt so Fabric resyncs it.
-                    rt_stage.GetPrimAtPath(sr_path)
-                prefetched += 1
-            except Exception as _pe:
-                print(f"[WARN] Fabric prefetch failed for {sr_path}: {_pe}")
-        if simulation_app:
-            for _ in range(5):
-                simulation_app.update()
-        print(f"[INFO] Fabric prefetch: re-synced {prefetched}/{len(skelroots)} SkelRoots via usdrt")
-    except Exception as e:
-        print(f"[WARN] usdrt prefetch unavailable: {e}")
 
     try:
         import AnimGraphSchema
