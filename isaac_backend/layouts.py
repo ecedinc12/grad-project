@@ -27,6 +27,16 @@ PALLET_CARGO_PROPS = ["box", "box_small", "box_large", "barrel", "drum", "crate"
 CLUTTER_PROPS = ["box", "box_small", "box_large", "barrel", "drum", "cone", "pallet", "crate"]
 SHELF_POSITIONS_PER_LEVEL = 5
 
+# SM_RackFrame_03 footprint after the 90° rotation we apply: 2.8m along the
+# row direction (X) × 1.1m deep (Y). Used both for placement pitch and for
+# converting the JSON `aisle_width` (gap-between-racks) into row pitch.
+RACK_X_EXTENT = 2.8
+RACK_DEPTH = 1.1
+# Keep racks off the warehouse walls so wall-side clutter, stashes and the
+# forklift charging bay have room to live. Without this the auto-fill packs
+# right up to the walls and the perimeter reads as bare.
+WALL_CLEARANCE = 1.5
+
 RACK_FILL_PROBS = {
     "empty": 0.0,
     "sparse": 0.30,
@@ -308,15 +318,19 @@ def _spawn_racks(params, asset_library, stage, idx):
     target_rack_height = params.get("target_rack_height", 4.5)
     rack_base_height = 1.51
     rack_z_scale = target_rack_height / rack_base_height
-    
-    rack_x_extent = 2.8  # SM_RackFrame_03 length when rotated 90°
-    
+
+    rack_x_extent = RACK_X_EXTENT
+    # Row pitch = rack body + aisle gap. The JSON `aisle_width` is the gap a
+    # forklift/worker actually walks through, not the center-to-center spacing.
+    row_pitch = RACK_DEPTH + aw
+
     if cols == "auto" or cols is None:
-        available_x = bmax[0] - bmin[0]
+        available_x = (bmax[0] - bmin[0]) - 2 * WALL_CLEARANCE
         cols = max(1, int(available_x / rack_x_extent))
     if rows == "auto" or rows is None:
-        available_y = bmax[1] - bmin[1]
-        rows = max(1, int(available_y / aw))
+        available_y = (bmax[1] - bmin[1]) - 2 * WALL_CLEARANCE
+        # rows*RACK_DEPTH + (rows-1)*aw <= available_y  →  rows <= (available_y + aw) / row_pitch
+        rows = max(1, int((available_y + aw) / row_pitch))
 
     count = 0
     rack_positions = []
@@ -326,13 +340,14 @@ def _spawn_racks(params, asset_library, stage, idx):
 
     if pattern == "rows":
         # rack_rows parallel rows running East-West, each with rack_cols racks
-        # placed back-to-back along X. aw is the Y aisle gap between rows.
+        # placed back-to-back along X. Row spacing is RACK_DEPTH + aw so that
+        # aw ends up as the actual walkable aisle gap between rack bodies.
         total_x = max(0, cols - 1) * rack_x_extent
-        total_y = (rows - 1) * aw
+        total_y = (rows - 1) * row_pitch
         x_start = (bmin[0] + bmax[0]) / 2.0 - total_x / 2.0
         y_start = (bmin[1] + bmax[1]) / 2.0 - total_y / 2.0
         for r in range(rows):
-            y = y_start + r * aw
+            y = y_start + r * row_pitch
             for c in range(cols):
                 x = x_start + c * rack_x_extent
                 idx = _place("rack", x, y, 0, 90, asset_library, stage, idx, scale=(1.0, 1.0, rack_z_scale))
@@ -341,13 +356,13 @@ def _spawn_racks(params, asset_library, stage, idx):
 
     elif pattern == "grid":
         total_x = max(0, cols - 1) * rack_x_extent
-        total_y = (rows - 1) * aw
+        total_y = (rows - 1) * row_pitch
         x_start = (bmin[0] + bmax[0]) / 2.0 - total_x / 2.0
         y_start = (bmin[1] + bmax[1]) / 2.0 - total_y / 2.0
         for r in range(rows):
             for c in range(cols):
                 x = x_start + c * rack_x_extent
-                y = y_start + r * aw
+                y = y_start + r * row_pitch
                 idx = _place("rack", x, y, 0, 90, asset_library, stage, idx, scale=(1.0, 1.0, rack_z_scale))
                 rack_positions.append((x, y, 90))
                 count += 1
@@ -434,20 +449,6 @@ def _populate_rack_shelves(rack_positions, params, asset_library, stage, idx):
         # as a real loaded shelving unit instead of a bare frame.
         if has_shelf_asset:
             for shelf_z in shelf_heights:
-                idx = _place("rack_shelf", rx, ry, shelf_z, rrot, asset_library, stage, idx)
-                deck_count += 1
-
-        if fill_prob <= 0.0:
-            continue
-
-        # Per-rack fill bias so some bays look overstocked, some near-empty —
-        # uniform fill across all racks reads as artificial.
-        rack_bias = random.gauss(0.0, 0.25)
-        rack_fill_prob = max(0.0, min(1.0, fill_prob + rack_bias))
-        # One dominant SKU per rack with occasional mixing — looks more like real stocking.
-        primary_prop = random.choice(SHELF_PROPS)
-
-        for shelf_z in shelf_heights:
                 idx = _place("rack_shelf", rx, ry, shelf_z, rrot, asset_library, stage, idx)
                 deck_count += 1
 
