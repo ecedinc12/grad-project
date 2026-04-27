@@ -25,6 +25,7 @@ except Exception:
 SHELF_PROPS = ["box", "box_small", "box_large", "crate"]
 PALLET_CARGO_PROPS = ["box", "box_small", "box_large", "barrel", "drum", "crate"]
 CLUTTER_PROPS = ["box", "box_small", "box_large", "barrel", "drum", "cone", "pallet", "crate"]
+SHELF_POSITIONS_PER_LEVEL = 5
 
 RACK_FILL_PROBS = {
     "empty": 0.0,
@@ -405,63 +406,6 @@ def _spawn_racks(params, asset_library, stage, idx):
 
 
 
-
-    elif pattern == "L-shape":
-        total_span_h = (rows - 1) * aw
-        y_start_h = (bmin[1] + bmax[1]) / 2.0 - total_span_h / 2.0
-        x_h = bmin[0] + (bmax[0] - bmin[0]) * 0.25
-        for r in range(rows):
-            y = y_start_h + r * aw
-            idx = _place("rack", x_h, y, 0, 90, asset_library, stage, idx, scale=(1.0, 1.0, RACK_Z_SCALE))
-            rack_positions.append((x_h, y, 90))
-            count += 1
-        total_span_v = max(2, rows - 1) * aw
-        x_start_v = x_h + aw
-        y_bottom = bmin[1] + (bmax[1] - bmin[1]) * 0.25
-        for c in range(max(2, rows - 1)):
-            x = x_start_v + c * aw
-            idx = _place("rack", x, y_bottom, 0, 0, asset_library, stage, idx, scale=(1.0, 1.0, RACK_Z_SCALE))
-            rack_positions.append((x, y_bottom, 0))
-            count += 1
-
-    elif pattern == "perimeter":
-        margin = 1.0
-        y_top = bmax[1] - margin
-        y_bottom = bmin[1] + margin
-        for i in range(rows):
-            frac = (i + 0.5) / rows
-            x = bmin[0] + frac * (bmax[0] - bmin[0])
-            idx = _place("rack", x, y_top, 0, 90, asset_library, stage, idx, scale=(1.0, 1.0, RACK_Z_SCALE))
-            rack_positions.append((x, y_top, 90))
-            idx = _place("rack", x, y_bottom, 0, 90, asset_library, stage, idx, scale=(1.0, 1.0, RACK_Z_SCALE))
-            rack_positions.append((x, y_bottom, 90))
-            count += 2
-        x_left = bmin[0] + margin
-        x_right = bmax[0] - margin
-        for i in range(max(1, rows - 2)):
-            frac = (i + 0.5) / max(1, rows - 2)
-            y = bmin[1] + frac * (bmax[1] - bmin[1])
-            idx = _place("rack", x_left, y, 0, 0, asset_library, stage, idx, scale=(1.0, 1.0, RACK_Z_SCALE))
-            rack_positions.append((x_left, y, 0))
-            idx = _place("rack", x_right, y, 0, 0, asset_library, stage, idx, scale=(1.0, 1.0, RACK_Z_SCALE))
-            rack_positions.append((x_right, y, 0))
-            count += 2
-
-    elif pattern == "clusters":
-        n_clusters = max(1, cols)
-        cluster_rows = rows
-        total_cluster_span = (n_clusters - 1) * 2 * aw
-        x_start = (bmin[0] + bmax[0]) / 2.0 - total_cluster_span / 2.0
-        y_center = (bmin[1] + bmax[1]) / 2.0
-        for ci in range(n_clusters):
-            cx = x_start + ci * 2 * aw
-            total_y = (cluster_rows - 1) * aw
-            y_start = y_center - total_y / 2.0
-            for r in range(cluster_rows):
-                y = y_start + r * aw
-                idx = _place("rack", cx, y, 0, 90, asset_library, stage, idx, scale=(1.0, 1.0, RACK_Z_SCALE))
-                rack_positions.append((cx, y, 90))
-                count += 1
 
     return idx, count, rack_positions
 
