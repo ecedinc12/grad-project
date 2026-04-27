@@ -135,7 +135,7 @@ def _spawn_racks(params, asset_library, stage, idx):
             for c in range(cols):
                 x = x_start + c * rack_x_extent
                 idx = _place("rack", x, y, 0, 90, asset_library, stage, idx)
-                rack_positions.append((x, y))
+                rack_positions.append((x, y, 90))
                 count += 1
 
     elif pattern == "grid":
@@ -148,7 +148,7 @@ def _spawn_racks(params, asset_library, stage, idx):
                 x = x_start + c * aw
                 y = y_start + r * aw
                 idx = _place("rack", x, y, 0, 90, asset_library, stage, idx)
-                rack_positions.append((x, y))
+                rack_positions.append((x, y, 90))
                 count += 1
 
     elif pattern == "L-shape":
@@ -158,7 +158,7 @@ def _spawn_racks(params, asset_library, stage, idx):
         for r in range(rows):
             y = y_start_h + r * aw
             idx = _place("rack", x_h, y, 0, 90, asset_library, stage, idx)
-            rack_positions.append((x_h, y))
+            rack_positions.append((x_h, y, 90))
             count += 1
         total_span_v = max(2, rows - 1) * aw
         x_start_v = x_h + aw
@@ -166,7 +166,7 @@ def _spawn_racks(params, asset_library, stage, idx):
         for c in range(max(2, rows - 1)):
             x = x_start_v + c * aw
             idx = _place("rack", x, y_bottom, 0, 0, asset_library, stage, idx)
-            rack_positions.append((x, y_bottom))
+            rack_positions.append((x, y_bottom, 0))
             count += 1
 
     elif pattern == "perimeter":
@@ -177,9 +177,9 @@ def _spawn_racks(params, asset_library, stage, idx):
             frac = (i + 0.5) / rows
             x = bmin[0] + frac * (bmax[0] - bmin[0])
             idx = _place("rack", x, y_top, 0, 90, asset_library, stage, idx)
-            rack_positions.append((x, y_top))
+            rack_positions.append((x, y_top, 90))
             idx = _place("rack", x, y_bottom, 0, 90, asset_library, stage, idx)
-            rack_positions.append((x, y_bottom))
+            rack_positions.append((x, y_bottom, 90))
             count += 2
         x_left = bmin[0] + margin
         x_right = bmax[0] - margin
@@ -187,9 +187,9 @@ def _spawn_racks(params, asset_library, stage, idx):
             frac = (i + 0.5) / max(1, rows - 2)
             y = bmin[1] + frac * (bmax[1] - bmin[1])
             idx = _place("rack", x_left, y, 0, 0, asset_library, stage, idx)
-            rack_positions.append((x_left, y))
+            rack_positions.append((x_left, y, 0))
             idx = _place("rack", x_right, y, 0, 0, asset_library, stage, idx)
-            rack_positions.append((x_right, y))
+            rack_positions.append((x_right, y, 0))
             count += 2
 
     elif pattern == "clusters":
@@ -205,7 +205,7 @@ def _spawn_racks(params, asset_library, stage, idx):
             for r in range(cluster_rows):
                 y = y_start + r * aw
                 idx = _place("rack", cx, y, 0, 90, asset_library, stage, idx)
-                rack_positions.append((cx, y))
+                rack_positions.append((cx, y, 90))
                 count += 1
 
     return idx, count, rack_positions
@@ -214,12 +214,28 @@ def _spawn_racks(params, asset_library, stage, idx):
 def _populate_rack_shelves(rack_positions, params, asset_library, stage, idx):
     fill_level = params.get("rack_fill", "medium")
     fill_prob = RACK_FILL_PROBS.get(fill_level, 0.60)
-    count = 0
+    deck_count = 0
+    cargo_count = 0
+    has_shelf_asset = "rack_shelf" in asset_library
 
-    if fill_prob <= 0.0:
-        return idx, 0
+    for pos in rack_positions:
+        # Tolerate older 2-tuple positions in case of partial upgrade.
+        if len(pos) == 3:
+            rx, ry, rrot = pos
+        else:
+            rx, ry = pos
+            rrot = 90
 
-    for rx, ry in rack_positions:
+        # Place a horizontal deck plank at each shelf level so the rack reads
+        # as a real loaded shelving unit instead of a bare frame.
+        if has_shelf_asset:
+            for shelf_z in SHELF_HEIGHTS:
+                idx = _place("rack_shelf", rx, ry, shelf_z, rrot, asset_library, stage, idx)
+                deck_count += 1
+
+        if fill_prob <= 0.0:
+            continue
+
         for shelf_z in SHELF_HEIGHTS:
             for _ in range(SHELF_POSITIONS_PER_LEVEL):
                 if random.random() > fill_prob:
@@ -233,10 +249,11 @@ def _populate_rack_shelves(rack_positions, params, asset_library, stage, idx):
                 z = shelf_z + jitter_z
                 rot = random.uniform(-25, 25)
                 idx = _place(prop, x, y, z, rot, asset_library, stage, idx)
-                count += 1
+                cargo_count += 1
 
-    print(f"[INFO] Populated rack shelves with {count} items (fill={fill_level}, prob={fill_prob:.0%})")
-    return idx, count
+    print(f"[INFO] Populated rack shelves: {deck_count} decks, {cargo_count} cargo items "
+          f"(fill={fill_level}, prob={fill_prob:.0%})")
+    return idx, deck_count + cargo_count
 
 
 def _stack_boxes(x, y, probs, jitters, asset_library, stage, idx):
