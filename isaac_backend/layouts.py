@@ -756,6 +756,158 @@ def _spawn_wall_details(params, asset_library, stage, idx):
     return idx, count
 
 
+def _place_caution_sign(stage, idx, x, y, rot_z=0):
+    """Yellow A-frame 'wet floor' caution sign — two angled panels."""
+    yellow = (0.95, 0.82, 0.10)
+    ang = math.radians(rot_z)
+    cos_a, sin_a = math.cos(ang), math.sin(ang)
+    for sgn, tilt in ((-1, 18), (1, -18)):
+        path = f"/World/Layout/caution_{idx}_{sgn}"
+        cube = UsdGeom.Cube.Define(stage, path)
+        cube.GetSizeAttr().Set(2.0)
+        prim = cube.GetPrim()
+        xf = UsdGeom.XformCommonAPI(prim)
+        xf.SetScale(Gf.Vec3f(0.16, 0.01, 0.32))
+        local_x = sgn * 0.10
+        wx = x + local_x * cos_a
+        wy = y + local_x * sin_a
+        xf.SetTranslate(Gf.Vec3d(wx, wy, 0.32))
+        xf.SetRotate(Gf.Vec3f(0, tilt, rot_z), UsdGeom.XformCommonAPI.RotationOrderXYZ)
+        cube.CreateDisplayColorAttr([Gf.Vec3f(*yellow)])
+    return idx + 2
+
+
+def _place_wall_junction_box(stage, idx, x, y, z=1.4):
+    """Gray electrical junction box on a wall."""
+    path = f"/World/Layout/junction_{idx}"
+    cube = UsdGeom.Cube.Define(stage, path)
+    cube.GetSizeAttr().Set(2.0)
+    prim = cube.GetPrim()
+    xf = UsdGeom.XformCommonAPI(prim)
+    xf.SetScale(Gf.Vec3f(0.18, 0.04, 0.25))
+    xf.SetTranslate(Gf.Vec3d(x, y, z))
+    cube.CreateDisplayColorAttr([Gf.Vec3f(0.45, 0.47, 0.50)])
+    return idx + 1
+
+
+def _place_overhead_light(stage, idx, x, y, z=4.5, length=2.0):
+    """Long thin white cuboid as a ceiling strip light."""
+    path = f"/World/Layout/ceil_light_{idx}"
+    cube = UsdGeom.Cube.Define(stage, path)
+    cube.GetSizeAttr().Set(2.0)
+    prim = cube.GetPrim()
+    xf = UsdGeom.XformCommonAPI(prim)
+    xf.SetScale(Gf.Vec3f(length / 2.0, 0.10, 0.04))
+    xf.SetTranslate(Gf.Vec3d(x, y, z))
+    cube.CreateDisplayColorAttr([Gf.Vec3f(0.96, 0.96, 0.92)])
+    return idx + 1
+
+
+def _place_aisle_sign(stage, idx, x, y, band_color, z=2.8):
+    """Small hanging aisle-number placard with a colored band."""
+    body_path = f"/World/Layout/aisle_sign_{idx}"
+    body = UsdGeom.Cube.Define(stage, body_path)
+    body.GetSizeAttr().Set(2.0)
+    bxf = UsdGeom.XformCommonAPI(body.GetPrim())
+    bxf.SetScale(Gf.Vec3f(0.22, 0.02, 0.16))
+    bxf.SetTranslate(Gf.Vec3d(x, y, z))
+    body.CreateDisplayColorAttr([Gf.Vec3f(0.96, 0.96, 0.94)])
+    band_path = f"/World/Layout/aisle_sign_band_{idx}"
+    band = UsdGeom.Cube.Define(stage, band_path)
+    band.GetSizeAttr().Set(2.0)
+    cxf = UsdGeom.XformCommonAPI(band.GetPrim())
+    cxf.SetScale(Gf.Vec3f(0.22, 0.025, 0.04))
+    cxf.SetTranslate(Gf.Vec3d(x, y, z + 0.18))
+    band.CreateDisplayColorAttr([Gf.Vec3f(*band_color)])
+    return idx + 2
+
+
+def _place_mop_and_bucket(stage, idx, x, y):
+    """Yellow mop bucket cylinder + thin angled broom handle."""
+    bucket_path = f"/World/Layout/mop_bucket_{idx}"
+    cyl = UsdGeom.Cylinder.Define(stage, bucket_path)
+    cyl.GetRadiusAttr().Set(0.20)
+    cyl.GetHeightAttr().Set(0.45)
+    cyl.GetAxisAttr().Set("Z")
+    bxf = UsdGeom.XformCommonAPI(cyl.GetPrim())
+    bxf.SetTranslate(Gf.Vec3d(x, y, 0.225))
+    cyl.CreateDisplayColorAttr([Gf.Vec3f(0.92, 0.78, 0.10)])
+    broom_path = f"/World/Layout/broom_handle_{idx}"
+    broom = UsdGeom.Cube.Define(stage, broom_path)
+    broom.GetSizeAttr().Set(2.0)
+    hxf = UsdGeom.XformCommonAPI(broom.GetPrim())
+    hxf.SetScale(Gf.Vec3f(0.015, 0.015, 0.65))
+    hxf.SetTranslate(Gf.Vec3d(x + 0.18, y + 0.05, 0.75))
+    hxf.SetRotate(Gf.Vec3f(0, 14, 0), UsdGeom.XformCommonAPI.RotationOrderXYZ)
+    broom.CreateDisplayColorAttr([Gf.Vec3f(0.55, 0.38, 0.20)])
+    return idx + 2
+
+
+def _spawn_realism_extras(params, rack_positions, stage, idx):
+    """Caution signs in aisles, junction boxes on walls, ceiling strip lights,
+    aisle-number placards, mop bucket near bins."""
+    bmin = params["bounds_min"]
+    bmax = params["bounds_max"]
+    cx = (bmin[0] + bmax[0]) / 2.0
+    count = 0
+
+    # Caution signs scattered in 1-3 aisle midpoints.
+    rows = {}
+    for (rx, ry, rrot) in rack_positions:
+        if rrot == 90:
+            key = round(ry * 2) / 2.0
+            rows.setdefault(key, []).append(rx)
+    sorted_ys = sorted(rows.keys())
+    aisle_mids = []
+    for i in range(len(sorted_ys) - 1):
+        y_mid = (sorted_ys[i] + sorted_ys[i + 1]) / 2.0
+        xs = rows[sorted_ys[i]] + rows[sorted_ys[i + 1]]
+        aisle_mids.append((sum(xs) / len(xs), y_mid))
+    random.shuffle(aisle_mids)
+    for (ax, ay) in aisle_mids[:min(2, len(aisle_mids))]:
+        idx = _place_caution_sign(stage, idx, ax + random.uniform(-0.5, 0.5),
+                                  ay + random.uniform(-0.3, 0.3),
+                                  rot_z=random.uniform(0, 360))
+        count += 2
+
+    # Junction boxes along both long walls at ~3m spacing.
+    margin = 0.20
+    span = bmax[1] - bmin[1]
+    n_boxes = max(2, int(span / 3.0))
+    for j in range(n_boxes):
+        frac = (j + 0.5) / n_boxes
+        wy = bmin[1] + frac * span
+        idx = _place_wall_junction_box(stage, idx, bmin[0] + margin, wy, z=1.4)
+        idx = _place_wall_junction_box(stage, idx, bmax[0] - margin, wy, z=1.55)
+        count += 2
+
+    # Ceiling strip lights on a grid above the aisle rows.
+    light_zs = 4.5
+    n_lights_x = max(2, int((bmax[0] - bmin[0]) / 4.0))
+    light_ys = sorted_ys if sorted_ys else [(bmin[1] + bmax[1]) / 2.0]
+    for ly in light_ys:
+        for k in range(n_lights_x):
+            frac = (k + 0.5) / n_lights_x
+            lx = bmin[0] + frac * (bmax[0] - bmin[0])
+            idx = _place_overhead_light(stage, idx, lx, ly, z=light_zs, length=2.4)
+            count += 1
+
+    # Aisle-number sign at the entry side of each aisle.
+    band_palette = [(0.20, 0.55, 0.90), (0.90, 0.40, 0.20),
+                    (0.30, 0.70, 0.35), (0.85, 0.20, 0.55),
+                    (0.95, 0.78, 0.10)]
+    for i, (_, ay) in enumerate(aisle_mids):
+        color = band_palette[i % len(band_palette)]
+        idx = _place_aisle_sign(stage, idx, cx, ay, color, z=2.8)
+        count += 2
+
+    # Mop + bucket tucked next to the bin corner used in _spawn_wall_details.
+    idx = _place_mop_and_bucket(stage, idx, bmax[0] - 1.2, bmin[1] + 0.9)
+    count += 2
+
+    return idx, count
+
+
 def _spawn_charging_station(params, asset_library, stage, idx):
     """Parked forklift + a couple of charger cabinets along the left wall."""
     if "forklift" not in asset_library:
@@ -807,10 +959,12 @@ def generate_layout(layout_name, layout_params, asset_library, stage):
     idx, num_charge = _spawn_charging_station(params, asset_library, stage, idx)
     idx, num_rack_extras = _spawn_rack_end_details(rack_positions, asset_library, stage, idx)
     idx, num_wall_extras = _spawn_wall_details(params, asset_library, stage, idx)
+    idx, num_realism = _spawn_realism_extras(params, rack_positions, stage, idx)
 
     print(f"[INFO] Spawned {num_racks} racks, {num_shelf_items} shelf items, "
           f"{num_pallets} pallets, {num_clutter} clutter props, {num_dock_items} dock items, "
           f"{num_stripes} floor stripes, {num_guards} column guards, {num_charge} charge-bay items, "
-          f"{num_rack_extras} rack-end details, {num_wall_extras} wall details.")
+          f"{num_rack_extras} rack-end details, {num_wall_extras} wall details, "
+          f"{num_realism} realism extras.")
 
     return params["bounds_min"], params["bounds_max"]
