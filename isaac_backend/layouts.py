@@ -8,6 +8,7 @@ and clutter props into the USD stage.
 
 import os
 import json
+import math
 import random
 from pxr import UsdGeom, Gf, UsdPhysics
 import omni.usd
@@ -25,7 +26,7 @@ SHELF_PROPS = ["box", "box_small", "box_large", "crate"]
 PALLET_CARGO_PROPS = ["box", "box_small", "box_large", "barrel", "drum", "crate"]
 CLUTTER_PROPS = ["box", "box_small", "box_large", "barrel", "drum", "cone", "pallet", "crate"]
 SHELF_HEIGHTS = [0.15, 0.85, 1.55]
-SHELF_POSITIONS_PER_LEVEL = 2
+SHELF_POSITIONS_PER_LEVEL = 4
 
 RACK_FILL_PROBS = {
     "empty": 0.0,
@@ -236,18 +237,24 @@ def _populate_rack_shelves(rack_positions, params, asset_library, stage, idx):
         if fill_prob <= 0.0:
             continue
 
+        ang = math.radians(rrot)
+        cos_a, sin_a = math.cos(ang), math.sin(ang)
         for shelf_z in SHELF_HEIGHTS:
-            for _ in range(SHELF_POSITIONS_PER_LEVEL):
+            for slot in range(SHELF_POSITIONS_PER_LEVEL):
                 if random.random() > fill_prob:
                     continue
                 prop = random.choice(SHELF_PROPS)
-                jitter_x = random.uniform(-0.35, 0.35)
-                jitter_y = random.uniform(-0.15, 0.15)
-                jitter_z = random.uniform(-0.03, 0.03)
-                x = rx + jitter_x
-                y = ry + jitter_y
-                z = shelf_z + jitter_z
-                rot = random.uniform(-25, 25)
+                # Distribute slots evenly along the shelf length, with mild jitter.
+                slot_frac = (slot + 0.5) / SHELF_POSITIONS_PER_LEVEL  # 0..1
+                local_along = (slot_frac - 0.5) * 2.2 + random.uniform(-0.10, 0.10)
+                local_depth = random.uniform(-0.18, 0.18)
+                # Rotate local (along, depth) → world (x, y) using rack orientation.
+                world_dx = local_along * cos_a - local_depth * sin_a
+                world_dy = local_along * sin_a + local_depth * cos_a
+                x = rx + world_dx
+                y = ry + world_dy
+                z = shelf_z + random.uniform(-0.02, 0.02)
+                rot = rrot + random.uniform(-15, 15)
                 idx = _place(prop, x, y, z, rot, asset_library, stage, idx)
                 cargo_count += 1
 

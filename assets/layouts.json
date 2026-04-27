@@ -1,11 +1,11 @@
 {
   "standard_warehouse": {
-    "description": "Busy working warehouse floor sized to match the 1.7x-scaled warehouse.usd interior (~±9m). 2x4 grid of stocked racks across the central storage area with forklift aisles between rack rows, dense pallet storage near the back wall, heavy dock staging at the front, scattered clutter across the storage zone.",
+    "description": "Dense working warehouse floor sized to match the 1.7x-scaled warehouse.usd interior (~±9m). 3x5 grid of fully-stocked racks across the central storage area with forklift aisles between rack rows, heavy pallet staging at the back wall, dock pile at the front, plus barrel/crate stashes along both side walls. High clutter throughout.",
     "keywords": ["default", "standard", "typical", "normal", "regular"],
     "rack_pattern": "grid",
-    "rack_rows": 2,
-    "rack_cols": 4,
-    "rack_fill": "medium",
+    "rack_rows": 3,
+    "rack_cols": 5,
+    "rack_fill": "full",
     "aisle_width": 3.0,
     "bounds_min": [-9.0, -9.0],
     "bounds_max": [9.0, 9.0],
@@ -14,20 +14,34 @@
       {
         "area": "dock_staging",
         "bounds_min": [-8.0, -9.0],
-        "bounds_max": [8.0, -4.0],
+        "bounds_max": [8.0, -5.0],
         "density": "high",
-        "types": ["box", "box_large", "crate", "barrel", "drum", "cone"]
+        "types": ["box", "box_large", "crate", "barrel", "drum", "cone", "pallet"]
       },
       {
-        "area": "storage_zone_scatter",
-        "bounds_min": [-8.0, 3.0],
+        "area": "back_staging",
+        "bounds_min": [-8.0, 5.0],
         "bounds_max": [8.0, 9.0],
         "density": "high",
-        "types": ["box", "box_small", "crate", "barrel"]
+        "types": ["box", "box_small", "crate", "barrel", "pallet"]
+      },
+      {
+        "area": "left_wall_stash",
+        "bounds_min": [-9.0, -4.5],
+        "bounds_max": [-7.0, 4.5],
+        "density": "medium",
+        "types": ["barrel", "drum", "crate", "cone", "box_large"]
+      },
+      {
+        "area": "right_wall_stash",
+        "bounds_min": [7.0, -4.5],
+        "bounds_max": [9.0, 4.5],
+        "density": "medium",
+        "types": ["barrel", "drum", "crate", "cone", "box_large"]
       }
     ],
-    "pallet_rows": 3,
-    "pallet_cols": 5,
+    "pallet_rows": 2,
+    "pallet_cols": 7,
     "dock_area": true
   },
   "narrow_aisle": {
