@@ -519,7 +519,7 @@ def _populate_rack_shelves(rack_positions, params, asset_library, stage, idx):
 
         ang = math.radians(rrot)
         cos_a, sin_a = math.cos(ang), math.sin(ang)
-        for shelf_z in SHELF_HEIGHTS:
+        for shelf_z in shelf_heights:
             for slot in range(SHELF_POSITIONS_PER_LEVEL):
                 if random.random() > rack_fill_prob:
                     continue
