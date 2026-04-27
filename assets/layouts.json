@@ -196,5 +196,181 @@
     ],
     "pallet_rows": 2,
     "pallet_cols": 2
+  },
+  "emergency_egress": {
+    "description": "Egress drill scene: a wide central corridor with a forklift-blocked obstacle pile in the middle and clearly marked exit lanes leading to a muster point. Racks flank the corridor on both sides.",
+    "keywords": ["evacuation", "emergency", "egress", "exit", "blocked", "muster", "fire", "escape"],
+    "rack_pattern": "rows",
+    "rack_rows": 3,
+    "rack_cols": 1,
+    "rack_fill": "medium",
+    "aisle_width": 3.5,
+    "bounds_min": [-9.0, -9.0],
+    "bounds_max": [9.0, 9.0],
+    "clutter_density": "medium",
+    "clutter_zones": [
+      {
+        "area": "blockage_zone",
+        "bounds_min": [-3.0, -4.0],
+        "bounds_max": [3.0, 4.0],
+        "density": "high",
+        "types": ["box_large", "crate", "pallet", "cone"]
+      },
+      {
+        "area": "egress_corridor_south",
+        "bounds_min": [-2.0, -9.0],
+        "bounds_max": [2.0, -4.0],
+        "density": "low",
+        "types": ["cone"]
+      },
+      {
+        "area": "egress_corridor_north",
+        "bounds_min": [-2.0, 4.0],
+        "bounds_max": [2.0, 9.0],
+        "density": "low",
+        "types": ["cone"]
+      }
+    ],
+    "pallet_rows": 2,
+    "pallet_cols": 2,
+    "dock_area": false
+  },
+  "hazmat_storage": {
+    "description": "Chemical drum storage with a row of drums along the back wall, a central spill cordon, and a clear ventilation corridor along the far wall. Sparse racks; drums dominate the floor.",
+    "keywords": ["hazmat", "chemical", "drum", "spill", "hazardous", "ventilation", "corrosive"],
+    "rack_pattern": "rows",
+    "rack_rows": 2,
+    "rack_cols": 1,
+    "rack_fill": "sparse",
+    "aisle_width": 2.5,
+    "bounds_min": [-9.0, -9.0],
+    "bounds_max": [9.0, 9.0],
+    "clutter_density": "high",
+    "clutter_zones": [
+      {
+        "area": "drum_storage",
+        "bounds_min": [-7.0, -7.0],
+        "bounds_max": [7.0, -4.0],
+        "density": "high",
+        "types": ["barrel", "drum"]
+      },
+      {
+        "area": "chemical_spill_zone",
+        "bounds_min": [-4.0, -4.0],
+        "bounds_max": [4.0, 4.0],
+        "density": "medium",
+        "types": ["barrel", "drum", "cone"]
+      },
+      {
+        "area": "ventilation_corridor",
+        "bounds_min": [-8.0, 5.0],
+        "bounds_max": [8.0, 9.0],
+        "density": "low",
+        "types": ["cone"]
+      }
+    ],
+    "pallet_rows": 2,
+    "pallet_cols": 3,
+    "dock_area": false
+  },
+  "high_density_storage": {
+    "description": "Heavily packed grid of tall racks with very narrow aisles, full shelves throughout, and a confined central aisle. Maximum-density storage scenario.",
+    "keywords": ["high density", "high-density", "packed", "tall storage", "overhead", "vertical", "stacked", "crammed"],
+    "rack_pattern": "grid",
+    "rack_rows": 5,
+    "rack_cols": 3,
+    "rack_fill": "full",
+    "aisle_width": 1.2,
+    "bounds_min": [-9.0, -9.0],
+    "bounds_max": [9.0, 9.0],
+    "clutter_density": "medium",
+    "clutter_zones": [
+      {
+        "area": "confined_aisle",
+        "bounds_min": [-8.0, -2.0],
+        "bounds_max": [8.0, 2.0],
+        "density": "medium",
+        "types": ["box", "cone", "pallet"]
+      }
+    ],
+    "pallet_rows": 3,
+    "pallet_cols": 3,
+    "dock_area": true
+  },
+  "pedestrian_crossing": {
+    "description": "Mixed-traffic floor with a clear vehicle lane through the middle, a parallel pedestrian walkway, and a marked crosswalk in the center. Perimeter racks line the walls; cones mark lanes and crossing.",
+    "keywords": ["pedestrian", "crossing", "walkway", "crosswalk", "vehicle lane", "traffic", "worker path"],
+    "rack_pattern": "perimeter",
+    "rack_rows": 2,
+    "rack_cols": 1,
+    "rack_fill": "medium",
+    "aisle_width": 3.0,
+    "bounds_min": [-9.0, -9.0],
+    "bounds_max": [9.0, 9.0],
+    "clutter_density": "low",
+    "clutter_zones": [
+      {
+        "area": "walkway",
+        "bounds_min": [-8.0, 3.0],
+        "bounds_max": [8.0, 8.0],
+        "density": "low",
+        "types": ["box", "cone"]
+      },
+      {
+        "area": "pedestrian_crossing",
+        "bounds_min": [-2.0, -2.0],
+        "bounds_max": [2.0, 2.0],
+        "density": "medium",
+        "types": ["cone"]
+      },
+      {
+        "area": "vehicle_lane",
+        "bounds_min": [-8.0, -2.0],
+        "bounds_max": [8.0, 2.0],
+        "density": "low",
+        "types": ["cone"]
+      }
+    ],
+    "pallet_rows": 2,
+    "pallet_cols": 3,
+    "dock_area": false
+  },
+  "receiving_dock": {
+    "description": "Inbound receiving floor with a heavy truck-apron and dock pile of incoming pallets, mid-floor staging area, and lightly stocked back-wall racks awaiting put-away.",
+    "keywords": ["receiving", "inbound", "unload", "unloading", "delivery", "truck apron", "incoming"],
+    "rack_pattern": "rows",
+    "rack_rows": 3,
+    "rack_cols": 1,
+    "rack_fill": "sparse",
+    "aisle_width": 3.0,
+    "bounds_min": [-9.0, -9.0],
+    "bounds_max": [9.0, 9.0],
+    "clutter_density": "high",
+    "clutter_zones": [
+      {
+        "area": "truck_apron",
+        "bounds_min": [-8.0, -9.0],
+        "bounds_max": [8.0, -7.0],
+        "density": "high",
+        "types": ["pallet", "box_large", "crate", "cone"]
+      },
+      {
+        "area": "receiving_dock",
+        "bounds_min": [-6.0, -7.0],
+        "bounds_max": [6.0, -4.0],
+        "density": "high",
+        "types": ["pallet", "box", "crate", "barrel"]
+      },
+      {
+        "area": "staging_area",
+        "bounds_min": [-8.0, -4.0],
+        "bounds_max": [8.0, 2.0],
+        "density": "medium",
+        "types": ["pallet", "box", "cone"]
+      }
+    ],
+    "pallet_rows": 4,
+    "pallet_cols": 3,
+    "dock_area": true
   }
 }

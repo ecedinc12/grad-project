@@ -65,7 +65,12 @@ def generate_scene_config(prompt: str, output_path: str):
     - Match keywords: "cramped/tight/dense" → narrow_aisle, "open/spacious" → open_floor,
       "loading/truck/shipping" → loading_dock, "maintenance/repair" → maintenance_bay,
       "yard/outdoor/container" → storage_yard, "cold/freezer" → cold_storage,
-      "cross-dock/transfer" → cross_dock.
+      "cross-dock/transfer" → cross_dock,
+      "hazmat/chemical/drum/spill" → hazmat_storage,
+      "evacuation/egress/blocked exit/muster" → emergency_egress,
+      "pedestrian/crosswalk/walkway/vehicle lane" → pedestrian_crossing,
+      "receiving/inbound/truck apron/unloading" → receiving_dock,
+      "high-density/tall storage/packed/crammed" → high_density_storage.
 
     LAYOUT PARAMS RULES (only set layout_params if overriding preset defaults or using layout="custom"):
     - rack_rows: number of rack rows (1-12). Default 5.

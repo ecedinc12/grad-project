@@ -10,7 +10,7 @@
 output/
 
 # Large Assets (USD files, textures, models)
-assets/
+# assets/
 
 # Python/Environment
 __pycache__/
