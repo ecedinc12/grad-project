@@ -1,12 +1,12 @@
 {
   "standard_warehouse": {
-    "description": "Busy working warehouse floor sized to match the 1.7x-scaled warehouse.usd interior (~±9m). 4x2 rows of stocked racks flanking a central forklift aisle, dense pallet storage near the back wall, heavy dock staging at the front, scattered clutter across the storage zone, and safety cones in the forklift aisle.",
+    "description": "Busy working warehouse floor sized to match the 1.7x-scaled warehouse.usd interior (~±9m). 2x4 grid of stocked racks across the central storage area with forklift aisles between rack rows, dense pallet storage near the back wall, heavy dock staging at the front, scattered clutter across the storage zone.",
     "keywords": ["default", "standard", "typical", "normal", "regular"],
-    "rack_pattern": "rows",
-    "rack_rows": 4,
-    "rack_cols": 2,
+    "rack_pattern": "grid",
+    "rack_rows": 2,
+    "rack_cols": 4,
     "rack_fill": "medium",
-    "aisle_width": 2.5,
+    "aisle_width": 3.0,
     "bounds_min": [-9.0, -9.0],
     "bounds_max": [9.0, 9.0],
     "clutter_density": "high",
@@ -24,13 +24,6 @@
         "bounds_max": [8.0, 9.0],
         "density": "high",
         "types": ["box", "box_small", "crate", "barrel"]
-      },
-      {
-        "area": "forklift_aisle_markers",
-        "bounds_min": [-7.0, -2.5],
-        "bounds_max": [7.0, 2.5],
-        "density": "low",
-        "types": ["cone"]
       }
     ],
     "pallet_rows": 3,

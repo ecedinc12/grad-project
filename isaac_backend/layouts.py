@@ -123,14 +123,20 @@ def _spawn_racks(params, asset_library, stage, idx):
         return idx, 0, rack_positions
 
     if pattern == "rows":
-        total_span = (rows - 1) * aw
-        y_start = (bmin[1] + bmax[1]) / 2.0 - total_span / 2.0
+        # rack_rows parallel rows running East-West, each with rack_cols racks
+        # placed back-to-back along X. aw is the Y aisle gap between rows.
+        rack_x_extent = 2.8  # SM_RackFrame_03 length when rotated 90°
+        total_x = max(0, cols - 1) * rack_x_extent
+        total_y = (rows - 1) * aw
+        x_start = (bmin[0] + bmax[0]) / 2.0 - total_x / 2.0
+        y_start = (bmin[1] + bmax[1]) / 2.0 - total_y / 2.0
         for r in range(rows):
             y = y_start + r * aw
-            x_center = (bmin[0] + bmax[0]) / 2.0
-            idx = _place("rack", x_center, y, 0, 90, asset_library, stage, idx)
-            rack_positions.append((x_center, y))
-            count += 1
+            for c in range(cols):
+                x = x_start + c * rack_x_extent
+                idx = _place("rack", x, y, 0, 90, asset_library, stage, idx)
+                rack_positions.append((x, y))
+                count += 1
 
     elif pattern == "grid":
         total_x = (cols - 1) * aw
