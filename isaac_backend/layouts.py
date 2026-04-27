@@ -25,9 +25,6 @@ except Exception:
 SHELF_PROPS = ["box", "box_small", "box_large", "crate"]
 PALLET_CARGO_PROPS = ["box", "box_small", "box_large", "barrel", "drum", "crate"]
 CLUTTER_PROPS = ["box", "box_small", "box_large", "barrel", "drum", "cone", "pallet", "crate"]
-SHELF_HEIGHTS = [0.15, 1.05, 1.95, 2.85]
-SHELF_POSITIONS_PER_LEVEL = 5
-RACK_Z_SCALE = 1.85  # Stretch rack frame vertically — stock SM_RackFrame_03 is too short for the warehouse interior.
 
 RACK_FILL_PROBS = {
     "empty": 0.0,
@@ -53,8 +50,9 @@ def _resolve_params(layout_name, layout_params, layouts):
     preset = layouts.get(layout_name, layouts.get("standard_warehouse", {}))
     params = {
         "rack_pattern": preset.get("rack_pattern", "rows"),
-        "rack_rows": preset.get("rack_rows", 8),
-        "rack_cols": preset.get("rack_cols", 2),
+        "rack_rows": preset.get("rack_rows", "auto"),
+        "rack_cols": preset.get("rack_cols", "auto"),
+        "target_rack_height": preset.get("target_rack_height", 4.5),
         "aisle_width": preset.get("aisle_width", 2.5),
         "bounds_min": tuple(preset.get("bounds_min", [-12.0, -12.0])),
         "bounds_max": tuple(preset.get("bounds_max", [12.0, 12.0])),
@@ -67,7 +65,7 @@ def _resolve_params(layout_name, layout_params, layouts):
     }
     if layout_params:
         for key in (
-            "rack_pattern", "rack_rows", "rack_cols", "aisle_width",
+            "rack_pattern", "rack_rows", "rack_cols", "target_rack_height", "aisle_width",
             "bounds_min", "bounds_max", "clutter_density", "clutter_zones",
             "pallet_rows", "pallet_cols", "rack_fill", "dock_area",
         ):
@@ -305,6 +303,20 @@ def _spawn_racks(params, asset_library, stage, idx):
     aw = params["aisle_width"]
     bmin = params["bounds_min"]
     bmax = params["bounds_max"]
+    
+    target_rack_height = params.get("target_rack_height", 4.5)
+    rack_base_height = 1.51
+    rack_z_scale = target_rack_height / rack_base_height
+    
+    rack_x_extent = 2.8  # SM_RackFrame_03 length when rotated 90°
+    
+    if cols == "auto" or cols is None:
+        available_x = bmax[0] - bmin[0]
+        cols = max(1, int(available_x / rack_x_extent))
+    if rows == "auto" or rows is None:
+        available_y = bmax[1] - bmin[1]
+        rows = max(1, int(available_y / aw))
+
     count = 0
     rack_positions = []
 
@@ -314,7 +326,6 @@ def _spawn_racks(params, asset_library, stage, idx):
     if pattern == "rows":
         # rack_rows parallel rows running East-West, each with rack_cols racks
         # placed back-to-back along X. aw is the Y aisle gap between rows.
-        rack_x_extent = 2.8  # SM_RackFrame_03 length when rotated 90°
         total_x = max(0, cols - 1) * rack_x_extent
         total_y = (rows - 1) * aw
         x_start = (bmin[0] + bmax[0]) / 2.0 - total_x / 2.0
@@ -323,22 +334,77 @@ def _spawn_racks(params, asset_library, stage, idx):
             y = y_start + r * aw
             for c in range(cols):
                 x = x_start + c * rack_x_extent
-                idx = _place("rack", x, y, 0, 90, asset_library, stage, idx, scale=(1.0, 1.0, RACK_Z_SCALE))
+                idx = _place("rack", x, y, 0, 90, asset_library, stage, idx, scale=(1.0, 1.0, rack_z_scale))
                 rack_positions.append((x, y, 90))
                 count += 1
 
     elif pattern == "grid":
-        total_x = (cols - 1) * aw
+        total_x = max(0, cols - 1) * rack_x_extent
         total_y = (rows - 1) * aw
         x_start = (bmin[0] + bmax[0]) / 2.0 - total_x / 2.0
         y_start = (bmin[1] + bmax[1]) / 2.0 - total_y / 2.0
         for r in range(rows):
             for c in range(cols):
-                x = x_start + c * aw
+                x = x_start + c * rack_x_extent
                 y = y_start + r * aw
-                idx = _place("rack", x, y, 0, 90, asset_library, stage, idx, scale=(1.0, 1.0, RACK_Z_SCALE))
+                idx = _place("rack", x, y, 0, 90, asset_library, stage, idx, scale=(1.0, 1.0, rack_z_scale))
                 rack_positions.append((x, y, 90))
                 count += 1
+
+    elif pattern == "L-shape":
+        total_span_h = (rows - 1) * aw
+        y_start_h = (bmin[1] + bmax[1]) / 2.0 - total_span_h / 2.0
+        x_h = bmin[0] + (bmax[0] - bmin[0]) * 0.25
+        for r in range(rows):
+            y = y_start_h + r * aw
+            idx = _place("rack", x_h, y, 0, 90, asset_library, stage, idx, scale=(1.0, 1.0, rack_z_scale))
+            rack_positions.append((x_h, y, 90))
+            count += 1
+        total_span_v = max(2, rows - 1) * aw
+        x_start_v = x_h + aw
+        y_bottom = bmin[1] + (bmax[1] - bmin[1]) * 0.25
+        for c in range(max(2, rows - 1)):
+            x = x_start_v + c * aw
+            idx = _place("rack", x, y_bottom, 0, 0, asset_library, stage, idx, scale=(1.0, 1.0, rack_z_scale))
+            rack_positions.append((x, y_bottom, 0))
+            count += 1
+
+    elif pattern == "perimeter":
+        total_x = (cols - 1) * aw
+        total_y = (rows - 1) * aw
+        y_bottom = bmin[1] + (bmax[1] - bmin[1]) * 0.1
+        y_top = bmax[1] - (bmax[1] - bmin[1]) * 0.1
+        x_start = (bmin[0] + bmax[0]) / 2.0 - total_x / 2.0
+        for c in range(cols):
+            x = x_start + c * aw
+            idx = _place("rack", x, y_bottom, 0, 0, asset_library, stage, idx, scale=(1.0, 1.0, rack_z_scale))
+            idx = _place("rack", x, y_top, 0, 90, asset_library, stage, idx, scale=(1.0, 1.0, rack_z_scale))
+            rack_positions.extend([(x, y_bottom, 0), (x, y_top, 90)])
+            count += 2
+        x_left = bmin[0] + (bmax[0] - bmin[0]) * 0.1
+        x_right = bmax[0] - (bmax[0] - bmin[0]) * 0.1
+        y_start_v = (bmin[1] + bmax[1]) / 2.0 - total_y / 2.0
+        for r in range(rows):
+            y = y_start_v + r * aw
+            idx = _place("rack", x_left, y, 0, 0, asset_library, stage, idx, scale=(1.0, 1.0, rack_z_scale))
+            idx = _place("rack", x_right, y, 0, 0, asset_library, stage, idx, scale=(1.0, 1.0, rack_z_scale))
+            rack_positions.extend([(x_left, y, 0), (x_right, y, 0)])
+            count += 2
+
+    elif pattern == "clusters":
+        cx = (bmin[0] + bmax[0]) / 2.0
+        cy = (bmin[1] + bmax[1]) / 2.0
+        total_y = (rows - 1) * aw
+        y_start = cy - total_y / 2.0
+        for r in range(rows):
+            y = y_start + r * aw
+            if r % 2 == 0:
+                idx = _place("rack", cx, y, 0, 90, asset_library, stage, idx, scale=(1.0, 1.0, rack_z_scale))
+                rack_positions.append((cx, y, 90))
+                count += 1
+
+
+
 
     elif pattern == "L-shape":
         total_span_h = (rows - 1) * aw
@@ -406,6 +472,11 @@ def _populate_rack_shelves(rack_positions, params, asset_library, stage, idx):
     deck_count = 0
     cargo_count = 0
     has_shelf_asset = "rack_shelf" in asset_library
+    
+    target_rack_height = params.get("target_rack_height", 4.5)
+    shelf_spacing = 0.9
+    num_shelves = int(target_rack_height / shelf_spacing)
+    shelf_heights = [0.15 + i * shelf_spacing for i in range(num_shelves)]
 
     for pos in rack_positions:
         # Tolerate older 2-tuple positions in case of partial upgrade.
@@ -418,7 +489,21 @@ def _populate_rack_shelves(rack_positions, params, asset_library, stage, idx):
         # Place a horizontal deck plank at each shelf level so the rack reads
         # as a real loaded shelving unit instead of a bare frame.
         if has_shelf_asset:
-            for shelf_z in SHELF_HEIGHTS:
+            for shelf_z in shelf_heights:
+                idx = _place("rack_shelf", rx, ry, shelf_z, rrot, asset_library, stage, idx)
+                deck_count += 1
+
+        if fill_prob <= 0.0:
+            continue
+
+        # Per-rack fill bias so some bays look overstocked, some near-empty —
+        # uniform fill across all racks reads as artificial.
+        rack_bias = random.gauss(0.0, 0.25)
+        rack_fill_prob = max(0.0, min(1.0, fill_prob + rack_bias))
+        # One dominant SKU per rack with occasional mixing — looks more like real stocking.
+        primary_prop = random.choice(SHELF_PROPS)
+
+        for shelf_z in shelf_heights:
                 idx = _place("rack_shelf", rx, ry, shelf_z, rrot, asset_library, stage, idx)
                 deck_count += 1
 

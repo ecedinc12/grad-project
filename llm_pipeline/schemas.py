@@ -43,8 +43,13 @@ class LayoutParams(BaseModel):
     rack_pattern: Literal["rows", "grid", "L-shape", "perimeter", "clusters", "none"] = Field(
         default="rows", description="Rack placement pattern algorithm"
     )
-    rack_rows: int = Field(default=8, description="Number of rack rows (1-12)")
-    rack_cols: int = Field(default=2, description="Number of rack columns (1-3)")
+    rack_rows: Literal["auto", 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] = Field(
+        default="auto", description="Number of rack rows (1-12) or 'auto' to procedurally fill bounds"
+    )
+    rack_cols: Literal["auto", 1, 2, 3, 4, 5, 6, 7, 8, 9, 10] = Field(
+        default="auto", description="Number of rack columns (1-10) or 'auto' to procedurally fill bounds"
+    )
+    target_rack_height: float = Field(default=4.5, description="Target height for the racks in meters. Racks and shelves will scale procedurally.")
     aisle_width: float = Field(default=2.5, description="Distance between rack rows in meters (1.0-5.0)")
     bounds_min: tuple[float, float] = Field(default=(-6.0, -6.0), description="Minimum (x, y) layout footprint in meters. Must stay within ±6m.")
     bounds_max: tuple[float, float] = Field(default=(6.0, 6.0), description="Maximum (x, y) layout footprint in meters. Must stay within ±6m.")
