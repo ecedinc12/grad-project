@@ -250,8 +250,8 @@ def _place_floor_arrow(stage, idx, x, y, rot_z=0):
     sxf.SetRotate(Gf.Vec3f(0, 0, rot_z), UsdGeom.XformCommonAPI.RotationOrderXYZ)
     sh.CreateDisplayColorAttr([Gf.Vec3f(*yellow)])
     # Head — two angled bars
-    for sgn in (-1, 1):
-        hd_path = f"/World/Layout/arrow_head_{idx}_{sgn}"
+    for sgn_i, sgn in enumerate((-1, 1)):
+        hd_path = f"/World/Layout/arrow_head_{idx}_{sgn_i}"
         hd = UsdGeom.Cube.Define(stage, hd_path)
         hd.GetSizeAttr().Set(2.0)
         hxf = UsdGeom.XformCommonAPI(hd.GetPrim())
@@ -761,8 +761,8 @@ def _place_caution_sign(stage, idx, x, y, rot_z=0):
     yellow = (0.95, 0.82, 0.10)
     ang = math.radians(rot_z)
     cos_a, sin_a = math.cos(ang), math.sin(ang)
-    for sgn, tilt in ((-1, 18), (1, -18)):
-        path = f"/World/Layout/caution_{idx}_{sgn}"
+    for sgn_i, (sgn, tilt) in enumerate(((-1, 18), (1, -18))):
+        path = f"/World/Layout/caution_{idx}_{sgn_i}"
         cube = UsdGeom.Cube.Define(stage, path)
         cube.GetSizeAttr().Set(2.0)
         prim = cube.GetPrim()
