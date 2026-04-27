@@ -1,44 +1,87 @@
 {
   "standard_warehouse": {
-    "description": "Dense working warehouse floor sized to match the 1.7x-scaled warehouse.usd interior (~±9m). 3x5 grid of fully-stocked racks across the central storage area with forklift aisles between rack rows, heavy pallet staging at the back wall, dock pile at the front, plus barrel/crate stashes along both side walls. High clutter throughout.",
-    "keywords": ["default", "standard", "typical", "normal", "regular"],
+    "description": "Working warehouse floor sized to fill the 1.7x-scaled warehouse.usd interior (~\u00b111m). Auto-fit rack grid biased toward the back wall, with a clear front zone for the dock and forklift entry, plus stashes along both side walls.",
+    "keywords": [
+      "default",
+      "standard",
+      "typical",
+      "normal",
+      "regular"
+    ],
     "rack_pattern": "rows",
     "rack_rows": "auto",
     "rack_cols": "auto",
     "target_rack_height": 4.5,
     "rack_fill": "full",
-    "aisle_width": 3.5,
-    "bounds_min": [-9.0, -9.0],
-    "bounds_max": [9.0, 9.0],
+    "aisle_width": 3.0,
+    "bounds_min": [
+      -11.0,
+      -11.0
+    ],
+    "bounds_max": [
+      11.0,
+      11.0
+    ],
     "clutter_density": "high",
     "clutter_zones": [
       {
         "area": "dock_staging",
-        "bounds_min": [-8.0, -9.0],
-        "bounds_max": [8.0, -5.0],
+        "bounds_min": [
+          -10.0,
+          -11.0
+        ],
+        "bounds_max": [
+          10.0,
+          -6.0
+        ],
         "density": "high",
-        "types": ["box", "box_large", "crate", "barrel", "drum", "cone", "pallet"]
-      },
-      {
-        "area": "back_staging",
-        "bounds_min": [-8.0, 5.0],
-        "bounds_max": [8.0, 9.0],
-        "density": "high",
-        "types": ["box", "box_small", "crate", "barrel", "pallet"]
+        "types": [
+          "box",
+          "box_large",
+          "crate",
+          "barrel",
+          "drum",
+          "cone",
+          "pallet"
+        ]
       },
       {
         "area": "left_wall_stash",
-        "bounds_min": [-9.0, -4.5],
-        "bounds_max": [-7.0, 4.5],
+        "bounds_min": [
+          -11.0,
+          -5.0
+        ],
+        "bounds_max": [
+          -9.0,
+          5.0
+        ],
         "density": "medium",
-        "types": ["barrel", "drum", "crate", "cone", "box_large"]
+        "types": [
+          "barrel",
+          "drum",
+          "crate",
+          "cone",
+          "box_large"
+        ]
       },
       {
         "area": "right_wall_stash",
-        "bounds_min": [7.0, -4.5],
-        "bounds_max": [9.0, 4.5],
+        "bounds_min": [
+          9.0,
+          -5.0
+        ],
+        "bounds_max": [
+          11.0,
+          5.0
+        ],
         "density": "medium",
-        "types": ["barrel", "drum", "crate", "cone", "box_large"]
+        "types": [
+          "barrel",
+          "drum",
+          "crate",
+          "cone",
+          "box_large"
+        ]
       }
     ],
     "pallet_rows": 2,
@@ -47,21 +90,44 @@
   },
   "narrow_aisle": {
     "description": "Cramped high-density storage with 7 rack rows and tight passages. Increased collision risk between workers and vehicles.",
-    "keywords": ["cramped", "tight", "dense", "narrow", "crowded", "high-density"],
+    "keywords": [
+      "cramped",
+      "tight",
+      "dense",
+      "narrow",
+      "crowded",
+      "high-density"
+    ],
     "rack_pattern": "rows",
     "rack_rows": "auto",
     "rack_cols": "auto",
     "aisle_width": 1.2,
-    "bounds_min": [-6.0, -6.0],
-    "bounds_max": [6.0, 6.0],
+    "bounds_min": [
+      -9.0,
+      -9.0
+    ],
+    "bounds_max": [
+      9.0,
+      9.0
+    ],
     "clutter_density": "high",
     "clutter_zones": [
       {
         "area": "center_aisle",
-        "bounds_min": [-5.0, -1.5],
-        "bounds_max": [5.0, 1.5],
+        "bounds_min": [
+          -7.5,
+          -2.25
+        ],
+        "bounds_max": [
+          7.5,
+          2.25
+        ],
         "density": "high",
-        "types": ["box", "barrel", "cone"]
+        "types": [
+          "box",
+          "barrel",
+          "cone"
+        ]
       }
     ],
     "pallet_rows": 3,
@@ -69,13 +135,26 @@
   },
   "open_floor": {
     "description": "Sparse layout with 2 perimeter rack rows and wide open areas. Good for vehicle maneuvering and wide-shot scenarios.",
-    "keywords": ["open", "spacious", "wide", "empty", "large", "clear"],
+    "keywords": [
+      "open",
+      "spacious",
+      "wide",
+      "empty",
+      "large",
+      "clear"
+    ],
     "rack_pattern": "perimeter",
     "rack_rows": "auto",
     "rack_cols": "auto",
     "aisle_width": 3.0,
-    "bounds_min": [-6.0, -6.0],
-    "bounds_max": [6.0, 6.0],
+    "bounds_min": [
+      -9.0,
+      -9.0
+    ],
+    "bounds_max": [
+      9.0,
+      9.0
+    ],
     "clutter_density": "low",
     "clutter_zones": [],
     "pallet_rows": 1,
@@ -83,21 +162,43 @@
   },
   "cross_dock": {
     "description": "L-shaped rack arrangement with wide truck corridor for cross-docking operations. Forklift traffic flows through central corridor.",
-    "keywords": ["cross-dock", "transfer", "dock", "shipping", "receiving", "L-shape"],
+    "keywords": [
+      "cross-dock",
+      "transfer",
+      "dock",
+      "shipping",
+      "receiving",
+      "L-shape"
+    ],
     "rack_pattern": "L-shape",
     "rack_rows": "auto",
     "rack_cols": "auto",
     "aisle_width": 3.5,
-    "bounds_min": [-6.0, -6.0],
-    "bounds_max": [6.0, 6.0],
+    "bounds_min": [
+      -9.0,
+      -9.0
+    ],
+    "bounds_max": [
+      9.0,
+      9.0
+    ],
     "clutter_density": "medium",
     "clutter_zones": [
       {
         "area": "truck_corridor",
-        "bounds_min": [-6.0, -2.0],
-        "bounds_max": [6.0, 2.0],
+        "bounds_min": [
+          -9.0,
+          -3.0
+        ],
+        "bounds_max": [
+          9.0,
+          3.0
+        ],
         "density": "low",
-        "types": ["cone", "pallet"]
+        "types": [
+          "cone",
+          "pallet"
+        ]
       }
     ],
     "pallet_rows": 3,
@@ -105,28 +206,58 @@
   },
   "cold_storage": {
     "description": "Dense grid layout with heavy barrel clustering. Simulates refrigerated or cold storage with tight grid racking and barrel-heavy clutter.",
-    "keywords": ["cold", "freezer", "refrigerated", "cold storage", "frozen", "chilled"],
+    "keywords": [
+      "cold",
+      "freezer",
+      "refrigerated",
+      "cold storage",
+      "frozen",
+      "chilled"
+    ],
     "rack_pattern": "grid",
     "rack_rows": 4,
     "rack_cols": 3,
     "aisle_width": 1.5,
-    "bounds_min": [-6.0, -6.0],
-    "bounds_max": [6.0, 6.0],
+    "bounds_min": [
+      -9.0,
+      -9.0
+    ],
+    "bounds_max": [
+      9.0,
+      9.0
+    ],
     "clutter_density": "high",
     "clutter_zones": [
       {
         "area": "barrel_zone",
-        "bounds_min": [-4.0, -4.0],
-        "bounds_max": [4.0, 0.0],
+        "bounds_min": [
+          -6.0,
+          -6.0
+        ],
+        "bounds_max": [
+          6.0,
+          0.0
+        ],
         "density": "high",
-        "types": ["barrel"]
+        "types": [
+          "barrel"
+        ]
       },
       {
         "area": "pallet_zone",
-        "bounds_min": [-4.0, 0.0],
-        "bounds_max": [4.0, 4.0],
+        "bounds_min": [
+          -6.0,
+          0.0
+        ],
+        "bounds_max": [
+          6.0,
+          6.0
+        ],
         "density": "medium",
-        "types": ["pallet", "box"]
+        "types": [
+          "pallet",
+          "box"
+        ]
       }
     ],
     "pallet_rows": 3,
@@ -134,21 +265,45 @@
   },
   "loading_dock": {
     "description": "Minimal racks with heavy pallet staging and truck bay area. Simulates loading/unloading dock with pallet buildup.",
-    "keywords": ["loading", "truck", "shipping", "dock", "unloading", "freight", "bay"],
+    "keywords": [
+      "loading",
+      "truck",
+      "shipping",
+      "dock",
+      "unloading",
+      "freight",
+      "bay"
+    ],
     "rack_pattern": "rows",
     "rack_rows": "auto",
     "rack_cols": "auto",
     "aisle_width": 2.5,
-    "bounds_min": [-6.0, -6.0],
-    "bounds_max": [6.0, 6.0],
+    "bounds_min": [
+      -9.0,
+      -9.0
+    ],
+    "bounds_max": [
+      9.0,
+      9.0
+    ],
     "clutter_density": "high",
     "clutter_zones": [
       {
         "area": "dock_bay",
-        "bounds_min": [-6.0, -6.0],
-        "bounds_max": [6.0, -2.0],
+        "bounds_min": [
+          -9.0,
+          -9.0
+        ],
+        "bounds_max": [
+          9.0,
+          -3.0
+        ],
         "density": "high",
-        "types": ["pallet", "box", "cone"]
+        "types": [
+          "pallet",
+          "box",
+          "cone"
+        ]
       }
     ],
     "pallet_rows": 4,
@@ -156,21 +311,42 @@
   },
   "maintenance_bay": {
     "description": "No racks, open service area with cone-marked safety zones. Suitable for equipment repair and maintenance scenarios.",
-    "keywords": ["maintenance", "repair", "service", "workshop", "garage", "mechanic"],
+    "keywords": [
+      "maintenance",
+      "repair",
+      "service",
+      "workshop",
+      "garage",
+      "mechanic"
+    ],
     "rack_pattern": "none",
     "rack_rows": 0,
     "rack_cols": 0,
     "aisle_width": 2.0,
-    "bounds_min": [-6.0, -6.0],
-    "bounds_max": [6.0, 6.0],
+    "bounds_min": [
+      -9.0,
+      -9.0
+    ],
+    "bounds_max": [
+      9.0,
+      9.0
+    ],
     "clutter_density": "low",
     "clutter_zones": [
       {
         "area": "safety_zone_front",
-        "bounds_min": [-3.0, -2.0],
-        "bounds_max": [3.0, 2.0],
+        "bounds_min": [
+          -4.5,
+          -3.0
+        ],
+        "bounds_max": [
+          4.5,
+          3.0
+        ],
         "density": "medium",
-        "types": ["cone"]
+        "types": [
+          "cone"
+        ]
       }
     ],
     "pallet_rows": 0,
@@ -178,28 +354,59 @@
   },
   "storage_yard": {
     "description": "4 rack clusters with wide lanes, outdoor-style yard layout. Good for large-scale storage scenarios.",
-    "keywords": ["yard", "outdoor", "container", "storage yard", "bulk", "large-scale"],
+    "keywords": [
+      "yard",
+      "outdoor",
+      "container",
+      "storage yard",
+      "bulk",
+      "large-scale"
+    ],
     "rack_pattern": "clusters",
     "rack_rows": 3,
     "rack_cols": 4,
     "aisle_width": 3.0,
-    "bounds_min": [-6.0, -6.0],
-    "bounds_max": [6.0, 6.0],
+    "bounds_min": [
+      -9.0,
+      -9.0
+    ],
+    "bounds_max": [
+      9.0,
+      9.0
+    ],
     "clutter_density": "medium",
     "clutter_zones": [
       {
         "area": "yard_left",
-        "bounds_min": [-6.0, -6.0],
-        "bounds_max": [-1.0, 0.0],
+        "bounds_min": [
+          -9.0,
+          -9.0
+        ],
+        "bounds_max": [
+          -1.5,
+          0.0
+        ],
         "density": "medium",
-        "types": ["box", "barrel"]
+        "types": [
+          "box",
+          "barrel"
+        ]
       },
       {
         "area": "yard_right",
-        "bounds_min": [1.0, 0.0],
-        "bounds_max": [6.0, 6.0],
+        "bounds_min": [
+          1.5,
+          0.0
+        ],
+        "bounds_max": [
+          9.0,
+          9.0
+        ],
         "density": "medium",
-        "types": ["pallet", "cone"]
+        "types": [
+          "pallet",
+          "cone"
+        ]
       }
     ],
     "pallet_rows": 2,
@@ -207,36 +414,78 @@
   },
   "emergency_egress": {
     "description": "Egress drill scene: a wide central corridor with a forklift-blocked obstacle pile in the middle and clearly marked exit lanes leading to a muster point. Racks flank the corridor on both sides.",
-    "keywords": ["evacuation", "emergency", "egress", "exit", "blocked", "muster", "fire", "escape"],
+    "keywords": [
+      "evacuation",
+      "emergency",
+      "egress",
+      "exit",
+      "blocked",
+      "muster",
+      "fire",
+      "escape"
+    ],
     "rack_pattern": "rows",
     "rack_rows": "auto",
     "rack_cols": "auto",
     "rack_fill": "medium",
     "aisle_width": 3.5,
-    "bounds_min": [-9.0, -9.0],
-    "bounds_max": [9.0, 9.0],
+    "bounds_min": [
+      -11.0,
+      -11.0
+    ],
+    "bounds_max": [
+      11.0,
+      11.0
+    ],
     "clutter_density": "medium",
     "clutter_zones": [
       {
         "area": "blockage_zone",
-        "bounds_min": [-3.0, -4.0],
-        "bounds_max": [3.0, 4.0],
+        "bounds_min": [
+          -3.67,
+          -4.89
+        ],
+        "bounds_max": [
+          3.67,
+          4.89
+        ],
         "density": "high",
-        "types": ["box_large", "crate", "pallet", "cone"]
+        "types": [
+          "box_large",
+          "crate",
+          "pallet",
+          "cone"
+        ]
       },
       {
         "area": "egress_corridor_south",
-        "bounds_min": [-2.0, -9.0],
-        "bounds_max": [2.0, -4.0],
+        "bounds_min": [
+          -2.44,
+          -11.0
+        ],
+        "bounds_max": [
+          2.44,
+          -4.89
+        ],
         "density": "low",
-        "types": ["cone"]
+        "types": [
+          "cone"
+        ]
       },
       {
         "area": "egress_corridor_north",
-        "bounds_min": [-2.0, 4.0],
-        "bounds_max": [2.0, 9.0],
+        "bounds_min": [
+          -2.44,
+          4.89
+        ],
+        "bounds_max": [
+          2.44,
+          11.0
+        ],
         "density": "low",
-        "types": ["cone"]
+        "types": [
+          "cone"
+        ]
       }
     ],
     "pallet_rows": 2,
@@ -245,36 +494,77 @@
   },
   "hazmat_storage": {
     "description": "Chemical drum storage with a row of drums along the back wall, a central spill cordon, and a clear ventilation corridor along the far wall. Sparse racks; drums dominate the floor.",
-    "keywords": ["hazmat", "chemical", "drum", "spill", "hazardous", "ventilation", "corrosive"],
+    "keywords": [
+      "hazmat",
+      "chemical",
+      "drum",
+      "spill",
+      "hazardous",
+      "ventilation",
+      "corrosive"
+    ],
     "rack_pattern": "rows",
     "rack_rows": "auto",
     "rack_cols": "auto",
     "rack_fill": "sparse",
     "aisle_width": 2.5,
-    "bounds_min": [-9.0, -9.0],
-    "bounds_max": [9.0, 9.0],
+    "bounds_min": [
+      -11.0,
+      -11.0
+    ],
+    "bounds_max": [
+      11.0,
+      11.0
+    ],
     "clutter_density": "high",
     "clutter_zones": [
       {
         "area": "drum_storage",
-        "bounds_min": [-7.0, -7.0],
-        "bounds_max": [7.0, -4.0],
+        "bounds_min": [
+          -8.56,
+          -8.56
+        ],
+        "bounds_max": [
+          8.56,
+          -4.89
+        ],
         "density": "high",
-        "types": ["barrel", "drum"]
+        "types": [
+          "barrel",
+          "drum"
+        ]
       },
       {
         "area": "chemical_spill_zone",
-        "bounds_min": [-4.0, -4.0],
-        "bounds_max": [4.0, 4.0],
+        "bounds_min": [
+          -4.89,
+          -4.89
+        ],
+        "bounds_max": [
+          4.89,
+          4.89
+        ],
         "density": "medium",
-        "types": ["barrel", "drum", "cone"]
+        "types": [
+          "barrel",
+          "drum",
+          "cone"
+        ]
       },
       {
         "area": "ventilation_corridor",
-        "bounds_min": [-8.0, 5.0],
-        "bounds_max": [8.0, 9.0],
+        "bounds_min": [
+          -9.78,
+          6.11
+        ],
+        "bounds_max": [
+          9.78,
+          11.0
+        ],
         "density": "low",
-        "types": ["cone"]
+        "types": [
+          "cone"
+        ]
       }
     ],
     "pallet_rows": 2,
@@ -283,22 +573,47 @@
   },
   "high_density_storage": {
     "description": "Heavily packed grid of tall racks with very narrow aisles, full shelves throughout, and a confined central aisle. Maximum-density storage scenario.",
-    "keywords": ["high density", "high-density", "packed", "tall storage", "overhead", "vertical", "stacked", "crammed"],
+    "keywords": [
+      "high density",
+      "high-density",
+      "packed",
+      "tall storage",
+      "overhead",
+      "vertical",
+      "stacked",
+      "crammed"
+    ],
     "rack_pattern": "grid",
     "rack_rows": 5,
     "rack_cols": 3,
     "rack_fill": "full",
     "aisle_width": 1.2,
-    "bounds_min": [-9.0, -9.0],
-    "bounds_max": [9.0, 9.0],
+    "bounds_min": [
+      -11.0,
+      -11.0
+    ],
+    "bounds_max": [
+      11.0,
+      11.0
+    ],
     "clutter_density": "medium",
     "clutter_zones": [
       {
         "area": "confined_aisle",
-        "bounds_min": [-8.0, -2.0],
-        "bounds_max": [8.0, 2.0],
+        "bounds_min": [
+          -9.78,
+          -2.44
+        ],
+        "bounds_max": [
+          9.78,
+          2.44
+        ],
         "density": "medium",
-        "types": ["box", "cone", "pallet"]
+        "types": [
+          "box",
+          "cone",
+          "pallet"
+        ]
       }
     ],
     "pallet_rows": 3,
@@ -307,36 +622,75 @@
   },
   "pedestrian_crossing": {
     "description": "Mixed-traffic floor with a clear vehicle lane through the middle, a parallel pedestrian walkway, and a marked crosswalk in the center. Perimeter racks line the walls; cones mark lanes and crossing.",
-    "keywords": ["pedestrian", "crossing", "walkway", "crosswalk", "vehicle lane", "traffic", "worker path"],
+    "keywords": [
+      "pedestrian",
+      "crossing",
+      "walkway",
+      "crosswalk",
+      "vehicle lane",
+      "traffic",
+      "worker path"
+    ],
     "rack_pattern": "perimeter",
     "rack_rows": "auto",
     "rack_cols": "auto",
     "rack_fill": "medium",
     "aisle_width": 3.0,
-    "bounds_min": [-9.0, -9.0],
-    "bounds_max": [9.0, 9.0],
+    "bounds_min": [
+      -11.0,
+      -11.0
+    ],
+    "bounds_max": [
+      11.0,
+      11.0
+    ],
     "clutter_density": "low",
     "clutter_zones": [
       {
         "area": "walkway",
-        "bounds_min": [-8.0, 3.0],
-        "bounds_max": [8.0, 8.0],
+        "bounds_min": [
+          -9.78,
+          3.67
+        ],
+        "bounds_max": [
+          9.78,
+          9.78
+        ],
         "density": "low",
-        "types": ["box", "cone"]
+        "types": [
+          "box",
+          "cone"
+        ]
       },
       {
         "area": "pedestrian_crossing",
-        "bounds_min": [-2.0, -2.0],
-        "bounds_max": [2.0, 2.0],
+        "bounds_min": [
+          -2.44,
+          -2.44
+        ],
+        "bounds_max": [
+          2.44,
+          2.44
+        ],
         "density": "medium",
-        "types": ["cone"]
+        "types": [
+          "cone"
+        ]
       },
       {
         "area": "vehicle_lane",
-        "bounds_min": [-8.0, -2.0],
-        "bounds_max": [8.0, 2.0],
+        "bounds_min": [
+          -9.78,
+          -2.44
+        ],
+        "bounds_max": [
+          9.78,
+          2.44
+        ],
         "density": "low",
-        "types": ["cone"]
+        "types": [
+          "cone"
+        ]
       }
     ],
     "pallet_rows": 2,
@@ -345,36 +699,82 @@
   },
   "receiving_dock": {
     "description": "Inbound receiving floor with a heavy truck-apron and dock pile of incoming pallets, mid-floor staging area, and lightly stocked back-wall racks awaiting put-away.",
-    "keywords": ["receiving", "inbound", "unload", "unloading", "delivery", "truck apron", "incoming"],
+    "keywords": [
+      "receiving",
+      "inbound",
+      "unload",
+      "unloading",
+      "delivery",
+      "truck apron",
+      "incoming"
+    ],
     "rack_pattern": "rows",
     "rack_rows": "auto",
     "rack_cols": "auto",
     "rack_fill": "sparse",
     "aisle_width": 3.0,
-    "bounds_min": [-9.0, -9.0],
-    "bounds_max": [9.0, 9.0],
+    "bounds_min": [
+      -11.0,
+      -11.0
+    ],
+    "bounds_max": [
+      11.0,
+      11.0
+    ],
     "clutter_density": "high",
     "clutter_zones": [
       {
         "area": "truck_apron",
-        "bounds_min": [-8.0, -9.0],
-        "bounds_max": [8.0, -7.0],
+        "bounds_min": [
+          -9.78,
+          -11.0
+        ],
+        "bounds_max": [
+          9.78,
+          -8.56
+        ],
         "density": "high",
-        "types": ["pallet", "box_large", "crate", "cone"]
+        "types": [
+          "pallet",
+          "box_large",
+          "crate",
+          "cone"
+        ]
       },
       {
         "area": "receiving_dock",
-        "bounds_min": [-6.0, -7.0],
-        "bounds_max": [6.0, -4.0],
+        "bounds_min": [
+          -7.33,
+          -8.56
+        ],
+        "bounds_max": [
+          7.33,
+          -4.89
+        ],
         "density": "high",
-        "types": ["pallet", "box", "crate", "barrel"]
+        "types": [
+          "pallet",
+          "box",
+          "crate",
+          "barrel"
+        ]
       },
       {
         "area": "staging_area",
-        "bounds_min": [-8.0, -4.0],
-        "bounds_max": [8.0, 2.0],
+        "bounds_min": [
+          -9.78,
+          -4.89
+        ],
+        "bounds_max": [
+          9.78,
+          2.44
+        ],
         "density": "medium",
-        "types": ["pallet", "box", "cone"]
+        "types": [
+          "pallet",
+          "box",
+          "cone"
+        ]
       }
     ],
     "pallet_rows": 4,

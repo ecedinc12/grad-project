@@ -32,10 +32,9 @@ SHELF_POSITIONS_PER_LEVEL = 5
 # converting the JSON `aisle_width` (gap-between-racks) into row pitch.
 RACK_X_EXTENT = 2.8
 RACK_DEPTH = 1.1
-# Keep racks off the warehouse walls so wall-side clutter, stashes and the
-# forklift charging bay have room to live. Without this the auto-fill packs
-# right up to the walls and the perimeter reads as bare.
-WALL_CLEARANCE = 1.5
+# Tight wall margin so racks dress the perimeter instead of leaving the walls
+# reading as a bare frame around a central clump.
+WALL_CLEARANCE = 0.9
 
 RACK_FILL_PROBS = {
     "empty": 0.0,
@@ -344,7 +343,7 @@ def _spawn_racks(params, asset_library, stage, idx):
     bmax = params["bounds_max"]
     
     target_rack_height = params.get("target_rack_height", 4.5)
-    rack_base_height = 1.51
+    rack_base_height = 2.4  # measured height of SM_RackFrame_03 base mesh
     rack_z_scale = target_rack_height / rack_base_height
 
     rack_x_extent = RACK_X_EXTENT
@@ -370,10 +369,14 @@ def _spawn_racks(params, asset_library, stage, idx):
         # rack_rows parallel rows running East-West, each with rack_cols racks
         # placed back-to-back along X. Row spacing is RACK_DEPTH + aw so that
         # aw ends up as the actual walkable aisle gap between rack bodies.
+        # Backmost row sits one wall-clearance off the back (+Y) wall; the
+        # rest of the rows extend forward from there, leaving the front of
+        # the warehouse open for the dock/entry zone.
         total_x = max(0, cols - 1) * rack_x_extent
         total_y = (rows - 1) * row_pitch
         x_start = (bmin[0] + bmax[0]) / 2.0 - total_x / 2.0
-        y_start = (bmin[1] + bmax[1]) / 2.0 - total_y / 2.0
+        y_back = bmax[1] - WALL_CLEARANCE - RACK_DEPTH / 2.0
+        y_start = y_back - total_y
         for r in range(rows):
             y = y_start + r * row_pitch
             for c in range(cols):
@@ -386,7 +389,8 @@ def _spawn_racks(params, asset_library, stage, idx):
         total_x = max(0, cols - 1) * rack_x_extent
         total_y = (rows - 1) * row_pitch
         x_start = (bmin[0] + bmax[0]) / 2.0 - total_x / 2.0
-        y_start = (bmin[1] + bmax[1]) / 2.0 - total_y / 2.0
+        y_back = bmax[1] - WALL_CLEARANCE - RACK_DEPTH / 2.0
+        y_start = y_back - total_y
         for r in range(rows):
             for c in range(cols):
                 x = x_start + c * rack_x_extent
@@ -930,14 +934,14 @@ def _place_mop_and_bucket(stage, idx, x, y):
 
 
 def _place_tire_scuff(stage, idx, x, y, length, rot_z=0):
-    """Broken dark stripe down an aisle centerline — forklift tire residue.
-    Drawn as a chain of short dark segments so it reads as worn rubber, not a
-    solid line of paint."""
-    color = (0.10, 0.09, 0.08)
+    """Broken stripe down an aisle centerline — forklift tire residue. Drawn
+    as a chain of short rust-brown segments so it reads as worn rubber,
+    not a solid line of paint."""
+    color = (0.22, 0.16, 0.12)
     ang = math.radians(rot_z)
     cos_a, sin_a = math.cos(ang), math.sin(ang)
-    seg_len = 0.55
-    gap = 0.30
+    seg_len = 0.70
+    gap = 0.25
     pitch = seg_len + gap
     n_segs = max(1, int(length / pitch))
     start = -((n_segs - 1) * pitch) / 2.0
@@ -952,29 +956,29 @@ def _place_tire_scuff(stage, idx, x, y, length, rot_z=0):
         cube = UsdGeom.Cube.Define(stage, path)
         cube.GetSizeAttr().Set(2.0)
         sxf = UsdGeom.XformCommonAPI(cube.GetPrim())
-        sxf.SetScale(Gf.Vec3f(seg_len / 2.0, 0.06, 0.006))
-        sxf.SetTranslate(Gf.Vec3d(wx, wy, 0.008))
+        sxf.SetScale(Gf.Vec3f(seg_len / 2.0, 0.10, 0.006))
+        sxf.SetTranslate(Gf.Vec3d(wx, wy, 0.018))
         sxf.SetRotate(Gf.Vec3f(0, 0, rot_z), UsdGeom.XformCommonAPI.RotationOrderXYZ)
         cube.CreateDisplayColorAttr([Gf.Vec3f(*color)])
     return idx + 1
 
 
-def _place_oil_stain(stage, idx, x, y, radius=0.45):
-    """Dark irregular puddle — cluster of small flat dark blobs."""
-    base_color = (0.06, 0.05, 0.04)
-    for b in range(random.randint(4, 7)):
+def _place_oil_stain(stage, idx, x, y, radius=0.55):
+    """Irregular puddle — cluster of small flat dark blobs."""
+    base_color = (0.12, 0.10, 0.08)
+    for b in range(random.randint(5, 8)):
         ang = random.uniform(0, 2 * math.pi)
         r = random.uniform(0.0, radius)
         bx = x + r * math.cos(ang)
         by = y + r * math.sin(ang)
-        sx = random.uniform(0.10, 0.22)
-        sy = random.uniform(0.10, 0.22)
+        sx = random.uniform(0.14, 0.28)
+        sy = random.uniform(0.14, 0.28)
         path = f"/World/Layout/oil_blob_{idx}_{b}"
         cube = UsdGeom.Cube.Define(stage, path)
         cube.GetSizeAttr().Set(2.0)
         oxf = UsdGeom.XformCommonAPI(cube.GetPrim())
         oxf.SetScale(Gf.Vec3f(sx, sy, 0.005))
-        oxf.SetTranslate(Gf.Vec3d(bx, by, 0.007))
+        oxf.SetTranslate(Gf.Vec3d(bx, by, 0.020))
         oxf.SetRotate(Gf.Vec3f(0, 0, random.uniform(0, 90)),
                       UsdGeom.XformCommonAPI.RotationOrderXYZ)
         cube.CreateDisplayColorAttr([Gf.Vec3f(*base_color)])
