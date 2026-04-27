@@ -106,7 +106,8 @@ def _paint_floor_stripe(stage, idx, x, y, length_x, length_y, color, z=0.012):
 
 
 def _place_column_guard(stage, idx, x, y, height=0.55):
-    """Yellow plastic-style column-protector stub at a rack corner."""
+    """Yellow plastic-style column-protector stub at a rack corner, wrapped in
+    a black/yellow hazard chevron pattern (alternating thin black bands)."""
     path = f"/World/Layout/col_guard_{idx}"
     cyl = UsdGeom.Cylinder.Define(stage, path)
     cyl.GetRadiusAttr().Set(0.12)
@@ -118,6 +119,20 @@ def _place_column_guard(stage, idx, x, y, height=0.55):
     cyl.CreateDisplayColorAttr([Gf.Vec3f(0.95, 0.78, 0.05)])
     if not prim.HasAPI(UsdPhysics.CollisionAPI):
         UsdPhysics.CollisionAPI.Apply(prim)
+    # Hazard chevron — three thin black bands wrapping the post. Slightly
+    # larger radius so they sit proud of the yellow base instead of z-fighting.
+    band_count = 3
+    band_h = 0.05
+    for b in range(band_count):
+        bz = (b + 1) * height / (band_count + 1)
+        band_path = f"/World/Layout/col_guard_band_{idx}_{b}"
+        band = UsdGeom.Cylinder.Define(stage, band_path)
+        band.GetRadiusAttr().Set(0.125)
+        band.GetHeightAttr().Set(band_h)
+        band.GetAxisAttr().Set("Z")
+        bxf = UsdGeom.XformCommonAPI(band.GetPrim())
+        bxf.SetTranslate(Gf.Vec3d(x, y, bz))
+        band.CreateDisplayColorAttr([Gf.Vec3f(0.05, 0.05, 0.05)])
     return idx + 1
 
 
@@ -137,8 +152,9 @@ def _place_charger_box(stage, idx, x, y, rot_z=0):
     return idx + 1
 
 
-def _place_shelf_placard(stage, idx, x, y, z, rot_z):
-    """Small white SKU placard on a rack upright."""
+def _place_shelf_placard(stage, idx, x, y, z, rot_z, band_color=None):
+    """Small SKU placard on a rack upright — white body with an optional
+    colored bay-ID band along the top to mimic A-1, B-2 style aisle labels."""
     path = f"/World/Layout/placard_{idx}"
     cube = UsdGeom.Cube.Define(stage, path)
     cube.GetSizeAttr().Set(2.0)
@@ -148,7 +164,19 @@ def _place_shelf_placard(stage, idx, x, y, z, rot_z):
     xf.SetTranslate(Gf.Vec3d(x, y, z))
     xf.SetRotate(Gf.Vec3f(0, 0, rot_z), UsdGeom.XformCommonAPI.RotationOrderXYZ)
     cube.CreateDisplayColorAttr([Gf.Vec3f(0.95, 0.95, 0.92)])
-    return idx + 1
+    used = 1
+    if band_color is not None:
+        band_path = f"/World/Layout/placard_band_{idx}"
+        band = UsdGeom.Cube.Define(stage, band_path)
+        band.GetSizeAttr().Set(2.0)
+        bxf = UsdGeom.XformCommonAPI(band.GetPrim())
+        # Sits along the top edge of the placard, slightly proud on the +Y side.
+        bxf.SetScale(Gf.Vec3f(0.18, 0.022, 0.018))
+        bxf.SetTranslate(Gf.Vec3d(x, y, z + 0.045))
+        bxf.SetRotate(Gf.Vec3f(0, 0, rot_z), UsdGeom.XformCommonAPI.RotationOrderXYZ)
+        band.CreateDisplayColorAttr([Gf.Vec3f(*band_color)])
+        used += 1
+    return idx + used
 
 
 def _place_fire_extinguisher(stage, idx, x, y):
@@ -437,6 +465,8 @@ def _populate_rack_shelves(rack_positions, params, asset_library, stage, idx):
     num_shelves = int(target_rack_height / shelf_spacing)
     shelf_heights = [0.15 + i * shelf_spacing for i in range(num_shelves)]
 
+    has_pallet_asset = "pallet" in asset_library
+
     for pos in rack_positions:
         # Tolerate older 2-tuple positions in case of partial upgrade.
         if len(pos) == 3:
@@ -445,10 +475,20 @@ def _populate_rack_shelves(rack_positions, params, asset_library, stage, idx):
             rx, ry = pos
             rrot = 90
 
+        # One shelf level per rack is randomly skipped to break up the uniform
+        # vertical pattern across the warehouse — empty/missing decks read as
+        # a stocking-in-progress shelving unit.
+        skip_level = random.randint(0, len(shelf_heights) - 1) if (
+            len(shelf_heights) > 1 and random.random() < 0.35
+        ) else -1
+        rack_shelf_heights = [
+            sh for i, sh in enumerate(shelf_heights) if i != skip_level
+        ]
+
         # Place a horizontal deck plank at each shelf level so the rack reads
         # as a real loaded shelving unit instead of a bare frame.
         if has_shelf_asset:
-            for shelf_z in shelf_heights:
+            for shelf_z in rack_shelf_heights:
                 idx = _place("rack_shelf", rx, ry, shelf_z, rrot, asset_library, stage, idx)
                 deck_count += 1
 
@@ -461,10 +501,12 @@ def _populate_rack_shelves(rack_positions, params, asset_library, stage, idx):
         rack_fill_prob = max(0.0, min(1.0, fill_prob + rack_bias))
         # One dominant SKU per rack with occasional mixing — looks more like real stocking.
         primary_prop = random.choice(SHELF_PROPS)
+        # Some racks store cargo on pallets (palletized SKUs), others bare-shelf.
+        rack_uses_pallets = has_pallet_asset and random.random() < 0.55
 
         ang = math.radians(rrot)
         cos_a, sin_a = math.cos(ang), math.sin(ang)
-        for shelf_z in shelf_heights:
+        for shelf_z in rack_shelf_heights:
             for slot in range(SHELF_POSITIONS_PER_LEVEL):
                 if random.random() > rack_fill_prob:
                     continue
@@ -478,9 +520,17 @@ def _populate_rack_shelves(rack_positions, params, asset_library, stage, idx):
                 world_dy = local_along * sin_a + local_depth * cos_a
                 x = rx + world_dx
                 y = ry + world_dy
-                z = shelf_z + random.uniform(-0.02, 0.02)
+                # Palletized racks: thin pallet under the cargo, cargo lifted
+                # by pallet thickness. Reads much better than floating boxes.
+                z_base = shelf_z + random.uniform(-0.02, 0.02)
+                if rack_uses_pallets:
+                    idx = _place("pallet", x, y, z_base, rrot, asset_library, stage, idx)
+                    cargo_count += 1
+                    z_box = z_base + 0.14
+                else:
+                    z_box = z_base
                 rot = rrot + random.uniform(-15, 15)
-                idx = _place(prop, x, y, z, rot, asset_library, stage, idx)
+                idx = _place(prop, x, y, z_box, rot, asset_library, stage, idx)
                 cargo_count += 1
 
     print(f"[INFO] Populated rack shelves: {deck_count} decks, {cargo_count} cargo items "
@@ -713,13 +763,19 @@ def _spawn_rack_end_details(rack_positions, asset_library, stage, idx):
             key = round(ry * 2) / 2.0
             rows.setdefault(key, []).append((rx, ry))
     count = 0
-    for key, items in rows.items():
+    # Each row gets a stable color band so all placards in a row read as
+    # belonging to the same numbered aisle (A row = blue, B row = orange…).
+    band_palette = [(0.20, 0.55, 0.90), (0.90, 0.40, 0.20),
+                    (0.30, 0.70, 0.35), (0.85, 0.20, 0.55),
+                    (0.95, 0.78, 0.10), (0.55, 0.30, 0.75)]
+    for row_i, (key, items) in enumerate(sorted(rows.items())):
         items.sort()
+        row_color = band_palette[row_i % len(band_palette)]
         # Placard at every rack upright (each rack contributes two)
         for (rx, ry) in items:
             for upright_dx in (-1.35, 1.35):
                 idx = _place_shelf_placard(stage, idx, rx + upright_dx, ry - 0.55,
-                                            1.45, 0)
+                                            1.45, 0, band_color=row_color)
                 count += 1
         # Leaning empty pallet at one end of the row
         (lx, ly) = items[0]
@@ -873,6 +929,102 @@ def _place_mop_and_bucket(stage, idx, x, y):
     return idx + 2
 
 
+def _place_tire_scuff(stage, idx, x, y, length, rot_z=0):
+    """Broken dark stripe down an aisle centerline — forklift tire residue.
+    Drawn as a chain of short dark segments so it reads as worn rubber, not a
+    solid line of paint."""
+    color = (0.10, 0.09, 0.08)
+    ang = math.radians(rot_z)
+    cos_a, sin_a = math.cos(ang), math.sin(ang)
+    seg_len = 0.55
+    gap = 0.30
+    pitch = seg_len + gap
+    n_segs = max(1, int(length / pitch))
+    start = -((n_segs - 1) * pitch) / 2.0
+    for s in range(n_segs):
+        if random.random() < 0.18:
+            continue  # missing segment for natural unevenness
+        local_x = start + s * pitch + random.uniform(-0.05, 0.05)
+        local_y = random.uniform(-0.04, 0.04)
+        wx = x + local_x * cos_a - local_y * sin_a
+        wy = y + local_x * sin_a + local_y * cos_a
+        path = f"/World/Layout/tire_scuff_{idx}_{s}"
+        cube = UsdGeom.Cube.Define(stage, path)
+        cube.GetSizeAttr().Set(2.0)
+        sxf = UsdGeom.XformCommonAPI(cube.GetPrim())
+        sxf.SetScale(Gf.Vec3f(seg_len / 2.0, 0.06, 0.006))
+        sxf.SetTranslate(Gf.Vec3d(wx, wy, 0.008))
+        sxf.SetRotate(Gf.Vec3f(0, 0, rot_z), UsdGeom.XformCommonAPI.RotationOrderXYZ)
+        cube.CreateDisplayColorAttr([Gf.Vec3f(*color)])
+    return idx + 1
+
+
+def _place_oil_stain(stage, idx, x, y, radius=0.45):
+    """Dark irregular puddle — cluster of small flat dark blobs."""
+    base_color = (0.06, 0.05, 0.04)
+    for b in range(random.randint(4, 7)):
+        ang = random.uniform(0, 2 * math.pi)
+        r = random.uniform(0.0, radius)
+        bx = x + r * math.cos(ang)
+        by = y + r * math.sin(ang)
+        sx = random.uniform(0.10, 0.22)
+        sy = random.uniform(0.10, 0.22)
+        path = f"/World/Layout/oil_blob_{idx}_{b}"
+        cube = UsdGeom.Cube.Define(stage, path)
+        cube.GetSizeAttr().Set(2.0)
+        oxf = UsdGeom.XformCommonAPI(cube.GetPrim())
+        oxf.SetScale(Gf.Vec3f(sx, sy, 0.005))
+        oxf.SetTranslate(Gf.Vec3d(bx, by, 0.007))
+        oxf.SetRotate(Gf.Vec3f(0, 0, random.uniform(0, 90)),
+                      UsdGeom.XformCommonAPI.RotationOrderXYZ)
+        cube.CreateDisplayColorAttr([Gf.Vec3f(*base_color)])
+    return idx + 1
+
+
+def _place_dock_door(stage, idx, x, y, width=2.6, height=3.2, rot_z=0):
+    """Sectional roll-up loading-bay door — four horizontal panels with thin
+    seams between, plus a darker frame around the opening."""
+    panel_color = (0.78, 0.78, 0.74)
+    seam_color = (0.45, 0.45, 0.42)
+    frame_color = (0.25, 0.25, 0.27)
+    ang = math.radians(rot_z)
+    cos_a, sin_a = math.cos(ang), math.sin(ang)
+    n_panels = 4
+    panel_h = height / n_panels
+    for p in range(n_panels):
+        z = panel_h / 2.0 + p * panel_h
+        path = f"/World/Layout/dock_panel_{idx}_{p}"
+        cube = UsdGeom.Cube.Define(stage, path)
+        cube.GetSizeAttr().Set(2.0)
+        pxf = UsdGeom.XformCommonAPI(cube.GetPrim())
+        pxf.SetScale(Gf.Vec3f(width / 2.0, 0.04, panel_h / 2.0 - 0.01))
+        pxf.SetTranslate(Gf.Vec3d(x, y, z))
+        pxf.SetRotate(Gf.Vec3f(0, 0, rot_z), UsdGeom.XformCommonAPI.RotationOrderXYZ)
+        cube.CreateDisplayColorAttr([Gf.Vec3f(*panel_color)])
+    # Frame: two side jambs + a header bar
+    for sgn_i, sgn in enumerate((-1, 1)):
+        local_x = sgn * (width / 2.0 + 0.06)
+        wx = x + local_x * cos_a
+        wy = y + local_x * sin_a
+        path = f"/World/Layout/dock_jamb_{idx}_{sgn_i}"
+        cube = UsdGeom.Cube.Define(stage, path)
+        cube.GetSizeAttr().Set(2.0)
+        jxf = UsdGeom.XformCommonAPI(cube.GetPrim())
+        jxf.SetScale(Gf.Vec3f(0.06, 0.06, height / 2.0))
+        jxf.SetTranslate(Gf.Vec3d(wx, wy, height / 2.0))
+        jxf.SetRotate(Gf.Vec3f(0, 0, rot_z), UsdGeom.XformCommonAPI.RotationOrderXYZ)
+        cube.CreateDisplayColorAttr([Gf.Vec3f(*frame_color)])
+    head_path = f"/World/Layout/dock_header_{idx}"
+    head = UsdGeom.Cube.Define(stage, head_path)
+    head.GetSizeAttr().Set(2.0)
+    hxf = UsdGeom.XformCommonAPI(head.GetPrim())
+    hxf.SetScale(Gf.Vec3f(width / 2.0 + 0.08, 0.06, 0.10))
+    hxf.SetTranslate(Gf.Vec3d(x, y, height + 0.05))
+    hxf.SetRotate(Gf.Vec3f(0, 0, rot_z), UsdGeom.XformCommonAPI.RotationOrderXYZ)
+    head.CreateDisplayColorAttr([Gf.Vec3f(*frame_color)])
+    return idx + 1
+
+
 def _spawn_realism_extras(params, rack_positions, stage, idx):
     """Caution signs in aisles, junction boxes on walls, ceiling strip lights,
     aisle-number placards, mop bucket near bins."""
@@ -939,7 +1091,8 @@ def _spawn_realism_extras(params, rack_positions, stage, idx):
 
 
 def _spawn_charging_station(params, asset_library, stage, idx):
-    """Parked forklift + a couple of charger cabinets along the left wall."""
+    """Parked forklift + a couple of charger cabinets along the left wall,
+    plus a dark oil stain underneath."""
     if "forklift" not in asset_library:
         return idx, 0
     bmin = params["bounds_min"]
@@ -954,10 +1107,111 @@ def _spawn_charging_station(params, asset_library, stage, idx):
     # Parked forklift facing into the floor (90° → nose along +X).
     idx = _place("forklift", wall_x + 1.2, base_y + 0.5, 0, 90, asset_library, stage, idx)
     count += 1
+    # Oil stain pooled below where the forklift drips between shifts.
+    idx = _place_oil_stain(stage, idx, wall_x + 1.2, base_y + 0.4, radius=0.55)
+    count += 1
     # Cone in front to mark the charging bay.
     if "cone" in asset_library:
         idx = _place("cone", wall_x + 2.6, base_y - 0.3, 0, 0, asset_library, stage, idx)
         count += 1
+    return idx, count
+
+
+def _spawn_dock_doors(params, stage, idx):
+    """Roll-up sectional doors along the front (-Y) wall — one per typical
+    bay-width along the wall, evenly spaced."""
+    bmin = params["bounds_min"]
+    bmax = params["bounds_max"]
+    wall_y = bmin[1] + 0.06  # just inside the wall
+    span_x = bmax[0] - bmin[0]
+    door_w = 2.6
+    spacing = door_w + 1.4
+    n_doors = max(1, int((span_x - 2.0) / spacing))
+    total_w = (n_doors - 1) * spacing
+    x_start = (bmin[0] + bmax[0]) / 2.0 - total_w / 2.0
+    count = 0
+    for d in range(n_doors):
+        x = x_start + d * spacing
+        idx = _place_dock_door(stage, idx, x, wall_y, width=door_w, height=3.2, rot_z=0)
+        count += 1
+    return idx, count
+
+
+def _spawn_aisle_floor_wear(rack_positions, params, stage, idx):
+    """Tire scuffs running down each aisle centerline, plus an oil stain in
+    one random aisle for variety."""
+    if not rack_positions:
+        return idx, 0
+    bmin = params["bounds_min"]
+    bmax = params["bounds_max"]
+    rows = {}
+    for (rx, ry, rrot) in rack_positions:
+        if rrot == 90:
+            key = round(ry * 2) / 2.0
+            rows.setdefault(key, []).append(rx)
+    sorted_ys = sorted(rows.keys())
+    aisle_mids = []
+    for i in range(len(sorted_ys) - 1):
+        y_mid = (sorted_ys[i] + sorted_ys[i + 1]) / 2.0
+        xs = rows[sorted_ys[i]] + rows[sorted_ys[i + 1]]
+        x_lo, x_hi = min(xs) - 0.8, max(xs) + 0.8
+        aisle_mids.append((y_mid, x_lo, x_hi))
+    count = 0
+    for (y_mid, x_lo, x_hi) in aisle_mids:
+        # Two parallel scuff tracks ~1.0m apart — left and right wheel tracks.
+        for offset in (-0.50, 0.50):
+            idx = _place_tire_scuff(stage, idx, (x_lo + x_hi) / 2.0,
+                                    y_mid + offset, x_hi - x_lo, rot_z=0)
+            count += 1
+    if aisle_mids and random.random() < 0.7:
+        y_mid, x_lo, x_hi = random.choice(aisle_mids)
+        ox = random.uniform(x_lo + 1.0, x_hi - 1.0)
+        idx = _place_oil_stain(stage, idx, ox, y_mid + random.uniform(-0.2, 0.2),
+                               radius=0.35)
+        count += 1
+    return idx, count
+
+
+def _spawn_mid_aisle_forklift(rack_positions, params, asset_library, stage, idx):
+    """Drop a second forklift parked mid-aisle to imply active operations."""
+    if "forklift" not in asset_library or not rack_positions:
+        return idx, 0
+    rows = {}
+    for (rx, ry, rrot) in rack_positions:
+        if rrot == 90:
+            key = round(ry * 2) / 2.0
+            rows.setdefault(key, []).append(rx)
+    sorted_ys = sorted(rows.keys())
+    if len(sorted_ys) < 2:
+        return idx, 0
+    # Pick the aisle nearest the warehouse center.
+    cy = (params["bounds_min"][1] + params["bounds_max"][1]) / 2.0
+    aisle_mids = []
+    for i in range(len(sorted_ys) - 1):
+        y_mid = (sorted_ys[i] + sorted_ys[i + 1]) / 2.0
+        xs = rows[sorted_ys[i]] + rows[sorted_ys[i + 1]]
+        aisle_mids.append((y_mid, sum(xs) / len(xs)))
+    aisle_mids.sort(key=lambda t: abs(t[0] - cy))
+    y_mid, x_center = aisle_mids[0]
+    fx = x_center + random.uniform(-1.5, 1.5)
+    fy = y_mid + random.uniform(-0.15, 0.15)
+    rot = random.choice([0, 180]) + random.uniform(-8, 8)
+    idx = _place("forklift", fx, fy, 0, rot, asset_library, stage, idx)
+    count = 1
+    # Loaded pallet on the forks if available.
+    if "pallet" in asset_library:
+        ang = math.radians(rot)
+        cos_a, sin_a = math.cos(ang), math.sin(ang)
+        # Forks extend along +X in the forklift's local frame.
+        local_fx = 1.2
+        px = fx + local_fx * cos_a
+        py = fy + local_fx * sin_a
+        idx = _place("pallet", px, py, 0.18, rot, asset_library, stage, idx)
+        count += 1
+        # Stack of boxes on the pallet.
+        idx, n = _stack_boxes(px, py, (1.0, 0.7, 0.35),
+                              (0.06, 0.08, 0.10), asset_library, stage, idx)
+        count += n
     return idx, count
 
 
@@ -990,11 +1244,17 @@ def generate_layout(layout_name, layout_params, asset_library, stage):
     idx, num_rack_extras = _spawn_rack_end_details(rack_positions, asset_library, stage, idx)
     idx, num_wall_extras = _spawn_wall_details(params, asset_library, stage, idx)
     idx, num_realism = _spawn_realism_extras(params, rack_positions, stage, idx)
+    idx, num_wear = _spawn_aisle_floor_wear(rack_positions, params, stage, idx)
+    idx, num_mid_fork = _spawn_mid_aisle_forklift(rack_positions, params, asset_library, stage, idx)
+    num_doors = 0
+    if params.get("dock_area", False):
+        idx, num_doors = _spawn_dock_doors(params, stage, idx)
 
     print(f"[INFO] Spawned {num_racks} racks, {num_shelf_items} shelf items, "
           f"{num_pallets} pallets, {num_clutter} clutter props, {num_dock_items} dock items, "
           f"{num_stripes} floor stripes, {num_guards} column guards, {num_charge} charge-bay items, "
           f"{num_rack_extras} rack-end details, {num_wall_extras} wall details, "
-          f"{num_realism} realism extras.")
+          f"{num_realism} realism extras, {num_wear} aisle wear, {num_mid_fork} mid-aisle forklift, "
+          f"{num_doors} dock doors.")
 
     return params["bounds_min"], params["bounds_max"]
