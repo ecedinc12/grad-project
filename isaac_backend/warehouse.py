@@ -28,6 +28,9 @@ def hide_warehouse_rack_frames(stage):
     """
     hidden = 0
     for prim in stage.Traverse():
+        path_str = str(prim.GetPath())
+        if path_str.startswith("/World/Layout/"):
+            continue
         name_lower = prim.GetName().lower()
         if any(kw in name_lower for kw in _RACK_KEYWORDS):
             UsdGeom.Imageable(prim).MakeInvisible()
