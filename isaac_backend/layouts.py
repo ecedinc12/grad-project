@@ -206,11 +206,11 @@ def _place_pack_table(stage, idx, x, y, rot_z=0):
     if not prim.HasAPI(UsdPhysics.CollisionAPI):
         UsdPhysics.CollisionAPI.Apply(prim)
     # Four legs
-    for sx, sy in ((-0.85, -0.36), (0.85, -0.36), (-0.85, 0.36), (0.85, 0.36)):
+    for leg_i, (sx, sy) in enumerate(((-0.85, -0.36), (0.85, -0.36), (-0.85, 0.36), (0.85, 0.36))):
         ang = math.radians(rot_z)
         wx = x + sx * math.cos(ang) - sy * math.sin(ang)
         wy = y + sx * math.sin(ang) + sy * math.cos(ang)
-        leg_path = f"/World/Layout/pack_table_leg_{idx}_{sx}_{sy}"
+        leg_path = f"/World/Layout/pack_table_leg_{idx}_{leg_i}"
         leg = UsdGeom.Cube.Define(stage, leg_path)
         leg.GetSizeAttr().Set(2.0)
         lxf = UsdGeom.XformCommonAPI(leg.GetPrim())

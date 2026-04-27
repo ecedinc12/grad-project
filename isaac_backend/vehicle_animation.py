@@ -13,6 +13,8 @@ class VehicleAnimator:
 
     # Max yaw change per frame — limits turn speed to ~60 deg/s at 30 fps.
     MAX_ROT_PER_FRAME = 2.0
+    # Realistic forklift cruising speed (m/s). ~2.5 m/s ≈ 9 km/h.
+    MAX_SPEED_MPS = 2.5
 
     def __init__(self, vehicle_behaviors, stage, fps=30):
         self.stage = stage
@@ -60,6 +62,7 @@ class VehicleAnimator:
                 "id": v_id,
                 "waypoints": waypoints,
                 "cum_norm": self._compute_cum_norm(waypoints),
+                "total_dist": total_dist,
                 "translate_op": translate_op,
                 "rotate_op": rotate_op,
                 "current_rot": None,
@@ -145,7 +148,15 @@ class VehicleAnimator:
             if not wps:
                 continue
 
-            progress = current_frame / max(1, total_frames - 1)
+            # Speed-capped progress: distance traveled is bounded by MAX_SPEED_MPS.
+            # Once the path is consumed, the vehicle idles at its final waypoint
+            # instead of warping or finishing too quickly.
+            total_dist = v.get("total_dist", 0.0)
+            if total_dist > 1e-6:
+                traveled = min(total_dist, (current_frame / self.fps) * self.MAX_SPEED_MPS)
+                progress = traveled / total_dist
+            else:
+                progress = 1.0
             cum = v["cum_norm"]
 
             # Distance-proportional segment lookup: each segment's share of frames
