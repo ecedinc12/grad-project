@@ -25,8 +25,9 @@ except Exception:
 SHELF_PROPS = ["box", "box_small", "box_large", "crate"]
 PALLET_CARGO_PROPS = ["box", "box_small", "box_large", "barrel", "drum", "crate"]
 CLUTTER_PROPS = ["box", "box_small", "box_large", "barrel", "drum", "cone", "pallet", "crate"]
-SHELF_HEIGHTS = [0.15, 0.85, 1.55]
-SHELF_POSITIONS_PER_LEVEL = 4
+SHELF_HEIGHTS = [0.15, 1.05, 1.95, 2.85]
+SHELF_POSITIONS_PER_LEVEL = 5
+RACK_Z_SCALE = 1.85  # Stretch rack frame vertically — stock SM_RackFrame_03 is too short for the warehouse interior.
 
 RACK_FILL_PROBS = {
     "empty": 0.0,
@@ -81,6 +82,190 @@ def _resolve_params(layout_name, layout_params, layouts):
     return params
 
 
+def _paint_floor_stripe(stage, idx, x, y, length_x, length_y, color, z=0.012):
+    """Thin colored cuboid laid on the floor — used for aisle paint, hatched zones."""
+    path = f"/World/Layout/floor_stripe_{idx}"
+    cube = UsdGeom.Cube.Define(stage, path)
+    cube.GetSizeAttr().Set(2.0)  # default unit cube of size 2 (extents ±1)
+    prim = cube.GetPrim()
+    xf = UsdGeom.XformCommonAPI(prim)
+    # Cube default is 2x2x2 → scale halves give the desired full extents.
+    xf.SetScale(Gf.Vec3f(length_x / 2.0, length_y / 2.0, 0.012))
+    xf.SetTranslate(Gf.Vec3d(x, y, z))
+    cube.CreateDisplayColorAttr([Gf.Vec3f(*color)])
+    return idx + 1
+
+
+def _place_column_guard(stage, idx, x, y, height=0.55):
+    """Yellow plastic-style column-protector stub at a rack corner."""
+    path = f"/World/Layout/col_guard_{idx}"
+    cyl = UsdGeom.Cylinder.Define(stage, path)
+    cyl.GetRadiusAttr().Set(0.12)
+    cyl.GetHeightAttr().Set(height)
+    cyl.GetAxisAttr().Set("Z")
+    prim = cyl.GetPrim()
+    xf = UsdGeom.XformCommonAPI(prim)
+    xf.SetTranslate(Gf.Vec3d(x, y, height / 2.0))
+    cyl.CreateDisplayColorAttr([Gf.Vec3f(0.95, 0.78, 0.05)])
+    if not prim.HasAPI(UsdPhysics.CollisionAPI):
+        UsdPhysics.CollisionAPI.Apply(prim)
+    return idx + 1
+
+
+def _place_charger_box(stage, idx, x, y, rot_z=0):
+    """Simple boxy 'battery charging station' — gray cabinet."""
+    path = f"/World/Layout/charger_{idx}"
+    cube = UsdGeom.Cube.Define(stage, path)
+    cube.GetSizeAttr().Set(2.0)
+    prim = cube.GetPrim()
+    xf = UsdGeom.XformCommonAPI(prim)
+    xf.SetScale(Gf.Vec3f(0.45, 0.35, 0.55))  # ~0.9m wide, 0.7m deep, 1.1m tall
+    xf.SetTranslate(Gf.Vec3d(x, y, 0.55))
+    xf.SetRotate(Gf.Vec3f(0, 0, rot_z), UsdGeom.XformCommonAPI.RotationOrderXYZ)
+    cube.CreateDisplayColorAttr([Gf.Vec3f(0.32, 0.34, 0.38)])
+    if not prim.HasAPI(UsdPhysics.CollisionAPI):
+        UsdPhysics.CollisionAPI.Apply(prim)
+    return idx + 1
+
+
+def _place_shelf_placard(stage, idx, x, y, z, rot_z):
+    """Small white SKU placard on a rack upright."""
+    path = f"/World/Layout/placard_{idx}"
+    cube = UsdGeom.Cube.Define(stage, path)
+    cube.GetSizeAttr().Set(2.0)
+    prim = cube.GetPrim()
+    xf = UsdGeom.XformCommonAPI(prim)
+    xf.SetScale(Gf.Vec3f(0.18, 0.02, 0.06))
+    xf.SetTranslate(Gf.Vec3d(x, y, z))
+    xf.SetRotate(Gf.Vec3f(0, 0, rot_z), UsdGeom.XformCommonAPI.RotationOrderXYZ)
+    cube.CreateDisplayColorAttr([Gf.Vec3f(0.95, 0.95, 0.92)])
+    return idx + 1
+
+
+def _place_fire_extinguisher(stage, idx, x, y):
+    """Red cylinder mounted on a wall — wall-side fire extinguisher."""
+    base_path = f"/World/Layout/fire_ext_{idx}"
+    cyl = UsdGeom.Cylinder.Define(stage, base_path)
+    cyl.GetRadiusAttr().Set(0.09)
+    cyl.GetHeightAttr().Set(0.55)
+    cyl.GetAxisAttr().Set("Z")
+    prim = cyl.GetPrim()
+    xf = UsdGeom.XformCommonAPI(prim)
+    xf.SetTranslate(Gf.Vec3d(x, y, 1.10))
+    cyl.CreateDisplayColorAttr([Gf.Vec3f(0.78, 0.08, 0.07)])
+    # Backplate
+    bp_path = f"/World/Layout/fire_ext_plate_{idx}"
+    plate = UsdGeom.Cube.Define(stage, bp_path)
+    plate.GetSizeAttr().Set(2.0)
+    pxf = UsdGeom.XformCommonAPI(plate.GetPrim())
+    pxf.SetScale(Gf.Vec3f(0.18, 0.02, 0.32))
+    pxf.SetTranslate(Gf.Vec3d(x, y - 0.06, 1.10))
+    plate.CreateDisplayColorAttr([Gf.Vec3f(0.85, 0.85, 0.82)])
+    return idx + 2
+
+
+def _place_exit_sign(stage, idx, x, y, z=2.6):
+    """Green emissive exit sign plane high on the wall."""
+    path = f"/World/Layout/exit_sign_{idx}"
+    cube = UsdGeom.Cube.Define(stage, path)
+    cube.GetSizeAttr().Set(2.0)
+    prim = cube.GetPrim()
+    xf = UsdGeom.XformCommonAPI(prim)
+    xf.SetScale(Gf.Vec3f(0.30, 0.04, 0.14))
+    xf.SetTranslate(Gf.Vec3d(x, y, z))
+    cube.CreateDisplayColorAttr([Gf.Vec3f(0.10, 0.85, 0.25)])
+    return idx + 1
+
+
+def _place_trash_bin(stage, idx, x, y, color=(0.18, 0.42, 0.18)):
+    path = f"/World/Layout/bin_{idx}"
+    cyl = UsdGeom.Cylinder.Define(stage, path)
+    cyl.GetRadiusAttr().Set(0.22)
+    cyl.GetHeightAttr().Set(0.75)
+    cyl.GetAxisAttr().Set("Z")
+    prim = cyl.GetPrim()
+    xf = UsdGeom.XformCommonAPI(prim)
+    xf.SetTranslate(Gf.Vec3d(x, y, 0.375))
+    cyl.CreateDisplayColorAttr([Gf.Vec3f(*color)])
+    if not prim.HasAPI(UsdPhysics.CollisionAPI):
+        UsdPhysics.CollisionAPI.Apply(prim)
+    return idx + 1
+
+
+def _place_pack_table(stage, idx, x, y, rot_z=0):
+    """Wooden-toned packing table for the wrap/pack station."""
+    path = f"/World/Layout/pack_table_{idx}"
+    cube = UsdGeom.Cube.Define(stage, path)
+    cube.GetSizeAttr().Set(2.0)
+    prim = cube.GetPrim()
+    xf = UsdGeom.XformCommonAPI(prim)
+    xf.SetScale(Gf.Vec3f(0.90, 0.40, 0.04))
+    xf.SetTranslate(Gf.Vec3d(x, y, 0.85))
+    xf.SetRotate(Gf.Vec3f(0, 0, rot_z), UsdGeom.XformCommonAPI.RotationOrderXYZ)
+    cube.CreateDisplayColorAttr([Gf.Vec3f(0.55, 0.40, 0.25)])
+    if not prim.HasAPI(UsdPhysics.CollisionAPI):
+        UsdPhysics.CollisionAPI.Apply(prim)
+    # Four legs
+    for sx, sy in ((-0.85, -0.36), (0.85, -0.36), (-0.85, 0.36), (0.85, 0.36)):
+        ang = math.radians(rot_z)
+        wx = x + sx * math.cos(ang) - sy * math.sin(ang)
+        wy = y + sx * math.sin(ang) + sy * math.cos(ang)
+        leg_path = f"/World/Layout/pack_table_leg_{idx}_{sx}_{sy}"
+        leg = UsdGeom.Cube.Define(stage, leg_path)
+        leg.GetSizeAttr().Set(2.0)
+        lxf = UsdGeom.XformCommonAPI(leg.GetPrim())
+        lxf.SetScale(Gf.Vec3f(0.04, 0.04, 0.42))
+        lxf.SetTranslate(Gf.Vec3d(wx, wy, 0.42))
+        leg.CreateDisplayColorAttr([Gf.Vec3f(0.45, 0.32, 0.18)])
+    return idx + 1
+
+
+def _place_cardboard_stack(stage, idx, x, y, rot_z=0, sheets=8):
+    """Stack of flattened cardboard sheets — thin tan slabs."""
+    path = f"/World/Layout/cardboard_{idx}"
+    cube = UsdGeom.Cube.Define(stage, path)
+    cube.GetSizeAttr().Set(2.0)
+    prim = cube.GetPrim()
+    h = 0.012 * sheets
+    xf = UsdGeom.XformCommonAPI(prim)
+    xf.SetScale(Gf.Vec3f(0.55, 0.40, h))
+    xf.SetTranslate(Gf.Vec3d(x, y, h))
+    xf.SetRotate(Gf.Vec3f(0, 0, rot_z), UsdGeom.XformCommonAPI.RotationOrderXYZ)
+    cube.CreateDisplayColorAttr([Gf.Vec3f(0.72, 0.55, 0.32)])
+    return idx + 1
+
+
+def _place_floor_arrow(stage, idx, x, y, rot_z=0):
+    """Yellow directional arrow painted on the floor — head + shaft."""
+    yellow = (0.92, 0.78, 0.10)
+    ang = math.radians(rot_z)
+    cos_a, sin_a = math.cos(ang), math.sin(ang)
+    # Shaft
+    sh_path = f"/World/Layout/arrow_shaft_{idx}"
+    sh = UsdGeom.Cube.Define(stage, sh_path)
+    sh.GetSizeAttr().Set(2.0)
+    sxf = UsdGeom.XformCommonAPI(sh.GetPrim())
+    sxf.SetScale(Gf.Vec3f(0.55, 0.07, 0.012))
+    sxf.SetTranslate(Gf.Vec3d(x, y, 0.013))
+    sxf.SetRotate(Gf.Vec3f(0, 0, rot_z), UsdGeom.XformCommonAPI.RotationOrderXYZ)
+    sh.CreateDisplayColorAttr([Gf.Vec3f(*yellow)])
+    # Head — two angled bars
+    for sgn in (-1, 1):
+        hd_path = f"/World/Layout/arrow_head_{idx}_{sgn}"
+        hd = UsdGeom.Cube.Define(stage, hd_path)
+        hd.GetSizeAttr().Set(2.0)
+        hxf = UsdGeom.XformCommonAPI(hd.GetPrim())
+        hxf.SetScale(Gf.Vec3f(0.28, 0.07, 0.012))
+        # Tip is +X end of shaft (pre-rotation)
+        local_x, local_y = 0.45, sgn * 0.18
+        wx = x + local_x * cos_a - local_y * sin_a
+        wy = y + local_x * sin_a + local_y * cos_a
+        hxf.SetTranslate(Gf.Vec3d(wx, wy, 0.013))
+        hxf.SetRotate(Gf.Vec3f(0, 0, rot_z + sgn * 35), UsdGeom.XformCommonAPI.RotationOrderXYZ)
+        hd.CreateDisplayColorAttr([Gf.Vec3f(*yellow)])
+    return idx + 3
+
+
 def _place(asset_id, x, y, z, rot_z, asset_library, stage, idx, scale=None):
     usd = asset_library.get(asset_id)
     if not usd:
@@ -100,7 +285,10 @@ def _place(asset_id, x, y, z, rot_z, asset_library, stage, idx, scale=None):
     xf.SetTranslate(Gf.Vec3d(x, y, z))
     xf.SetRotate(Gf.Vec3f(0, 0, rot_z), UsdGeom.XformCommonAPI.RotationOrderXYZ)
     if scale is not None:
-        xf.SetScale(Gf.Vec3f(scale, scale, scale))
+        if isinstance(scale, (tuple, list)):
+            xf.SetScale(Gf.Vec3f(float(scale[0]), float(scale[1]), float(scale[2])))
+        else:
+            xf.SetScale(Gf.Vec3f(scale, scale, scale))
     semantic_class = SEMANTIC_MAP.get(asset_id, asset_id)
     apply_usd_semantics(prim, semantic_class)
     # Static collision so navmesh routes workers and vehicles around layout items.
@@ -135,7 +323,7 @@ def _spawn_racks(params, asset_library, stage, idx):
             y = y_start + r * aw
             for c in range(cols):
                 x = x_start + c * rack_x_extent
-                idx = _place("rack", x, y, 0, 90, asset_library, stage, idx)
+                idx = _place("rack", x, y, 0, 90, asset_library, stage, idx, scale=(1.0, 1.0, RACK_Z_SCALE))
                 rack_positions.append((x, y, 90))
                 count += 1
 
@@ -148,7 +336,7 @@ def _spawn_racks(params, asset_library, stage, idx):
             for c in range(cols):
                 x = x_start + c * aw
                 y = y_start + r * aw
-                idx = _place("rack", x, y, 0, 90, asset_library, stage, idx)
+                idx = _place("rack", x, y, 0, 90, asset_library, stage, idx, scale=(1.0, 1.0, RACK_Z_SCALE))
                 rack_positions.append((x, y, 90))
                 count += 1
 
@@ -158,7 +346,7 @@ def _spawn_racks(params, asset_library, stage, idx):
         x_h = bmin[0] + (bmax[0] - bmin[0]) * 0.25
         for r in range(rows):
             y = y_start_h + r * aw
-            idx = _place("rack", x_h, y, 0, 90, asset_library, stage, idx)
+            idx = _place("rack", x_h, y, 0, 90, asset_library, stage, idx, scale=(1.0, 1.0, RACK_Z_SCALE))
             rack_positions.append((x_h, y, 90))
             count += 1
         total_span_v = max(2, rows - 1) * aw
@@ -166,7 +354,7 @@ def _spawn_racks(params, asset_library, stage, idx):
         y_bottom = bmin[1] + (bmax[1] - bmin[1]) * 0.25
         for c in range(max(2, rows - 1)):
             x = x_start_v + c * aw
-            idx = _place("rack", x, y_bottom, 0, 0, asset_library, stage, idx)
+            idx = _place("rack", x, y_bottom, 0, 0, asset_library, stage, idx, scale=(1.0, 1.0, RACK_Z_SCALE))
             rack_positions.append((x, y_bottom, 0))
             count += 1
 
@@ -177,9 +365,9 @@ def _spawn_racks(params, asset_library, stage, idx):
         for i in range(rows):
             frac = (i + 0.5) / rows
             x = bmin[0] + frac * (bmax[0] - bmin[0])
-            idx = _place("rack", x, y_top, 0, 90, asset_library, stage, idx)
+            idx = _place("rack", x, y_top, 0, 90, asset_library, stage, idx, scale=(1.0, 1.0, RACK_Z_SCALE))
             rack_positions.append((x, y_top, 90))
-            idx = _place("rack", x, y_bottom, 0, 90, asset_library, stage, idx)
+            idx = _place("rack", x, y_bottom, 0, 90, asset_library, stage, idx, scale=(1.0, 1.0, RACK_Z_SCALE))
             rack_positions.append((x, y_bottom, 90))
             count += 2
         x_left = bmin[0] + margin
@@ -187,9 +375,9 @@ def _spawn_racks(params, asset_library, stage, idx):
         for i in range(max(1, rows - 2)):
             frac = (i + 0.5) / max(1, rows - 2)
             y = bmin[1] + frac * (bmax[1] - bmin[1])
-            idx = _place("rack", x_left, y, 0, 0, asset_library, stage, idx)
+            idx = _place("rack", x_left, y, 0, 0, asset_library, stage, idx, scale=(1.0, 1.0, RACK_Z_SCALE))
             rack_positions.append((x_left, y, 0))
-            idx = _place("rack", x_right, y, 0, 0, asset_library, stage, idx)
+            idx = _place("rack", x_right, y, 0, 0, asset_library, stage, idx, scale=(1.0, 1.0, RACK_Z_SCALE))
             rack_positions.append((x_right, y, 0))
             count += 2
 
@@ -205,7 +393,7 @@ def _spawn_racks(params, asset_library, stage, idx):
             y_start = y_center - total_y / 2.0
             for r in range(cluster_rows):
                 y = y_start + r * aw
-                idx = _place("rack", cx, y, 0, 90, asset_library, stage, idx)
+                idx = _place("rack", cx, y, 0, 90, asset_library, stage, idx, scale=(1.0, 1.0, RACK_Z_SCALE))
                 rack_positions.append((cx, y, 90))
                 count += 1
 
@@ -237,13 +425,20 @@ def _populate_rack_shelves(rack_positions, params, asset_library, stage, idx):
         if fill_prob <= 0.0:
             continue
 
+        # Per-rack fill bias so some bays look overstocked, some near-empty —
+        # uniform fill across all racks reads as artificial.
+        rack_bias = random.gauss(0.0, 0.25)
+        rack_fill_prob = max(0.0, min(1.0, fill_prob + rack_bias))
+        # One dominant SKU per rack with occasional mixing — looks more like real stocking.
+        primary_prop = random.choice(SHELF_PROPS)
+
         ang = math.radians(rrot)
         cos_a, sin_a = math.cos(ang), math.sin(ang)
         for shelf_z in SHELF_HEIGHTS:
             for slot in range(SHELF_POSITIONS_PER_LEVEL):
-                if random.random() > fill_prob:
+                if random.random() > rack_fill_prob:
                     continue
-                prop = random.choice(SHELF_PROPS)
+                prop = primary_prop if random.random() < 0.7 else random.choice(SHELF_PROPS)
                 # Distribute slots evenly along the shelf length, with mild jitter.
                 slot_frac = (slot + 0.5) / SHELF_POSITIONS_PER_LEVEL  # 0..1
                 local_along = (slot_frac - 0.5) * 2.2 + random.uniform(-0.10, 0.10)
@@ -420,6 +615,170 @@ def _spawn_dock_area(params, asset_library, stage, idx):
     return idx, count
 
 
+def _spawn_floor_markings(rack_positions, params, stage, idx):
+    """Yellow aisle paint between rows, hatched corners at endpoints."""
+    if not rack_positions:
+        return idx, 0
+    bmin = params["bounds_min"]
+    bmax = params["bounds_max"]
+    yellow = (0.92, 0.78, 0.10)
+    count = 0
+
+    # Group racks by row (same y, allowing for clusters/grid). Keys snapped to 0.5m.
+    rows = {}
+    for (rx, ry, rrot) in rack_positions:
+        if rrot == 90:
+            key = round(ry * 2) / 2.0
+            rows.setdefault(key, []).append(rx)
+
+    sorted_ys = sorted(rows.keys())
+    for i in range(len(sorted_ys) - 1):
+        y_a, y_b = sorted_ys[i], sorted_ys[i + 1]
+        y_mid = (y_a + y_b) / 2.0
+        xs = rows[y_a] + rows[y_b]
+        x_lo, x_hi = min(xs) - 1.0, max(xs) + 1.0
+        # Two parallel yellow stripes 0.4m apart bracketing the aisle centerline.
+        for offset in (-0.20, 0.20):
+            idx = _paint_floor_stripe(stage, idx, (x_lo + x_hi) / 2.0,
+                                      y_mid + offset, x_hi - x_lo, 0.10, yellow)
+            count += 1
+
+    # Perimeter safety border just inside the warehouse walls.
+    border_color = (0.85, 0.72, 0.10)
+    margin = 0.4
+    for y_edge in (bmin[1] + margin, bmax[1] - margin):
+        idx = _paint_floor_stripe(stage, idx, (bmin[0] + bmax[0]) / 2.0, y_edge,
+                                  (bmax[0] - bmin[0]) - 2 * margin, 0.10, border_color)
+        count += 1
+    return idx, count
+
+
+def _spawn_column_guards(rack_positions, stage, idx):
+    if not rack_positions:
+        return idx, 0
+    # Cluster racks by row again, place a guard at each row's leftmost and rightmost end.
+    rows = {}
+    for (rx, ry, rrot) in rack_positions:
+        if rrot == 90:
+            key = round(ry * 2) / 2.0
+            rows.setdefault(key, []).append((rx, ry))
+    count = 0
+    for key, items in rows.items():
+        items.sort()
+        (lx, ly) = items[0]
+        (rx, ry) = items[-1]
+        idx = _place_column_guard(stage, idx, lx - 1.5, ly)
+        idx = _place_column_guard(stage, idx, rx + 1.5, ry)
+        count += 2
+    return idx, count
+
+
+def _spawn_rack_end_details(rack_positions, asset_library, stage, idx):
+    """Placards on rack uprights, plus an occasional leaning pallet or tipped box at row ends."""
+    if not rack_positions:
+        return idx, 0
+    rows = {}
+    for (rx, ry, rrot) in rack_positions:
+        if rrot == 90:
+            key = round(ry * 2) / 2.0
+            rows.setdefault(key, []).append((rx, ry))
+    count = 0
+    for key, items in rows.items():
+        items.sort()
+        # Placard at every rack upright (each rack contributes two)
+        for (rx, ry) in items:
+            for upright_dx in (-1.35, 1.35):
+                idx = _place_shelf_placard(stage, idx, rx + upright_dx, ry - 0.55,
+                                            1.45, 0)
+                count += 1
+        # Leaning empty pallet at one end of the row
+        (lx, ly) = items[0]
+        if "pallet" in asset_library and random.random() < 0.7:
+            idx = _place("pallet", lx - 1.4, ly - 0.6, 0.55, random.uniform(70, 90),
+                         asset_library, stage, idx)
+            count += 1
+        # Tipped box on its side near the other end
+        (rx_end, ry_end) = items[-1]
+        if random.random() < 0.6:
+            prop = random.choice(["box", "box_large", "crate"])
+            if prop in asset_library:
+                idx = _place(prop, rx_end + 1.6, ry_end + 0.4, 0.20,
+                             random.uniform(60, 110), asset_library, stage, idx)
+                count += 1
+    return idx, count
+
+
+def _spawn_wall_details(params, asset_library, stage, idx):
+    """Fire extinguishers, exit signs, trash bins, pack station, flattened-cardboard stack."""
+    bmin = params["bounds_min"]
+    bmax = params["bounds_max"]
+    cx = (bmin[0] + bmax[0]) / 2.0
+    cy = (bmin[1] + bmax[1]) / 2.0
+    count = 0
+
+    # Fire extinguishers — one per long wall, mid-span.
+    margin = 0.25
+    idx = _place_fire_extinguisher(stage, idx, bmin[0] + margin, cy - 1.5)
+    idx = _place_fire_extinguisher(stage, idx, bmax[0] - margin, cy + 1.5)
+    count += 4  # each placement adds 2 prims
+
+    # Exit signs — front and back walls.
+    idx = _place_exit_sign(stage, idx, cx, bmin[1] + margin)
+    idx = _place_exit_sign(stage, idx, cx, bmax[1] - margin)
+    count += 2
+
+    # Trash + recycling bins paired in a corner.
+    idx = _place_trash_bin(stage, idx, bmax[0] - 0.6, bmin[1] + 0.7, color=(0.20, 0.45, 0.20))
+    idx = _place_trash_bin(stage, idx, bmax[0] - 0.6, bmin[1] + 1.3, color=(0.18, 0.32, 0.62))
+    count += 2
+
+    # Pack/wrap station along the back wall with a stacked cargo on top.
+    pt_x = cx + 3.5
+    pt_y = bmax[1] - 0.9
+    idx = _place_pack_table(stage, idx, pt_x, pt_y, rot_z=0)
+    count += 1
+    if "box_small" in asset_library:
+        idx = _place("box_small", pt_x - 0.3, pt_y, 0.95, random.uniform(-15, 15),
+                     asset_library, stage, idx)
+        idx = _place("box_small", pt_x + 0.25, pt_y - 0.05, 0.95, random.uniform(-15, 15),
+                     asset_library, stage, idx)
+        count += 2
+
+    # Flattened-cardboard stack tucked next to the bins.
+    idx = _place_cardboard_stack(stage, idx, bmax[0] - 0.7, bmin[1] + 2.1,
+                                 rot_z=random.uniform(-10, 10), sheets=10)
+    count += 1
+
+    # Floor arrows at the warehouse entry approach (pointing into the floor).
+    idx = _place_floor_arrow(stage, idx, cx - 2.0, bmin[1] + 1.5, rot_z=90)
+    idx = _place_floor_arrow(stage, idx, cx + 2.0, bmin[1] + 1.5, rot_z=90)
+    count += 6  # each adds 3 prims
+    return idx, count
+
+
+def _spawn_charging_station(params, asset_library, stage, idx):
+    """Parked forklift + a couple of charger cabinets along the left wall."""
+    if "forklift" not in asset_library:
+        return idx, 0
+    bmin = params["bounds_min"]
+    bmax = params["bounds_max"]
+    wall_x = bmin[0] + 1.2
+    base_y = bmin[1] + (bmax[1] - bmin[1]) * 0.75
+    count = 0
+    # Two charger cabinets against the wall.
+    for j in range(2):
+        idx = _place_charger_box(stage, idx, wall_x - 0.4, base_y + j * 1.1, rot_z=0)
+        count += 1
+    # Parked forklift facing into the floor (90° → nose along +X).
+    idx = _place("forklift", wall_x + 1.2, base_y + 0.5, 0, 90, asset_library, stage, idx)
+    count += 1
+    # Cone in front to mark the charging bay.
+    if "cone" in asset_library:
+        idx = _place("cone", wall_x + 2.6, base_y - 0.3, 0, 0, asset_library, stage, idx)
+        count += 1
+    return idx, count
+
+
 def generate_layout(layout_name, layout_params, asset_library, stage):
     params = _resolve_params(layout_name, layout_params, LAYOUTS)
 
@@ -443,7 +802,15 @@ def generate_layout(layout_name, layout_params, asset_library, stage):
     if params.get("dock_area", False):
         idx, num_dock_items = _spawn_dock_area(params, asset_library, stage, idx)
 
+    idx, num_stripes = _spawn_floor_markings(rack_positions, params, stage, idx)
+    idx, num_guards = _spawn_column_guards(rack_positions, stage, idx)
+    idx, num_charge = _spawn_charging_station(params, asset_library, stage, idx)
+    idx, num_rack_extras = _spawn_rack_end_details(rack_positions, asset_library, stage, idx)
+    idx, num_wall_extras = _spawn_wall_details(params, asset_library, stage, idx)
+
     print(f"[INFO] Spawned {num_racks} racks, {num_shelf_items} shelf items, "
-          f"{num_pallets} pallets, {num_clutter} clutter props, {num_dock_items} dock items.")
+          f"{num_pallets} pallets, {num_clutter} clutter props, {num_dock_items} dock items, "
+          f"{num_stripes} floor stripes, {num_guards} column guards, {num_charge} charge-bay items, "
+          f"{num_rack_extras} rack-end details, {num_wall_extras} wall details.")
 
     return params["bounds_min"], params["bounds_max"]
