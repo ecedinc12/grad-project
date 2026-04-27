@@ -1,0 +1,200 @@
+{
+  "standard_warehouse": {
+    "description": "Busy working warehouse floor sized to match the 1.7x-scaled warehouse.usd interior (~±9m). 4x2 rows of stocked racks flanking a central forklift aisle, dense pallet storage near the back wall, heavy dock staging at the front, scattered clutter across the storage zone, and safety cones in the forklift aisle.",
+    "keywords": ["default", "standard", "typical", "normal", "regular"],
+    "rack_pattern": "rows",
+    "rack_rows": 4,
+    "rack_cols": 2,
+    "rack_fill": "medium",
+    "aisle_width": 2.5,
+    "bounds_min": [-9.0, -9.0],
+    "bounds_max": [9.0, 9.0],
+    "clutter_density": "high",
+    "clutter_zones": [
+      {
+        "area": "dock_staging",
+        "bounds_min": [-8.0, -9.0],
+        "bounds_max": [8.0, -4.0],
+        "density": "high",
+        "types": ["box", "box_large", "crate", "barrel", "drum", "cone"]
+      },
+      {
+        "area": "storage_zone_scatter",
+        "bounds_min": [-8.0, 3.0],
+        "bounds_max": [8.0, 9.0],
+        "density": "high",
+        "types": ["box", "box_small", "crate", "barrel"]
+      },
+      {
+        "area": "forklift_aisle_markers",
+        "bounds_min": [-7.0, -2.5],
+        "bounds_max": [7.0, 2.5],
+        "density": "low",
+        "types": ["cone"]
+      }
+    ],
+    "pallet_rows": 3,
+    "pallet_cols": 5,
+    "dock_area": true
+  },
+  "narrow_aisle": {
+    "description": "Cramped high-density storage with 7 rack rows and tight passages. Increased collision risk between workers and vehicles.",
+    "keywords": ["cramped", "tight", "dense", "narrow", "crowded", "high-density"],
+    "rack_pattern": "rows",
+    "rack_rows": 7,
+    "rack_cols": 1,
+    "aisle_width": 1.2,
+    "bounds_min": [-6.0, -6.0],
+    "bounds_max": [6.0, 6.0],
+    "clutter_density": "high",
+    "clutter_zones": [
+      {
+        "area": "center_aisle",
+        "bounds_min": [-5.0, -1.5],
+        "bounds_max": [5.0, 1.5],
+        "density": "high",
+        "types": ["box", "barrel", "cone"]
+      }
+    ],
+    "pallet_rows": 3,
+    "pallet_cols": 1
+  },
+  "open_floor": {
+    "description": "Sparse layout with 2 perimeter rack rows and wide open areas. Good for vehicle maneuvering and wide-shot scenarios.",
+    "keywords": ["open", "spacious", "wide", "empty", "large", "clear"],
+    "rack_pattern": "perimeter",
+    "rack_rows": 2,
+    "rack_cols": 1,
+    "aisle_width": 3.0,
+    "bounds_min": [-6.0, -6.0],
+    "bounds_max": [6.0, 6.0],
+    "clutter_density": "low",
+    "clutter_zones": [],
+    "pallet_rows": 1,
+    "pallet_cols": 1
+  },
+  "cross_dock": {
+    "description": "L-shaped rack arrangement with wide truck corridor for cross-docking operations. Forklift traffic flows through central corridor.",
+    "keywords": ["cross-dock", "transfer", "dock", "shipping", "receiving", "L-shape"],
+    "rack_pattern": "L-shape",
+    "rack_rows": 3,
+    "rack_cols": 1,
+    "aisle_width": 3.5,
+    "bounds_min": [-6.0, -6.0],
+    "bounds_max": [6.0, 6.0],
+    "clutter_density": "medium",
+    "clutter_zones": [
+      {
+        "area": "truck_corridor",
+        "bounds_min": [-6.0, -2.0],
+        "bounds_max": [6.0, 2.0],
+        "density": "low",
+        "types": ["cone", "pallet"]
+      }
+    ],
+    "pallet_rows": 3,
+    "pallet_cols": 2
+  },
+  "cold_storage": {
+    "description": "Dense grid layout with heavy barrel clustering. Simulates refrigerated or cold storage with tight grid racking and barrel-heavy clutter.",
+    "keywords": ["cold", "freezer", "refrigerated", "cold storage", "frozen", "chilled"],
+    "rack_pattern": "grid",
+    "rack_rows": 4,
+    "rack_cols": 3,
+    "aisle_width": 1.5,
+    "bounds_min": [-6.0, -6.0],
+    "bounds_max": [6.0, 6.0],
+    "clutter_density": "high",
+    "clutter_zones": [
+      {
+        "area": "barrel_zone",
+        "bounds_min": [-4.0, -4.0],
+        "bounds_max": [4.0, 0.0],
+        "density": "high",
+        "types": ["barrel"]
+      },
+      {
+        "area": "pallet_zone",
+        "bounds_min": [-4.0, 0.0],
+        "bounds_max": [4.0, 4.0],
+        "density": "medium",
+        "types": ["pallet", "box"]
+      }
+    ],
+    "pallet_rows": 3,
+    "pallet_cols": 2
+  },
+  "loading_dock": {
+    "description": "Minimal racks with heavy pallet staging and truck bay area. Simulates loading/unloading dock with pallet buildup.",
+    "keywords": ["loading", "truck", "shipping", "dock", "unloading", "freight", "bay"],
+    "rack_pattern": "rows",
+    "rack_rows": 2,
+    "rack_cols": 1,
+    "aisle_width": 2.5,
+    "bounds_min": [-6.0, -6.0],
+    "bounds_max": [6.0, 6.0],
+    "clutter_density": "high",
+    "clutter_zones": [
+      {
+        "area": "dock_bay",
+        "bounds_min": [-6.0, -6.0],
+        "bounds_max": [6.0, -2.0],
+        "density": "high",
+        "types": ["pallet", "box", "cone"]
+      }
+    ],
+    "pallet_rows": 4,
+    "pallet_cols": 2
+  },
+  "maintenance_bay": {
+    "description": "No racks, open service area with cone-marked safety zones. Suitable for equipment repair and maintenance scenarios.",
+    "keywords": ["maintenance", "repair", "service", "workshop", "garage", "mechanic"],
+    "rack_pattern": "none",
+    "rack_rows": 0,
+    "rack_cols": 0,
+    "aisle_width": 2.0,
+    "bounds_min": [-6.0, -6.0],
+    "bounds_max": [6.0, 6.0],
+    "clutter_density": "low",
+    "clutter_zones": [
+      {
+        "area": "safety_zone_front",
+        "bounds_min": [-3.0, -2.0],
+        "bounds_max": [3.0, 2.0],
+        "density": "medium",
+        "types": ["cone"]
+      }
+    ],
+    "pallet_rows": 0,
+    "pallet_cols": 0
+  },
+  "storage_yard": {
+    "description": "4 rack clusters with wide lanes, outdoor-style yard layout. Good for large-scale storage scenarios.",
+    "keywords": ["yard", "outdoor", "container", "storage yard", "bulk", "large-scale"],
+    "rack_pattern": "clusters",
+    "rack_rows": 3,
+    "rack_cols": 4,
+    "aisle_width": 3.0,
+    "bounds_min": [-6.0, -6.0],
+    "bounds_max": [6.0, 6.0],
+    "clutter_density": "medium",
+    "clutter_zones": [
+      {
+        "area": "yard_left",
+        "bounds_min": [-6.0, -6.0],
+        "bounds_max": [-1.0, 0.0],
+        "density": "medium",
+        "types": ["box", "barrel"]
+      },
+      {
+        "area": "yard_right",
+        "bounds_min": [1.0, 0.0],
+        "bounds_max": [6.0, 6.0],
+        "density": "medium",
+        "types": ["pallet", "cone"]
+      }
+    ],
+    "pallet_rows": 2,
+    "pallet_cols": 2
+  }
+}
