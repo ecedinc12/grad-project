@@ -16,10 +16,19 @@ class VehicleAnimator:
     # Realistic forklift cruising speed (m/s). ~2.5 m/s ≈ 9 km/h.
     MAX_SPEED_MPS = 2.5
 
-    def __init__(self, vehicle_behaviors, stage, fps=30):
+    def __init__(self, vehicle_behaviors, stage, fps=30,
+                 layout_bounds_min=None, layout_bounds_max=None):
         self.stage = stage
         self.fps = fps
         self.vehicles = []
+
+        self._planner = None
+        if layout_bounds_min is not None and layout_bounds_max is not None and vehicle_behaviors:
+            try:
+                from isaac_backend.layout_planner import LayoutPlanner
+                self._planner = LayoutPlanner(stage, layout_bounds_min, layout_bounds_max)
+            except Exception as e:
+                print(f"[WARN] VehicleAnimator: LayoutPlanner unavailable ({e}); falling back to navmesh")
 
         for vb in vehicle_behaviors:
             v_id = vb.get("vehicle_id")
@@ -34,7 +43,10 @@ class VehicleAnimator:
                 print(f"[WARN] VehicleAnimator: Not enough waypoints for {v_id}")
                 continue
 
-            waypoints = self._expand_via_navmesh(waypoints, v_id)
+            if self._planner is not None:
+                waypoints = self._expand_via_layout(waypoints, v_id)
+            else:
+                waypoints = self._expand_via_navmesh(waypoints, v_id)
 
             # Cache XformOp references once at init — looking them up every frame
             # via GetOrderedXformOps() can return stale or reordered results when
@@ -98,6 +110,26 @@ class VehicleAnimator:
         n = len(waypoints) - 1
         return [i / n if n > 0 else 0.0 for i in range(len(waypoints))]
 
+    def _expand_via_layout(self, waypoints, v_id):
+        """Route around static layout obstacles using a 2D occupancy grid."""
+        expanded = [waypoints[0]]
+        for i in range(len(waypoints) - 1):
+            p1, p2 = waypoints[i], waypoints[i + 1]
+            dx, dy = p2["x"] - p1["x"], p2["y"] - p1["y"]
+            if dx * dx + dy * dy < 0.01:
+                expanded.append(p2)
+                continue
+            pts = self._planner.plan(p1["x"], p1["y"], p2["x"], p2["y"])
+            if pts is None:
+                print(f"[WARN] VehicleAnimator: layout planner found no path for {v_id} "
+                      f"({p1['x']:.1f},{p1['y']:.1f})->({p2['x']:.1f},{p2['y']:.1f})")
+            elif pts:
+                for (wx, wy) in pts:
+                    expanded.append({"x": wx, "y": wy, "z": p2["z"], "rot": None})
+                print(f"[INFO] VehicleAnimator: layout planner added {len(pts)} waypoints for {v_id}")
+            expanded.append(p2)
+        return expanded
+
     def _expand_via_navmesh(self, waypoints, v_id):
         """Replace straight-line segments with navmesh-queried paths."""
         try:
@@ -112,27 +144,54 @@ class VehicleAnimator:
             print(f"[WARN] VehicleAnimator: could not acquire navmesh for {v_id}: {e}")
             return waypoints
 
+        def _query(p1, p2, radius):
+            start = carb.Float3(p1["x"], p1["y"], 0.0)
+            end = carb.Float3(p2["x"], p2["y"], 0.0)
+            try:
+                nav_path = navmesh.query_shortest_path(start, end, agent_radius=radius)
+                return nav_path.get_points() if nav_path else None
+            except Exception:
+                return None
+
+        def _resolve(p1, p2, depth=0):
+            """Recursively subdivide a segment until navmesh returns a curved path
+            or the subsegment is short enough that straight-line is acceptable."""
+            dx, dy = p2["x"] - p1["x"], p2["y"] - p1["y"]
+            seg_len = math.sqrt(dx * dx + dy * dy)
+            # Try a few agent radii — too generous a radius can fail to find a path
+            # through aisles narrower than 1m of clearance.
+            for r in (0.5, 0.3, 0.15):
+                pts = _query(p1, p2, r)
+                if pts and len(pts) > 2:
+                    return [{"x": pt[0], "y": pt[1], "z": p2["z"], "rot": None}
+                            for pt in pts[1:-1]]
+            # Straight-line returned. If the segment is short or we've recursed
+            # deep, accept it (likely a clear corridor). Otherwise subdivide.
+            if seg_len < 2.0 or depth >= 3:
+                return None
+            mid = {"x": (p1["x"] + p2["x"]) / 2.0,
+                   "y": (p1["y"] + p2["y"]) / 2.0,
+                   "z": p2["z"], "rot": None}
+            left = _resolve(p1, mid, depth + 1) or []
+            right = _resolve(mid, p2, depth + 1) or []
+            if left or right:
+                return left + [mid] + right
+            return None
+
         expanded = [waypoints[0]]
         for i in range(len(waypoints) - 1):
             p1, p2 = waypoints[i], waypoints[i + 1]
             dx, dy = p2["x"] - p1["x"], p2["y"] - p1["y"]
-            if dx*dx + dy*dy < 0.01:
+            if dx * dx + dy * dy < 0.01:
                 expanded.append(p2)
                 continue
-            try:
-                start = carb.Float3(p1["x"], p1["y"], 0.0)
-                end = carb.Float3(p2["x"], p2["y"], 0.0)
-                nav_path = navmesh.query_shortest_path(start, end, agent_radius=0.5)
-                pts = nav_path.get_points() if nav_path else None
-                if pts and len(pts) > 2:
-                    for pt in pts[1:-1]:
-                        expanded.append({"x": pt[0], "y": pt[1], "z": p2["z"], "rot": None})
-                    print(f"[INFO] VehicleAnimator: navmesh added {len(pts)-2} intermediate points for {v_id}")
-                else:
-                    print(f"[WARN] VehicleAnimator: navmesh returned straight-line path for {v_id} "
-                          f"({p1['x']:.1f},{p1['y']:.1f})->({p2['x']:.1f},{p2['y']:.1f}) — vehicle may clip through objects")
-            except Exception as e:
-                print(f"[WARN] VehicleAnimator: navmesh query failed for {v_id}: {e}")
+            intermediates = _resolve(p1, p2)
+            if intermediates:
+                expanded.extend(intermediates)
+                print(f"[INFO] VehicleAnimator: navmesh added {len(intermediates)} intermediate points for {v_id}")
+            else:
+                print(f"[WARN] VehicleAnimator: navmesh returned straight-line path for {v_id} "
+                      f"({p1['x']:.1f},{p1['y']:.1f})->({p2['x']:.1f},{p2['y']:.1f}) — accepted as clear corridor")
             expanded.append(p2)
         return expanded
 

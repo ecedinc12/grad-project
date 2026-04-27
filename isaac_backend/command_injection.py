@@ -10,6 +10,7 @@ import time
 import random
 
 import isaac_backend.ira_setup as _ira
+from isaac_backend.navmesh_utils import get_navmesh, get_worker_pos, snap_target
 
 WAREHOUSE_X_RANGE = (-5.5, 5.5)
 WAREHOUSE_Y_RANGE = (-5.5, 5.5)
@@ -20,7 +21,8 @@ def _progress(msg):
     sys.stdout.flush()
 
 
-def _build_command_list(worker_behaviors, worker_name, visible_bounds=None):
+def _build_command_list(worker_behaviors, worker_name, visible_bounds=None,
+                        navmesh=None, origin_xy=None):
     """Build a command list for a single worker from behavior config.
 
     character_behavior.py requires the character name as the first word in each
@@ -31,6 +33,9 @@ def _build_command_list(worker_behaviors, worker_name, visible_bounds=None):
 
     Matches worker_id with or without "worker_" prefix. If visible_bounds is
     provided, GoTo (x, y) targets are clamped to (min_x, max_x, min_y, max_y).
+    When navmesh is provided, each GoTo target is also snapped to the nearest
+    reachable point so NavigationManager.generate_path won't fail with
+    "no valid path between point position".
     """
     short_name = worker_name.removeprefix("worker_")
     for wb in worker_behaviors:
@@ -40,6 +45,7 @@ def _build_command_list(worker_behaviors, worker_name, visible_bounds=None):
             if not commands:
                 return [f"{worker_name} Idle 10"]
             result = []
+            prev_xy = origin_xy
             for cmd in commands:
                 cmd_type = cmd.get("command", "")
                 if cmd_type == "GoTo":
@@ -52,6 +58,13 @@ def _build_command_list(worker_behaviors, worker_name, visible_bounds=None):
                     if visible_bounds is not None:
                         x = max(visible_bounds[0], min(visible_bounds[1], x))
                         y = max(visible_bounds[2], min(visible_bounds[3], y))
+                    if navmesh is not None and prev_xy is not None:
+                        snapped = snap_target(prev_xy, (x, y), navmesh=navmesh)
+                        if snapped != (x, y):
+                            print(f"[INFO] {worker_name} GoTo snapped "
+                                  f"({x:.2f},{y:.2f}) -> ({snapped[0]:.2f},{snapped[1]:.2f})")
+                        x, y = snapped
+                    prev_xy = (x, y)
                     result.append(f"{worker_name} GoTo {x} {y} {z} {rotation}")
                 elif cmd_type == "Idle":
                     result.append(f"{worker_name} Idle {cmd.get('duration', 5.0)}")
@@ -61,7 +74,8 @@ def _build_command_list(worker_behaviors, worker_name, visible_bounds=None):
     return [f"{worker_name} Idle 10"]
 
 
-def inject_commands_after_play(spawned_worker_names, worker_behaviors, simulation_app=None, visible_bounds=None):
+def inject_commands_after_play(spawned_worker_names, worker_behaviors, simulation_app=None,
+                                visible_bounds=None, stage=None):
     """Inject commands to all registered agents via AgentManager.
 
     Must be called AFTER timeline.play() and after waiting for agent registration.
@@ -69,6 +83,9 @@ def inject_commands_after_play(spawned_worker_names, worker_behaviors, simulatio
     variables through the registered behavior script instances.
 
     visible_bounds: (min_x, max_x, min_y, max_y) constraining GoTo targets.
+    stage: USD stage; when provided alongside an active navmesh, each GoTo
+        target is snapped to the nearest reachable point so NavigationManager
+        path queries can't fail.
 
     Returns (injected, failed) counts.
     """
@@ -94,6 +111,10 @@ def inject_commands_after_play(spawned_worker_names, worker_behaviors, simulatio
 
     print(f"[INFO] AgentManager registered agents: {list(agent_manager.get_all_agent_names())}")
 
+    navmesh = get_navmesh() if stage is not None else None
+    if stage is not None and navmesh is None:
+        print("[INFO] inject_commands_after_play: no navmesh — skipping target snapping")
+
     injected = 0
     failed = 0
 
@@ -103,7 +124,11 @@ def inject_commands_after_play(spawned_worker_names, worker_behaviors, simulatio
             failed += 1
             continue
 
-        command_list = _build_command_list(worker_behaviors, worker_name, visible_bounds=visible_bounds)
+        origin_xy = get_worker_pos(stage, worker_name) if stage is not None else None
+        command_list = _build_command_list(
+            worker_behaviors, worker_name, visible_bounds=visible_bounds,
+            navmesh=navmesh, origin_xy=origin_xy,
+        )
         print(f"[INFO] Injecting commands for {worker_name}: {command_list}")
 
         try:
@@ -122,7 +147,8 @@ def inject_commands_after_play(spawned_worker_names, worker_behaviors, simulatio
     return injected, failed
 
 
-def reinject_random_commands(spawned_worker_names, visible_bounds=None, worker_zone_bounds=None):
+def reinject_random_commands(spawned_worker_names, visible_bounds=None,
+                              worker_zone_bounds=None, stage=None):
     """Re-inject randomized commands to all registered agents.
 
     Prevents IRA behavior loop from repeating the same command sequence.
@@ -132,6 +158,8 @@ def reinject_random_commands(spawned_worker_names, visible_bounds=None, worker_z
 
     worker_zone_bounds: dict mapping worker_name → (x_lo, x_hi, y_lo, y_hi).
     visible_bounds: (min_x, max_x, min_y, max_y) fallback when no zone bounds.
+    stage: USD stage; when provided alongside an active navmesh, each random
+        GoTo target is snapped to the nearest reachable point.
 
     Returns (injected, failed) counts.
     """
@@ -147,6 +175,8 @@ def reinject_random_commands(spawned_worker_names, visible_bounds=None, worker_z
     default_x_lo, default_x_hi = (visible_bounds[0], visible_bounds[1]) if visible_bounds else WAREHOUSE_X_RANGE
     default_y_lo, default_y_hi = (visible_bounds[2], visible_bounds[3]) if visible_bounds else WAREHOUSE_Y_RANGE
 
+    navmesh = get_navmesh() if stage is not None else None
+
     for worker_name in sorted(spawned_worker_names):
         if not agent_manager.agent_registered(worker_name):
             failed += 1
@@ -157,11 +187,17 @@ def reinject_random_commands(spawned_worker_names, visible_bounds=None, worker_z
         else:
             x_lo, x_hi, y_lo, y_hi = default_x_lo, default_x_hi, default_y_lo, default_y_hi
 
+        prev_xy = get_worker_pos(stage, worker_name) if (stage is not None and navmesh is not None) else None
+
         num_waypoints = random.randint(2, 3)
         cmd_list = []
         for i in range(num_waypoints):
             wx = round(random.uniform(x_lo, x_hi), 1)
             wy = round(random.uniform(y_lo, y_hi), 1)
+            if navmesh is not None and prev_xy is not None:
+                snapped = snap_target(prev_xy, (wx, wy), navmesh=navmesh)
+                wx, wy = round(snapped[0], 2), round(snapped[1], 2)
+                prev_xy = (wx, wy)
             cmd_list.append(f"{worker_name} GoTo {wx} {wy} 0.0 0")
             if i < num_waypoints - 1:
                 if random.random() < 0.5:

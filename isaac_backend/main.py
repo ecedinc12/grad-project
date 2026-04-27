@@ -542,7 +542,7 @@ def main():
     _progress("Injecting commands via AgentManager...")
     injected, inj_failed = inject_commands_after_play(
         spawned_worker_names, worker_behaviors, simulation_app=simulation_app,
-        visible_bounds=visible_bounds,
+        visible_bounds=visible_bounds, stage=stage,
     )
     _progress(f"Command injection: {injected} succeeded, {inj_failed} failed")
 
@@ -561,7 +561,10 @@ def main():
     _configure_camera_trigger(camera, scene_config, cam_pos, look_at_target, focal_length=focal_length)
 
     _progress("Initializing vehicle animator...")
-    vehicle_animator = VehicleAnimator(scene_config.get("vehicle_behaviors", []), stage, fps=30)
+    vehicle_animator = VehicleAnimator(
+        scene_config.get("vehicle_behaviors", []), stage, fps=30,
+        layout_bounds_min=spawn_bounds_min, layout_bounds_max=spawn_bounds_max,
+    )
 
     # Build per-worker zone bounds for zone-aware re-injection.
     # Maps worker_name → (x_lo, x_hi, y_lo, y_hi) from their anchor_zone hazard bounds.
@@ -586,7 +589,10 @@ def main():
         if step % 100 == 0:
             _progress(f"Frame {step}/{NUM_FRAMES}")
         if step > 0 and step % REINJECT_INTERVAL == 0 and spawned_worker_names:
-            reinject_random_commands(spawned_worker_names, visible_bounds=visible_bounds, worker_zone_bounds=worker_zone_bounds)
+            reinject_random_commands(
+                spawned_worker_names, visible_bounds=visible_bounds,
+                worker_zone_bounds=worker_zone_bounds, stage=stage,
+            )
         for _ in range(SIM_STEPS_PER_FRAME):
             world.step(render=False)
         # Update vehicle after physics so the animated position is not overridden
