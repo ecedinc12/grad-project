@@ -68,6 +68,13 @@ class LayoutParams(BaseModel):
     dock_area: bool = Field(
         default=False, description="Whether to spawn a loading dock cluster of loaded pallets near the warehouse entrance"
     )
+    max_rows: int = Field(default=0, description="Max rack rows when auto-fitting (0=unlimited). Caps density so standard layouts don't oversaturate.")
+    max_cols: int = Field(default=0, description="Max rack columns when auto-fitting (0=unlimited). Caps density so standard layouts don't oversaturate.")
+    cross_aisle_every: int = Field(default=0, description="Insert a cross-aisle (perpendicular fire/forklift gap) every N columns. 0=disabled.")
+    cross_aisle_width: float = Field(default=3.5, description="Width in metres of each cross-aisle gap (typical: 3.5-4.0m)")
+    aisle_widths: Optional[List[float]] = Field(default=None, description="Per-gap aisle widths cycling [narrow, wide, narrow, ...]. Overrides uniform aisle_width for 'rows' pattern. E.g. [2.5, 4.0, 2.5] for two picking aisles flanking a main drive aisle.")
+    dock_zone_frac: float = Field(default=0.25, description="Fraction of warehouse Y-axis reserved for dock/staging zone at the front")
+    storage_zone_frac: float = Field(default=0.55, description="Fraction of warehouse Y-axis used for rack storage zone in the middle")
 
 class VehicleBehavior(BaseModel):
     vehicle_id: str                  # matches prim name: "forklift_01", "cart_01", ...

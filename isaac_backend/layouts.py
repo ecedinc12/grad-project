@@ -39,7 +39,7 @@ WALL_CLEARANCE = 0.9
 # computed for some reason — overridden at runtime by _measure_ceiling_z.
 DEFAULT_CEILING_Z = 8.4
 # Fraction of the measured ceiling height we want racks to reach.
-RACK_CEILING_FILL = 0.78
+RACK_CEILING_FILL = 0.60
 # Vertical pitch between adjacent rack shelves, scaled with rack height.
 SHELF_PITCH_FRACTION = 0.22
 
@@ -250,12 +250,21 @@ def _resolve_params(layout_name, layout_params, layouts):
         "pallet_cols": preset.get("pallet_cols", 2),
         "rack_fill": preset.get("rack_fill", "medium"),
         "dock_area": preset.get("dock_area", False),
+        "max_rows": preset.get("max_rows", 0),
+        "max_cols": preset.get("max_cols", 0),
+        "cross_aisle_every": preset.get("cross_aisle_every", 0),
+        "cross_aisle_width": preset.get("cross_aisle_width", 3.5),
+        "aisle_widths": preset.get("aisle_widths"),
+        "dock_zone_frac": preset.get("dock_zone_frac", 0.25),
+        "storage_zone_frac": preset.get("storage_zone_frac", 0.55),
     }
     if layout_params:
         for key in (
             "rack_pattern", "rack_rows", "rack_cols", "target_rack_height", "aisle_width",
             "bounds_min", "bounds_max", "clutter_density", "clutter_zones",
             "pallet_rows", "pallet_cols", "rack_fill", "dock_area",
+            "max_rows", "max_cols", "cross_aisle_every", "cross_aisle_width",
+            "aisle_widths", "dock_zone_frac", "storage_zone_frac",
         ):
             if key in layout_params:
                 val = layout_params[key]
@@ -263,6 +272,8 @@ def _resolve_params(layout_name, layout_params, layouts):
                     params[key] = tuple(val)
                 elif key == "clutter_zones":
                     params[key] = [dict(z) for z in val]
+                elif key == "aisle_widths" and val is not None:
+                    params[key] = list(val)
                 else:
                     params[key] = val
     return params
@@ -532,17 +543,57 @@ def _spawn_racks(params, asset_library, stage, idx):
     params["_resolved_rack_height"] = target_rack_height
 
     rack_x_extent = RACK_X_EXTENT
-    # Row pitch = rack body + aisle gap. The JSON `aisle_width` is the gap a
-    # forklift/worker actually walks through, not the center-to-center spacing.
+
+    # --- Change 5: Variable aisle widths ---
+    # Build per-gap aisle width list. If aisle_widths is provided, cycle through
+    # it; otherwise fall back to the uniform aisle_width.
+    aisle_widths_raw = params.get("aisle_widths")
+    if aisle_widths_raw:
+        aisle_widths_list = list(aisle_widths_raw)
+    else:
+        aisle_widths_list = None
+
+    # --- Change 3: max_rows / max_cols clamp ---
+    max_rows = params.get("max_rows", 0)
+    max_cols = params.get("max_cols", 0)
+
+    # --- Change 1: Cross-aisle parameters ---
+    cross_every = params.get("cross_aisle_every", 0)
+    cross_w = params.get("cross_aisle_width", 3.5)
+
+    # --- Change 2: Functional zone Y boundaries ---
+    # Allocate Y axis as: dock (front) | storage (middle) | bulk (back).
+    # Racks only occupy the storage zone so workers/forklifts have a real
+    # dock area instead of an empty floor behind the front wall.
+    dock_frac = params.get("dock_zone_frac", 0.25)
+    storage_frac = params.get("storage_zone_frac", 0.55)
+    total_y_span = bmax[1] - bmin[1]
+    dock_y_top = bmin[1] + dock_frac * total_y_span
+    bulk_y_bottom = bmax[1] - (1.0 - dock_frac - storage_frac) * total_y_span
+
+    # Default row_pitch used for auto-fit estimation and for non-"rows" patterns
     row_pitch = RACK_DEPTH + aw
 
     if cols == "auto" or cols is None:
         available_x = (bmax[0] - bmin[0]) - 2 * WALL_CLEARANCE
         cols = max(1, int(available_x / rack_x_extent))
+    if max_cols > 0:
+        cols = min(cols, max_cols)
+
+    # Auto-fit rows: if aisle_widths is provided, use its average for estimation;
+    # otherwise fall back to uniform aisle_width. This gives a better first
+    # approximation when the user specifies a wide main aisle.
     if rows == "auto" or rows is None:
-        available_y = (bmax[1] - bmin[1]) - 2 * WALL_CLEARANCE
-        # rows*RACK_DEPTH + (rows-1)*aw <= available_y  →  rows <= (available_y + aw) / row_pitch
-        rows = max(1, int((available_y + aw) / row_pitch))
+        storage_height = storage_frac * total_y_span
+        available_y = storage_height - 2 * WALL_CLEARANCE
+        if aisle_widths_list and len(aisle_widths_list) > 0:
+            avg_aw = sum(aisle_widths_list) / len(aisle_widths_list)
+        else:
+            avg_aw = aw
+        avg_row_pitch = RACK_DEPTH + avg_aw
+        rows = max(1, int((available_y + avg_aw) / avg_row_pitch))
+    if max_rows > 0:
+        rows = min(rows, max_rows)
 
     count = 0
     rack_positions = []
@@ -551,35 +602,73 @@ def _spawn_racks(params, asset_library, stage, idx):
         return idx, 0, rack_positions
 
     if pattern == "rows":
-        # rack_rows parallel rows running East-West, each with rack_cols racks
-        # placed back-to-back along X. Row spacing is RACK_DEPTH + aw so that
-        # aw ends up as the actual walkable aisle gap between rack bodies.
-        # Backmost row sits one wall-clearance off the back (+Y) wall; the
-        # rest of the rows extend forward from there, leaving the front of
-        # the warehouse open for the dock/entry zone.
-        total_x = max(0, cols - 1) * rack_x_extent
-        total_y = (rows - 1) * row_pitch
+        # Rack rows running East-West, each with rack_cols racks placed
+        # along X. Row spacing uses per-gap aisle_widths (Change 5) so one
+        # wide main drive aisle can split two narrow picking aisles.
+        # Racks are confined to the storage Y-zone (Change 2). Cross-aisles
+        # (Change 1) break long rows into bays every cross_aisle_every columns.
+
+        # --- Cross-aisle X span ---
+        num_cross = ((cols - 1) // cross_every) if (cross_every > 0 and cols > 1) else 0
+        total_x = max(0, cols - 1) * rack_x_extent + num_cross * cross_w
         x_start = (bmin[0] + bmax[0]) / 2.0 - total_x / 2.0
-        y_back = bmax[1] - WALL_CLEARANCE - RACK_DEPTH / 2.0
-        y_start = y_back - total_y
+
+        # --- Row Y positions (Change 5: variable aisle, Change 2: zone reserve) ---
+        storage_back_y = bulk_y_bottom - RACK_DEPTH / 2.0
+        storage_front_y = dock_y_top + RACK_DEPTH / 2.0
+
+        # Build cumulative Y positions. Row 0 (backmost) starts at storage_back_y,
+        # each subsequent row steps by RACK_DEPTH + gap_width.
+        first_row_y = storage_back_y
+        row_ys = [first_row_y]
+        for r in range(1, rows):
+            if aisle_widths_list:
+                gap = aisle_widths_list[(r - 1) % len(aisle_widths_list)]
+            else:
+                gap = aw
+            row_ys.append(row_ys[-1] - (RACK_DEPTH + gap))
+
+        # Center the row block within the storage zone so the layout breathes
+        # instead of hugging the back wall.
+        if rows > 1:
+            row_block_top = row_ys[0] + RACK_DEPTH / 2.0
+            row_block_bot = row_ys[-1] - RACK_DEPTH / 2.0
+            row_center = (row_block_top + row_block_bot) / 2.0
+            zone_center = (storage_back_y + storage_front_y) / 2.0
+            y_shift = zone_center - row_center
+            row_ys = [y + y_shift for y in row_ys]
+
         for r in range(rows):
-            y = y_start + r * row_pitch
+            y = row_ys[r]
+            x_offset = 0.0
             for c in range(cols):
-                x = x_start + c * rack_x_extent
+                if c > 0 and cross_every > 0 and c % cross_every == 0:
+                    x_offset += cross_w
+                x = x_start + c * rack_x_extent + x_offset
                 idx = _place("rack", x, y, 0, 90, asset_library, stage, idx, scale=(1.0, 1.0, rack_z_scale))
                 rack_positions.append((x, y, 90))
                 count += 1
 
     elif pattern == "grid":
-        total_x = max(0, cols - 1) * rack_x_extent
-        total_y = (rows - 1) * row_pitch
+        num_cross_grid = ((cols - 1) // cross_every) if (cross_every > 0 and cols > 1) else 0
+        total_x = max(0, cols - 1) * rack_x_extent + num_cross_grid * cross_w
+        storage_back_y = bulk_y_bottom - RACK_DEPTH / 2.0
+        storage_front_y = dock_y_top + RACK_DEPTH / 2.0
         x_start = (bmin[0] + bmax[0]) / 2.0 - total_x / 2.0
-        y_back = bmax[1] - WALL_CLEARANCE - RACK_DEPTH / 2.0
-        y_start = y_back - total_y
+        # Use uniform aisle for grid — variable widths are a "rows" feature.
+        total_y = (rows - 1) * row_pitch
+        y_block_top = storage_back_y
+        y_block_bot = y_block_top - total_y
+        y_center = (y_block_top + y_block_bot) / 2.0
+        zone_center = (storage_back_y + storage_front_y) / 2.0
+        y_shift = zone_center - y_center
         for r in range(rows):
             for c in range(cols):
-                x = x_start + c * rack_x_extent
-                y = y_start + r * row_pitch
+                x_offset = 0.0
+                if c > 0 and cross_every > 0 and c % cross_every == 0:
+                    x_offset += cross_w
+                x = x_start + c * rack_x_extent + x_offset
+                y = storage_back_y - r * row_pitch + y_shift
                 idx = _place("rack", x, y, 0, 90, asset_library, stage, idx, scale=(1.0, 1.0, rack_z_scale))
                 rack_positions.append((x, y, 90))
                 count += 1
@@ -637,8 +726,10 @@ def _spawn_racks(params, asset_library, stage, idx):
                 count += 1
 
 
-
-
+    print(f"[INFO] Rack layout: pattern={pattern}, rows={rows}, cols={cols}, "
+          f"max_rows={max_rows}, max_cols={max_cols}, "
+          f"aisle_widths={aisle_widths_list or [aw]}, cross_aisle_every={cross_every}, "
+          f"dock_zone_frac={dock_frac:.0%}, storage_zone_frac={storage_frac:.0%}")
     return idx, count, rack_positions
 
 
@@ -766,12 +857,18 @@ def _spawn_pallets(params, asset_library, stage, idx):
     if pallet_rows_grid == 0 or pallet_cols_grid == 0:
         return idx, 0
 
+    # Pallet staging lives in the dock zone (front of the warehouse) so
+    # forklifts have a natural reason to operate there.
+    dock_frac = params.get("dock_zone_frac", 0.25)
+    total_y_span = bmax[1] - bmin[1]
+    dock_y_top = bmin[1] + dock_frac * total_y_span
     spacing_x = 2.0
     spacing_y = 2.5
     total_x = (pallet_cols_grid - 1) * spacing_x
-    total_y = (pallet_rows_grid - 1) * spacing_y
+    total_y_pal = (pallet_rows_grid - 1) * spacing_y
     x_start = (bmin[0] + bmax[0]) / 2.0 - total_x / 2.0
-    y_start = bmax[1] - 0.5
+    y_center = (bmin[1] + dock_y_top) / 2.0
+    y_start = y_center + total_y_pal / 2.0
 
     for r in range(pallet_rows_grid):
         for c in range(pallet_cols_grid):

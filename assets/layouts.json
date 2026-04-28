@@ -1,6 +1,6 @@
 {
   "standard_warehouse": {
-    "description": "Working warehouse floor sized to fill the 1.7x-scaled warehouse.usd interior (~\u00b111m). Auto-fit rack grid biased toward the back wall, with a clear front zone for the dock and forklift entry, plus stashes along both side walls.",
+    "description": "Working warehouse floor sized to fill the 1.7x-scaled warehouse.usd interior (~±11m). Cross-aisles break long rack rows into bays, a wide main drive aisle separates two narrow picking aisles, and functional zones (dock, storage, bulk) keep the front open for active operations.",
     "keywords": [
       "default",
       "standard",
@@ -11,9 +11,16 @@
     "rack_pattern": "rows",
     "rack_rows": "auto",
     "rack_cols": "auto",
-    "target_rack_height": 4.5,
+    "target_rack_height": "auto",
     "rack_fill": "full",
     "aisle_width": 3.0,
+    "aisle_widths": [2.5, 4.0, 2.5],
+    "max_rows": 4,
+    "max_cols": 7,
+    "cross_aisle_every": 5,
+    "cross_aisle_width": 3.5,
+    "dock_zone_frac": 0.25,
+    "storage_zone_frac": 0.55,
     "bounds_min": [
       -11.0,
       -11.0
@@ -88,8 +95,8 @@
     "pallet_cols": 7,
     "dock_area": true
   },
-  "narrow_aisle": {
-    "description": "Cramped high-density storage with 7 rack rows and tight passages. Increased collision risk between workers and vehicles.",
+"narrow_aisle": {
+    "description": "Cramped high-density storage with tight passages. Increased collision risk between workers and vehicles.",
     "keywords": [
       "cramped",
       "tight",
@@ -101,7 +108,20 @@
     "rack_pattern": "rows",
     "rack_rows": "auto",
     "rack_cols": "auto",
+    "target_rack_height": "auto",
     "aisle_width": 1.2,
+    "max_rows": 0,
+    "max_cols": 0,
+    "cross_aisle_every": 0,
+    "cross_aisle_width": 3.5,
+    "dock_zone_frac": 0.25,
+    "storage_zone_frac": 0.55,
+    "max_rows": 0,
+    "max_cols": 0,
+    "cross_aisle_every": 0,
+    "cross_aisle_width": 3.5,
+    "dock_zone_frac": 0.25,
+    "storage_zone_frac": 0.55,
     "bounds_min": [
       -9.0,
       -9.0
@@ -146,7 +166,14 @@
     "rack_pattern": "perimeter",
     "rack_rows": "auto",
     "rack_cols": "auto",
+    "target_rack_height": "auto",
     "aisle_width": 3.0,
+    "max_rows": 0,
+    "max_cols": 0,
+    "cross_aisle_every": 0,
+    "cross_aisle_width": 3.5,
+    "dock_zone_frac": 0.25,
+    "storage_zone_frac": 0.55,
     "bounds_min": [
       -9.0,
       -9.0
@@ -173,7 +200,14 @@
     "rack_pattern": "L-shape",
     "rack_rows": "auto",
     "rack_cols": "auto",
+    "target_rack_height": "auto",
     "aisle_width": 3.5,
+    "max_rows": 0,
+    "max_cols": 0,
+    "cross_aisle_every": 0,
+    "cross_aisle_width": 3.5,
+    "dock_zone_frac": 0.30,
+    "storage_zone_frac": 0.50,
     "bounds_min": [
       -9.0,
       -9.0
@@ -217,7 +251,14 @@
     "rack_pattern": "grid",
     "rack_rows": 4,
     "rack_cols": 3,
+    "target_rack_height": "auto",
     "aisle_width": 1.5,
+    "max_rows": 3,
+    "max_cols": 0,
+    "cross_aisle_every": 4,
+    "cross_aisle_width": 3.0,
+    "dock_zone_frac": 0.25,
+    "storage_zone_frac": 0.55,
     "bounds_min": [
       -9.0,
       -9.0
@@ -277,7 +318,15 @@
     "rack_pattern": "rows",
     "rack_rows": "auto",
     "rack_cols": "auto",
+    "target_rack_height": "auto",
     "aisle_width": 2.5,
+    "aisle_widths": [2.5, 4.0],
+    "max_rows": 3,
+    "max_cols": 5,
+    "cross_aisle_every": 4,
+    "cross_aisle_width": 3.5,
+    "dock_zone_frac": 0.30,
+    "storage_zone_frac": 0.50,
     "bounds_min": [
       -9.0,
       -9.0
@@ -322,7 +371,14 @@
     "rack_pattern": "none",
     "rack_rows": 0,
     "rack_cols": 0,
+    "target_rack_height": "auto",
     "aisle_width": 2.0,
+    "max_rows": 0,
+    "max_cols": 0,
+    "cross_aisle_every": 0,
+    "cross_aisle_width": 3.5,
+    "dock_zone_frac": 0.25,
+    "storage_zone_frac": 0.55,
     "bounds_min": [
       -9.0,
       -9.0
@@ -365,7 +421,14 @@
     "rack_pattern": "clusters",
     "rack_rows": 3,
     "rack_cols": 4,
+    "target_rack_height": "auto",
     "aisle_width": 3.0,
+    "max_rows": 0,
+    "max_cols": 0,
+    "cross_aisle_every": 0,
+    "cross_aisle_width": 4.0,
+    "dock_zone_frac": 0.25,
+    "storage_zone_frac": 0.55,
     "bounds_min": [
       -9.0,
       -9.0
@@ -428,7 +491,14 @@
     "rack_rows": "auto",
     "rack_cols": "auto",
     "rack_fill": "medium",
+    "target_rack_height": "auto",
     "aisle_width": 3.5,
+    "max_rows": 4,
+    "max_cols": 7,
+    "cross_aisle_every": 5,
+    "cross_aisle_width": 3.5,
+    "dock_zone_frac": 0.25,
+    "storage_zone_frac": 0.55,
     "bounds_min": [
       -11.0,
       -11.0
@@ -507,7 +577,14 @@
     "rack_rows": "auto",
     "rack_cols": "auto",
     "rack_fill": "sparse",
+    "target_rack_height": "auto",
     "aisle_width": 2.5,
+    "max_rows": 0,
+    "max_cols": 0,
+    "cross_aisle_every": 4,
+    "cross_aisle_width": 3.5,
+    "dock_zone_frac": 0.25,
+    "storage_zone_frac": 0.55,
     "bounds_min": [
       -11.0,
       -11.0
@@ -587,7 +664,14 @@
     "rack_rows": 5,
     "rack_cols": 3,
     "rack_fill": "full",
+    "target_rack_height": "auto",
     "aisle_width": 1.2,
+    "max_rows": 0,
+    "max_cols": 0,
+    "cross_aisle_every": 0,
+    "cross_aisle_width": 3.0,
+    "dock_zone_frac": 0.20,
+    "storage_zone_frac": 0.60,
     "bounds_min": [
       -11.0,
       -11.0
@@ -635,7 +719,14 @@
     "rack_rows": "auto",
     "rack_cols": "auto",
     "rack_fill": "medium",
+    "target_rack_height": "auto",
     "aisle_width": 3.0,
+    "max_rows": 0,
+    "max_cols": 0,
+    "cross_aisle_every": 0,
+    "cross_aisle_width": 3.5,
+    "dock_zone_frac": 0.25,
+    "storage_zone_frac": 0.55,
     "bounds_min": [
       -11.0,
       -11.0
@@ -712,7 +803,15 @@
     "rack_rows": "auto",
     "rack_cols": "auto",
     "rack_fill": "sparse",
+    "target_rack_height": "auto",
     "aisle_width": 3.0,
+    "aisle_widths": [2.5, 4.0, 2.5],
+    "max_rows": 4,
+    "max_cols": 7,
+    "cross_aisle_every": 5,
+    "cross_aisle_width": 3.5,
+    "dock_zone_frac": 0.30,
+    "storage_zone_frac": 0.50,
     "bounds_min": [
       -11.0,
       -11.0
