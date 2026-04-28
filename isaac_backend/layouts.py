@@ -35,6 +35,48 @@ RACK_DEPTH = 1.1
 # Tight wall margin so racks dress the perimeter instead of leaving the walls
 # reading as a bare frame around a central clump.
 WALL_CLEARANCE = 0.9
+# Fallback ceiling height used only when the warehouse-prim bbox can't be
+# computed for some reason — overridden at runtime by _measure_ceiling_z.
+DEFAULT_CEILING_Z = 8.4
+# Fraction of the measured ceiling height we want racks to reach.
+RACK_CEILING_FILL = 0.78
+# Vertical pitch between adjacent rack shelves, scaled with rack height.
+SHELF_PITCH_FRACTION = 0.22
+
+
+def _measure_ceiling_z(stage, fallback=DEFAULT_CEILING_Z):
+    """Compute the actual interior ceiling height from the stage by taking
+    the world-aligned bbox of every imageable prim that isn't part of the
+    procedural layout we're about to spawn. Lets the rest of the layout
+    auto-scale to whatever warehouse asset / scale the caller used."""
+    try:
+        from pxr import UsdGeom as _UG, Usd as _U
+        cache = _UG.BBoxCache(_U.TimeCode.Default(),
+                              includedPurposes=[_UG.Tokens.default_, _UG.Tokens.proxy])
+        z_max = -1e9
+        layout_root = "/World/Layout"
+        for prim in stage.Traverse():
+            path = str(prim.GetPath())
+            if path.startswith(layout_root):
+                continue
+            if not prim.IsA(_UG.Imageable):
+                continue
+            try:
+                bb = cache.ComputeWorldBound(prim).ComputeAlignedRange()
+                if bb.IsEmpty():
+                    continue
+                zmax_p = bb.GetMax()[2]
+                if zmax_p > z_max:
+                    z_max = zmax_p
+            except Exception:
+                continue
+        if z_max > 0.5:
+            print(f"[INFO] Auto-detected ceiling Z = {z_max:.2f} m")
+            return z_max
+    except Exception as e:
+        print(f"[WARN] _measure_ceiling_z failed: {e}")
+    print(f"[WARN] Ceiling auto-detect failed, using fallback {fallback:.2f} m")
+    return fallback
 
 RACK_FILL_PROBS = {
     "empty": 0.0,
@@ -62,7 +104,7 @@ def _resolve_params(layout_name, layout_params, layouts):
         "rack_pattern": preset.get("rack_pattern", "rows"),
         "rack_rows": preset.get("rack_rows", "auto"),
         "rack_cols": preset.get("rack_cols", "auto"),
-        "target_rack_height": preset.get("target_rack_height", 4.5),
+        "target_rack_height": preset.get("target_rack_height", "auto"),
         "aisle_width": preset.get("aisle_width", 2.5),
         "bounds_min": tuple(preset.get("bounds_min", [-12.0, -12.0])),
         "bounds_max": tuple(preset.get("bounds_max", [12.0, 12.0])),
@@ -342,9 +384,16 @@ def _spawn_racks(params, asset_library, stage, idx):
     bmin = params["bounds_min"]
     bmax = params["bounds_max"]
     
-    target_rack_height = params.get("target_rack_height", 4.5)
+    # Rack height auto-derived from measured ceiling: aim to fill RACK_CEILING_FILL
+    # of the interior height so racks read tall but leave headroom for ceiling
+    # services (pipes, lights, sprinklers).
+    ceiling_z = params.get("ceiling_z", DEFAULT_CEILING_Z)
+    target_rack_height = params.get("target_rack_height")
+    if target_rack_height in (None, "auto"):
+        target_rack_height = ceiling_z * RACK_CEILING_FILL
     rack_base_height = 2.4  # measured height of SM_RackFrame_03 base mesh
     rack_z_scale = target_rack_height / rack_base_height
+    params["_resolved_rack_height"] = target_rack_height
 
     rack_x_extent = RACK_X_EXTENT
     # Row pitch = rack body + aisle gap. The JSON `aisle_width` is the gap a
@@ -464,9 +513,12 @@ def _populate_rack_shelves(rack_positions, params, asset_library, stage, idx):
     cargo_count = 0
     has_shelf_asset = "rack_shelf" in asset_library
     
-    target_rack_height = params.get("target_rack_height", 4.5)
-    shelf_spacing = 0.9
-    num_shelves = int(target_rack_height / shelf_spacing)
+    # Use the rack height that _spawn_racks resolved (auto-scaled to ceiling).
+    rack_height = params.get("_resolved_rack_height") or (
+        params.get("ceiling_z", DEFAULT_CEILING_Z) * RACK_CEILING_FILL
+    )
+    shelf_spacing = max(0.7, rack_height * SHELF_PITCH_FRACTION)
+    num_shelves = max(2, int(rack_height / shelf_spacing))
     shelf_heights = [0.15 + i * shelf_spacing for i in range(num_shelves)]
 
     has_pallet_asset = "pallet" in asset_library
@@ -880,7 +932,9 @@ def _place_wall_junction_box(stage, idx, x, y, z=1.4):
     return idx + 1
 
 
-def _place_overhead_light(stage, idx, x, y, z=4.5, length=2.0):
+def _place_overhead_light(stage, idx, x, y, z=None, length=2.0):
+    if z is None:
+        z = DEFAULT_CEILING_Z - 0.15
     """Long thin white cuboid as a ceiling strip light."""
     path = f"/World/Layout/ceil_light_{idx}"
     cube = UsdGeom.Cube.Define(stage, path)
@@ -1064,7 +1118,9 @@ def _place_hazard_hatch(stage, idx, x, y, width, depth, rot_z=0, stripes=8):
     return idx + 1 + (stripes // 2)
 
 
-def _place_sprinkler_head(stage, idx, x, y, z=4.85):
+def _place_sprinkler_head(stage, idx, x, y, z=None):
+    if z is None:
+        z = DEFAULT_CEILING_Z - 0.05
     """Small red-tipped sprinkler head pendant from the ceiling."""
     body_path = f"/World/Layout/sprinkler_{idx}"
     body = UsdGeom.Cylinder.Define(stage, body_path)
@@ -1395,22 +1451,26 @@ def _spawn_polish_pass(params, rack_positions, asset_library, stage, idx):
     cy = (bmin[1] + bmax[1]) / 2.0
     count = 0
 
+    ceiling_z = params.get("ceiling_z", DEFAULT_CEILING_Z)
+
     # 1) Ceiling pipe runs along Y — three parallel pipes, slightly different colors.
     pipe_ys = [bmin[1] + 1.5, cy, bmax[1] - 1.5]
     pipe_colors = [(0.55, 0.30, 0.18), (0.20, 0.32, 0.55), (0.70, 0.70, 0.65)]
+    pipe_z = ceiling_z - 0.25
     for py, pcol in zip(pipe_ys, pipe_colors):
         idx = _place_ceiling_pipe_run(stage, idx, bmin[0] + 0.3, bmax[0] - 0.3,
-                                       py, z=4.65, color=pcol)
+                                       py, z=pipe_z, color=pcol)
         count += 1
 
     # 2) Sprinkler grid on the ceiling — ~3.5m spacing.
     nx = max(2, int((bmax[0] - bmin[0]) / 3.5))
     ny = max(2, int((bmax[1] - bmin[1]) / 3.5))
+    sprinkler_z = ceiling_z - 0.05
     for i in range(nx):
         for j in range(ny):
             sx = bmin[0] + (i + 0.5) * (bmax[0] - bmin[0]) / nx
             sy = bmin[1] + (j + 0.5) * (bmax[1] - bmin[1]) / ny
-            idx = _place_sprinkler_head(stage, idx, sx, sy, z=4.85)
+            idx = _place_sprinkler_head(stage, idx, sx, sy, z=sprinkler_z)
             count += 2
 
     # 3) Hazard hatching at front-wall dock approach (3 patches).
@@ -1499,7 +1559,7 @@ def _spawn_realism_extras(params, rack_positions, stage, idx):
         count += 2
 
     # Ceiling strip lights on a grid above the aisle rows.
-    light_zs = 4.5
+    light_zs = params.get("ceiling_z", DEFAULT_CEILING_Z) - 0.15
     n_lights_x = max(2, int((bmax[0] - bmin[0]) / 4.0))
     light_ys = sorted_ys if sorted_ys else [(bmin[1] + bmax[1]) / 2.0]
     for ly in light_ys:
@@ -1515,7 +1575,9 @@ def _spawn_realism_extras(params, rack_positions, stage, idx):
                     (0.95, 0.78, 0.10)]
     for i, (_, ay) in enumerate(aisle_mids):
         color = band_palette[i % len(band_palette)]
-        idx = _place_aisle_sign(stage, idx, cx, ay, color, z=2.8)
+        # Hang aisle signs ~1m below the ceiling so they read as suspended.
+        sign_z = params.get("ceiling_z", DEFAULT_CEILING_Z) - 1.0
+        idx = _place_aisle_sign(stage, idx, cx, ay, color, z=sign_z)
         count += 2
 
     # Mop + bucket tucked next to the bin corner used in _spawn_wall_details.
@@ -1652,6 +1714,12 @@ def _spawn_mid_aisle_forklift(rack_positions, params, asset_library, stage, idx)
 
 def generate_layout(layout_name, layout_params, asset_library, stage):
     params = _resolve_params(layout_name, layout_params, LAYOUTS)
+
+    # Measure the actual interior height of whatever warehouse asset was loaded
+    # so racks, ceiling pipes, sprinklers, lights, and aisle signs all auto-
+    # scale to the environment instead of carrying baked-in numbers.
+    if "ceiling_z" not in params:
+        params["ceiling_z"] = _measure_ceiling_z(stage)
 
     idx = 0
     num_racks = 0
