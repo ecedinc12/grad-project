@@ -80,19 +80,26 @@ def _measure_ceiling_z(stage, fallback=DEFAULT_CEILING_Z):
 
 
 def _measure_floor_bounds(stage):
-    """Compute the warehouse interior XY bounding box from the stage by
-    unioning the world bbox of every tall non-layout imageable prim. Used
-    so racks/pallets/clutter scale to whatever warehouse asset (and scale)
-    the caller dropped in, instead of being clamped to preset bounds that
-    were authored against a specific warehouse size."""
+    """Estimate the walkable interior XY rectangle of whatever warehouse
+    asset is in the stage. Picks the largest near-horizontal imageable prim
+    sitting at floor level (thin in Z, big in XY, bottom near Z=0) and uses
+    its world-aligned bbox. Falling back on the union of tall structure
+    overshoots because warehouse USDs typically include exterior shell and
+    decorations that aren't part of the interior; the floor mesh is the
+    cleanest proxy for usable area."""
     try:
         from pxr import UsdGeom as _UG, Usd as _U
         cache = _UG.BBoxCache(_U.TimeCode.Default(),
                               includedPurposes=[_UG.Tokens.default_, _UG.Tokens.proxy])
-        x_min, y_min = 1e9, 1e9
-        x_max, y_max = -1e9, -1e9
         layout_root = "/World/Layout"
-        found = False
+        best_area = 0.0
+        best_lo = None
+        best_hi = None
+        # Fallback: union of tall structure (walls/columns) — used only if no
+        # floor-like prim is found.
+        tx_min, ty_min = 1e9, 1e9
+        tx_max, ty_max = -1e9, -1e9
+        tall_found = False
         for prim in stage.Traverse():
             path = str(prim.GetPath())
             if path.startswith(layout_root):
@@ -103,21 +110,38 @@ def _measure_floor_bounds(stage):
                 bb = cache.ComputeWorldBound(prim).ComputeAlignedRange()
                 if bb.IsEmpty():
                     continue
-                lo = bb.GetMin()
-                hi = bb.GetMax()
-                # Only consider tall structure (walls/columns/ceiling) so that
-                # ground-plane decals or stray small props don't shrink the box.
-                if hi[2] - lo[2] < 1.5:
-                    continue
-                x_min = min(x_min, lo[0]); y_min = min(y_min, lo[1])
-                x_max = max(x_max, hi[0]); y_max = max(y_max, hi[1])
-                found = True
+                lo = bb.GetMin(); hi = bb.GetMax()
+                dx = hi[0] - lo[0]; dy = hi[1] - lo[1]; dz = hi[2] - lo[2]
+                # Floor candidate: large XY footprint, thin Z, sitting at ground.
+                if dz < 1.0 and lo[2] < 1.0 and hi[2] < 2.0 and dx > 4.0 and dy > 4.0:
+                    area = dx * dy
+                    if area > best_area:
+                        best_area = area
+                        best_lo = (lo[0], lo[1])
+                        best_hi = (hi[0], hi[1])
+                # Tall structure fallback.
+                if dz >= 1.5:
+                    tx_min = min(tx_min, lo[0]); ty_min = min(ty_min, lo[1])
+                    tx_max = max(tx_max, hi[0]); ty_max = max(ty_max, hi[1])
+                    tall_found = True
             except Exception:
                 continue
-        if found and (x_max - x_min) > 4.0 and (y_max - y_min) > 4.0:
-            print(f"[INFO] Auto-detected interior bounds: "
-                  f"X=[{x_min:.2f},{x_max:.2f}] Y=[{y_min:.2f},{y_max:.2f}]")
-            return (x_min, y_min), (x_max, y_max)
+        if best_lo is not None:
+            # Inset the floor rect by the wall thickness so wall-mounted props
+            # (junction boxes, fire extinguishers, exit signs, pack station)
+            # land flush against the visible wall instead of floating past it
+            # when the floor mesh extends slightly under the wall slab.
+            inset = 0.35
+            best_lo = (best_lo[0] + inset, best_lo[1] + inset)
+            best_hi = (best_hi[0] - inset, best_hi[1] - inset)
+            print(f"[INFO] Auto-detected interior floor bounds (inset {inset}): "
+                  f"X=[{best_lo[0]:.2f},{best_hi[0]:.2f}] "
+                  f"Y=[{best_lo[1]:.2f},{best_hi[1]:.2f}] (area={best_area:.1f})")
+            return best_lo, best_hi
+        if tall_found and (tx_max - tx_min) > 4.0 and (ty_max - ty_min) > 4.0:
+            print(f"[WARN] No floor mesh detected; falling back to wall union: "
+                  f"X=[{tx_min:.2f},{tx_max:.2f}] Y=[{ty_min:.2f},{ty_max:.2f}]")
+            return (tx_min, ty_min), (tx_max, ty_max)
     except Exception as e:
         print(f"[WARN] _measure_floor_bounds failed: {e}")
     return None, None
