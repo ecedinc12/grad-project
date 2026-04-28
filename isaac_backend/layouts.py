@@ -51,7 +51,10 @@ def _measure_ceiling_z(stage, fallback=DEFAULT_CEILING_Z):
     auto-scale to whatever warehouse asset / scale the caller used."""
     try:
         from pxr import UsdGeom as _UG, Usd as _U
-        cache = _UG.BBoxCache(_U.TimeCode.Default(),
+        # Replicator writes xformOps as time samples (not defaults), so
+        # TimeCode.Default() ignores the 1.7x/2.0x pose scale and we read
+        # the unscaled asset. EarliestTime picks up the first authored sample.
+        cache = _UG.BBoxCache(_U.TimeCode.EarliestTime(),
                               includedPurposes=[_UG.Tokens.default_, _UG.Tokens.proxy])
         z_max = -1e9
         layout_root = "/World/Layout"
@@ -99,7 +102,9 @@ def _measure_floor_bounds(stage):
          is found."""
     try:
         from pxr import UsdGeom as _UG, Usd as _U
-        cache = _UG.BBoxCache(_U.TimeCode.Default(),
+        # See _measure_ceiling_z: TimeCode.Default() misses Replicator's
+        # time-sampled pose scale, so leaf bboxes come back unscaled.
+        cache = _UG.BBoxCache(_U.TimeCode.EarliestTime(),
                               includedPurposes=[_UG.Tokens.default_, _UG.Tokens.proxy])
         layout_root = "/World/Layout"
 
