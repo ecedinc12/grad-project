@@ -1029,6 +1029,288 @@ def _place_dock_door(stage, idx, x, y, width=2.6, height=3.2, rot_z=0):
     return idx + 1
 
 
+def _place_hazard_hatch(stage, idx, x, y, width, depth, rot_z=0, stripes=8):
+    """Diagonal yellow/black hazard hatching laid on the floor."""
+    ang = math.radians(rot_z)
+    cos_a, sin_a = math.cos(ang), math.sin(ang)
+    yellow = (0.95, 0.78, 0.10)
+    black = (0.08, 0.08, 0.08)
+    # Backplate (yellow)
+    bp_path = f"/World/Layout/hazard_bp_{idx}"
+    bp = UsdGeom.Cube.Define(stage, bp_path)
+    bp.GetSizeAttr().Set(2.0)
+    bxf = UsdGeom.XformCommonAPI(bp.GetPrim())
+    bxf.SetScale(Gf.Vec3f(width / 2.0, depth / 2.0, 0.012))
+    bxf.SetTranslate(Gf.Vec3d(x, y, 0.010))
+    bxf.SetRotate(Gf.Vec3f(0, 0, rot_z), UsdGeom.XformCommonAPI.RotationOrderXYZ)
+    bp.CreateDisplayColorAttr([Gf.Vec3f(*yellow)])
+    # Black diagonal stripes on top
+    stripe_w = width / stripes
+    for s in range(stripes):
+        if s % 2 == 0:
+            continue
+        local_x = -width / 2.0 + (s + 0.5) * stripe_w
+        wx = x + local_x * cos_a
+        wy = y + local_x * sin_a
+        sp_path = f"/World/Layout/hazard_st_{idx}_{s}"
+        sp = UsdGeom.Cube.Define(stage, sp_path)
+        sp.GetSizeAttr().Set(2.0)
+        sxf = UsdGeom.XformCommonAPI(sp.GetPrim())
+        sxf.SetScale(Gf.Vec3f(stripe_w * 0.55, depth / 2.0 * 1.4, 0.014))
+        sxf.SetTranslate(Gf.Vec3d(wx, wy, 0.014))
+        # Diagonal: rotate stripe ~45° relative to the patch.
+        sxf.SetRotate(Gf.Vec3f(0, 0, rot_z + 45), UsdGeom.XformCommonAPI.RotationOrderXYZ)
+        sp.CreateDisplayColorAttr([Gf.Vec3f(*black)])
+    return idx + 1 + (stripes // 2)
+
+
+def _place_sprinkler_head(stage, idx, x, y, z=4.85):
+    """Small red-tipped sprinkler head pendant from the ceiling."""
+    body_path = f"/World/Layout/sprinkler_{idx}"
+    body = UsdGeom.Cylinder.Define(stage, body_path)
+    body.GetRadiusAttr().Set(0.04)
+    body.GetHeightAttr().Set(0.12)
+    body.GetAxisAttr().Set("Z")
+    bxf = UsdGeom.XformCommonAPI(body.GetPrim())
+    bxf.SetTranslate(Gf.Vec3d(x, y, z))
+    body.CreateDisplayColorAttr([Gf.Vec3f(0.65, 0.65, 0.62)])
+    bulb_path = f"/World/Layout/sprinkler_bulb_{idx}"
+    bulb = UsdGeom.Sphere.Define(stage, bulb_path)
+    bulb.GetRadiusAttr().Set(0.035)
+    sxf = UsdGeom.XformCommonAPI(bulb.GetPrim())
+    sxf.SetTranslate(Gf.Vec3d(x, y, z - 0.09))
+    bulb.CreateDisplayColorAttr([Gf.Vec3f(0.85, 0.10, 0.10)])
+    return idx + 2
+
+
+def _place_ceiling_pipe_run(stage, idx, x_start, x_end, y, z=4.7, color=(0.55, 0.30, 0.18)):
+    """Long thin cylinder spanning across ceiling — gas/sprinkler/conduit pipe."""
+    length = abs(x_end - x_start)
+    if length < 0.5:
+        return idx
+    path = f"/World/Layout/pipe_{idx}"
+    cyl = UsdGeom.Cylinder.Define(stage, path)
+    cyl.GetRadiusAttr().Set(0.06)
+    cyl.GetHeightAttr().Set(length)
+    cyl.GetAxisAttr().Set("X")
+    cxf = UsdGeom.XformCommonAPI(cyl.GetPrim())
+    cxf.SetTranslate(Gf.Vec3d((x_start + x_end) / 2.0, y, z))
+    cyl.CreateDisplayColorAttr([Gf.Vec3f(*color)])
+    return idx + 1
+
+
+def _place_hi_vis_bollard(stage, idx, x, y, height=0.95):
+    """Yellow/black banded bollard for dock-door corners and hazard markers."""
+    base_path = f"/World/Layout/bollard_base_{idx}"
+    base = UsdGeom.Cylinder.Define(stage, base_path)
+    base.GetRadiusAttr().Set(0.10)
+    base.GetHeightAttr().Set(height)
+    base.GetAxisAttr().Set("Z")
+    bxf = UsdGeom.XformCommonAPI(base.GetPrim())
+    bxf.SetTranslate(Gf.Vec3d(x, y, height / 2.0))
+    base.CreateDisplayColorAttr([Gf.Vec3f(0.95, 0.78, 0.05)])
+    # Two black bands at 1/3 and 2/3 height
+    n_band = 2
+    for b in range(n_band):
+        band_path = f"/World/Layout/bollard_band_{idx}_{b}"
+        band = UsdGeom.Cylinder.Define(stage, band_path)
+        band.GetRadiusAttr().Set(0.105)
+        band.GetHeightAttr().Set(0.10)
+        band.GetAxisAttr().Set("Z")
+        bndxf = UsdGeom.XformCommonAPI(band.GetPrim())
+        bndxf.SetTranslate(Gf.Vec3d(x, y, height * (b + 1) / 3.0))
+        band.CreateDisplayColorAttr([Gf.Vec3f(0.06, 0.06, 0.06)])
+    return idx + 1 + n_band
+
+
+def _place_empty_pallet_stack(stage, idx, x, y, asset_library, count=6, rot_z=0):
+    """Stack of empty pallets — uses real pallet asset if available, else procedural slabs."""
+    placed = 0
+    if "pallet" in asset_library:
+        for k in range(count):
+            z = 0.14 * k
+            jitter_rot = rot_z + random.uniform(-2, 2)
+            idx = _place("pallet", x + random.uniform(-0.02, 0.02),
+                         y + random.uniform(-0.02, 0.02), z, jitter_rot,
+                         asset_library, stage, idx)
+            placed += 1
+    else:
+        for k in range(count):
+            path = f"/World/Layout/empty_pallet_{idx}"
+            cube = UsdGeom.Cube.Define(stage, path)
+            cube.GetSizeAttr().Set(2.0)
+            xf = UsdGeom.XformCommonAPI(cube.GetPrim())
+            xf.SetScale(Gf.Vec3f(0.60, 0.50, 0.07))
+            xf.SetTranslate(Gf.Vec3d(x, y, 0.07 + 0.14 * k))
+            cube.CreateDisplayColorAttr([Gf.Vec3f(0.55, 0.40, 0.22)])
+            idx += 1
+            placed += 1
+    return idx, placed
+
+
+def _place_parking_stall(stage, idx, x, y, width=2.2, depth=3.4, rot_z=0):
+    """White rectangular outline marking a forklift parking stall on the floor."""
+    color = (0.92, 0.92, 0.88)
+    line_w = 0.08
+    ang = math.radians(rot_z)
+    cos_a, sin_a = math.cos(ang), math.sin(ang)
+    # 4 sides
+    sides = [
+        (0, depth / 2.0, width, line_w),   # top
+        (0, -depth / 2.0, width, line_w),  # bottom
+        (-width / 2.0, 0, line_w, depth),  # left
+        (width / 2.0, 0, line_w, depth),   # right
+    ]
+    placed = 0
+    for (lx, ly, lw, ld) in sides:
+        wx = x + lx * cos_a - ly * sin_a
+        wy = y + lx * sin_a + ly * cos_a
+        path = f"/World/Layout/stall_{idx}_{placed}"
+        cube = UsdGeom.Cube.Define(stage, path)
+        cube.GetSizeAttr().Set(2.0)
+        xf = UsdGeom.XformCommonAPI(cube.GetPrim())
+        xf.SetScale(Gf.Vec3f(lw / 2.0, ld / 2.0, 0.012))
+        xf.SetTranslate(Gf.Vec3d(wx, wy, 0.013))
+        xf.SetRotate(Gf.Vec3f(0, 0, rot_z), UsdGeom.XformCommonAPI.RotationOrderXYZ)
+        cube.CreateDisplayColorAttr([Gf.Vec3f(*color)])
+        placed += 1
+    return idx + placed
+
+
+def _place_first_aid_kit(stage, idx, x, y, z=1.55):
+    """White wall-mounted box with a red cross face."""
+    path = f"/World/Layout/firstaid_{idx}"
+    cube = UsdGeom.Cube.Define(stage, path)
+    cube.GetSizeAttr().Set(2.0)
+    xf = UsdGeom.XformCommonAPI(cube.GetPrim())
+    xf.SetScale(Gf.Vec3f(0.18, 0.06, 0.14))
+    xf.SetTranslate(Gf.Vec3d(x, y, z))
+    cube.CreateDisplayColorAttr([Gf.Vec3f(0.95, 0.95, 0.92)])
+    # Red cross — vertical bar + horizontal bar, slightly proud of the box face.
+    for (sx, sy, sz, color) in (
+        (0.04, 0.005, 0.10, (0.85, 0.10, 0.10)),
+        (0.10, 0.005, 0.03, (0.85, 0.10, 0.10)),
+    ):
+        bar_path = f"/World/Layout/firstaid_bar_{idx}_{sx}_{sz}"
+        bar = UsdGeom.Cube.Define(stage, bar_path)
+        bar.GetSizeAttr().Set(2.0)
+        bxf = UsdGeom.XformCommonAPI(bar.GetPrim())
+        bxf.SetScale(Gf.Vec3f(sx, sy, sz))
+        bxf.SetTranslate(Gf.Vec3d(x, y - 0.065, z))
+        bar.CreateDisplayColorAttr([Gf.Vec3f(*color)])
+    return idx + 3
+
+
+def _place_wall_clock(stage, idx, x, y, z=2.4):
+    """Round white clock face on a wall."""
+    path = f"/World/Layout/clock_{idx}"
+    cyl = UsdGeom.Cylinder.Define(stage, path)
+    cyl.GetRadiusAttr().Set(0.20)
+    cyl.GetHeightAttr().Set(0.04)
+    cyl.GetAxisAttr().Set("Y")
+    cxf = UsdGeom.XformCommonAPI(cyl.GetPrim())
+    cxf.SetTranslate(Gf.Vec3d(x, y, z))
+    cyl.CreateDisplayColorAttr([Gf.Vec3f(0.95, 0.95, 0.92)])
+    # Minute & hour hands as thin cubes
+    for (sx, sz, sy_off, color) in ((0.005, 0.14, -0.04, (0.10, 0.10, 0.10)),
+                                     (0.005, 0.10, -0.04, (0.10, 0.10, 0.10))):
+        h_path = f"/World/Layout/clock_hand_{idx}_{sz}"
+        hand = UsdGeom.Cube.Define(stage, h_path)
+        hand.GetSizeAttr().Set(2.0)
+        hxf = UsdGeom.XformCommonAPI(hand.GetPrim())
+        hxf.SetScale(Gf.Vec3f(sx, 0.005, sz))
+        hxf.SetTranslate(Gf.Vec3d(x, y + sy_off, z + sz / 2.0))
+        hand.CreateDisplayColorAttr([Gf.Vec3f(*color)])
+    return idx + 3
+
+
+def _place_dock_leveler(stage, idx, x, y, width=2.4, depth=1.0):
+    """Steel dock leveler plate just inside the dock door — slight ramp tone."""
+    path = f"/World/Layout/leveler_{idx}"
+    cube = UsdGeom.Cube.Define(stage, path)
+    cube.GetSizeAttr().Set(2.0)
+    xf = UsdGeom.XformCommonAPI(cube.GetPrim())
+    xf.SetScale(Gf.Vec3f(width / 2.0, depth / 2.0, 0.025))
+    xf.SetTranslate(Gf.Vec3d(x, y, 0.025))
+    cube.CreateDisplayColorAttr([Gf.Vec3f(0.42, 0.42, 0.45)])
+    return idx + 1
+
+
+def _spawn_polish_pass(params, rack_positions, asset_library, stage, idx):
+    """Hazard hatching, ceiling pipe runs, sprinkler grid, hi-vis bollards at dock,
+    empty-pallet stacks, forklift parking stall, first-aid kit, wall clock,
+    and dock-door leveler plates."""
+    bmin = params["bounds_min"]
+    bmax = params["bounds_max"]
+    cx = (bmin[0] + bmax[0]) / 2.0
+    cy = (bmin[1] + bmax[1]) / 2.0
+    count = 0
+
+    # 1) Ceiling pipe runs along Y — three parallel pipes, slightly different colors.
+    pipe_ys = [bmin[1] + 1.5, cy, bmax[1] - 1.5]
+    pipe_colors = [(0.55, 0.30, 0.18), (0.20, 0.32, 0.55), (0.70, 0.70, 0.65)]
+    for py, pcol in zip(pipe_ys, pipe_colors):
+        idx = _place_ceiling_pipe_run(stage, idx, bmin[0] + 0.3, bmax[0] - 0.3,
+                                       py, z=4.65, color=pcol)
+        count += 1
+
+    # 2) Sprinkler grid on the ceiling — ~3.5m spacing.
+    nx = max(2, int((bmax[0] - bmin[0]) / 3.5))
+    ny = max(2, int((bmax[1] - bmin[1]) / 3.5))
+    for i in range(nx):
+        for j in range(ny):
+            sx = bmin[0] + (i + 0.5) * (bmax[0] - bmin[0]) / nx
+            sy = bmin[1] + (j + 0.5) * (bmax[1] - bmin[1]) / ny
+            idx = _place_sprinkler_head(stage, idx, sx, sy, z=4.85)
+            count += 2
+
+    # 3) Hazard hatching at front-wall dock approach (3 patches).
+    if params.get("dock_area", False):
+        for k, frac in enumerate((0.25, 0.5, 0.75)):
+            hx = bmin[0] + frac * (bmax[0] - bmin[0])
+            hy = bmin[1] + 1.4
+            idx = _place_hazard_hatch(stage, idx, hx, hy, width=1.6, depth=0.6,
+                                       rot_z=0, stripes=8)
+            count += 1
+
+        # 4) Hi-vis bollards bracketing each hatch.
+        for frac in (0.25, 0.5, 0.75):
+            hx = bmin[0] + frac * (bmax[0] - bmin[0])
+            for off in (-1.0, 1.0):
+                idx = _place_hi_vis_bollard(stage, idx, hx + off, bmin[1] + 1.4)
+                count += 1
+
+        # 5) Dock leveler plate centered on each hatch (just inside the door line).
+        for frac in (0.25, 0.5, 0.75):
+            hx = bmin[0] + frac * (bmax[0] - bmin[0])
+            idx = _place_dock_leveler(stage, idx, hx, bmin[1] + 0.85)
+            count += 1
+
+    # 6) Empty-pallet stack tucked at the back-right corner.
+    idx, n = _place_empty_pallet_stack(stage, idx,
+                                       bmax[0] - 1.4, bmax[1] - 1.6,
+                                       asset_library, count=6,
+                                       rot_z=random.uniform(-5, 5))
+    count += n
+
+    # 7) Forklift parking stall painted on the floor in the charging bay area.
+    wall_x = bmin[0] + 1.2
+    base_y = bmin[1] + (bmax[1] - bmin[1]) * 0.75
+    idx = _place_parking_stall(stage, idx, wall_x + 1.2, base_y + 0.3,
+                               width=2.0, depth=3.0, rot_z=0)
+    count += 1
+
+    # 8) First-aid kit on the right wall (shoulder height).
+    idx = _place_first_aid_kit(stage, idx, bmax[0] - 0.18, cy - 2.5, z=1.55)
+    count += 1
+
+    # 9) Wall clock high on the back wall.
+    idx = _place_wall_clock(stage, idx, cx + 1.0, bmax[1] - 0.18, z=2.6)
+    count += 1
+
+    return idx, count
+
+
 def _spawn_realism_extras(params, rack_positions, stage, idx):
     """Caution signs in aisles, junction boxes on walls, ceiling strip lights,
     aisle-number placards, mop bucket near bins."""
@@ -1254,11 +1536,13 @@ def generate_layout(layout_name, layout_params, asset_library, stage):
     if params.get("dock_area", False):
         idx, num_doors = _spawn_dock_doors(params, stage, idx)
 
+    idx, num_polish = _spawn_polish_pass(params, rack_positions, asset_library, stage, idx)
+
     print(f"[INFO] Spawned {num_racks} racks, {num_shelf_items} shelf items, "
           f"{num_pallets} pallets, {num_clutter} clutter props, {num_dock_items} dock items, "
           f"{num_stripes} floor stripes, {num_guards} column guards, {num_charge} charge-bay items, "
           f"{num_rack_extras} rack-end details, {num_wall_extras} wall details, "
           f"{num_realism} realism extras, {num_wear} aisle wear, {num_mid_fork} mid-aisle forklift, "
-          f"{num_doors} dock doors.")
+          f"{num_doors} dock doors, {num_polish} polish-pass items.")
 
     return params["bounds_min"], params["bounds_max"]
