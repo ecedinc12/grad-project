@@ -109,7 +109,36 @@ def _measure_floor_bounds(stage):
             except Exception:
                 return None
 
-        # Strategy 1: union of every prim with "floor" in its name.
+        # Build a "ceiling envelope" first. The Simple_Warehouse asset uses
+        # SM_floor* meshes for both the interior AND the exterior parking
+        # apron, so a raw floor union pulls in the whole site (~40x60m). The
+        # ceiling exists only over the building, so its XY footprint is a
+        # reliable interior gate.
+        c_lo_x = 1e9; c_lo_y = 1e9; c_hi_x = -1e9; c_hi_y = -1e9
+        n_ceiling = 0
+        for prim in stage.Traverse():
+            path = str(prim.GetPath())
+            if path.startswith(layout_root):
+                continue
+            if "ceiling" not in prim.GetName().lower():
+                continue
+            bb = _bbox_xy(prim)
+            if bb is None:
+                continue
+            lx, ly, hx, hy, lz, hz = bb
+            c_lo_x = min(c_lo_x, lx); c_lo_y = min(c_lo_y, ly)
+            c_hi_x = max(c_hi_x, hx); c_hi_y = max(c_hi_y, hy)
+            n_ceiling += 1
+
+        ceiling_envelope = None
+        if n_ceiling > 0 and c_hi_x > c_lo_x and c_hi_y > c_lo_y:
+            ceiling_envelope = (c_lo_x, c_lo_y, c_hi_x, c_hi_y)
+            print(f"[INFO] Ceiling envelope: union of {n_ceiling} ceiling prims, "
+                  f"X=[{c_lo_x:.2f},{c_hi_x:.2f}] Y=[{c_lo_y:.2f},{c_hi_y:.2f}]")
+
+        # Strategy 1: union of floor prims whose centroid sits inside the
+        # ceiling envelope. Falls back to the unfiltered union if no ceiling
+        # was found (other warehouse assets may not have one).
         f_lo_x = 1e9; f_lo_y = 1e9; f_hi_x = -1e9; f_hi_y = -1e9
         n_floor = 0
         for prim in stage.Traverse():
@@ -117,7 +146,6 @@ def _measure_floor_bounds(stage):
             if path.startswith(layout_root):
                 continue
             name_lc = prim.GetName().lower()
-            # Skip floor decals/markings — they only cover painted areas.
             if "floor" not in name_lc or "decal" in name_lc:
                 continue
             bb = _bbox_xy(prim)
@@ -126,6 +154,12 @@ def _measure_floor_bounds(stage):
             lx, ly, hx, hy, lz, hz = bb
             if (hx - lx) < 0.5 or (hy - ly) < 0.5:
                 continue
+            if ceiling_envelope is not None:
+                ccx = (lx + hx) / 2.0; ccy = (ly + hy) / 2.0
+                slack = 0.5
+                if not (ceiling_envelope[0] - slack <= ccx <= ceiling_envelope[2] + slack
+                        and ceiling_envelope[1] - slack <= ccy <= ceiling_envelope[3] + slack):
+                    continue
             f_lo_x = min(f_lo_x, lx); f_lo_y = min(f_lo_y, ly)
             f_hi_x = max(f_hi_x, hx); f_hi_y = max(f_hi_y, hy)
             n_floor += 1
@@ -133,8 +167,9 @@ def _measure_floor_bounds(stage):
         if n_floor > 0 and f_hi_x > f_lo_x and f_hi_y > f_lo_y:
             res_lo = (f_lo_x + floor_inset, f_lo_y + floor_inset)
             res_hi = (f_hi_x - floor_inset, f_hi_y - floor_inset)
+            gate = "gated by ceiling" if ceiling_envelope is not None else "ungated"
             print(f"[INFO] Auto-detected interior floor bounds "
-                  f"(union of {n_floor} floor prims, inset {floor_inset}): "
+                  f"(union of {n_floor} floor prims {gate}, inset {floor_inset}): "
                   f"X=[{res_lo[0]:.2f},{res_hi[0]:.2f}] "
                   f"Y=[{res_lo[1]:.2f},{res_hi[1]:.2f}]")
             return res_lo, res_hi
