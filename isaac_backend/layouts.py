@@ -1830,6 +1830,9 @@ def generate_layout(layout_name, layout_params, asset_library, stage):
     # middle when the asset is larger than the preset assumed.
     user_pinned_bounds = bool(layout_params and (
         "bounds_min" in layout_params or "bounds_max" in layout_params))
+    print(f"[INFO] Bounds resolution: user_pinned={user_pinned_bounds}, "
+          f"preset bounds_min={params['bounds_min']} bounds_max={params['bounds_max']}, "
+          f"layout_params={'<dict>' if layout_params else layout_params}")
     if not user_pinned_bounds:
         m_min, m_max = _measure_floor_bounds(stage)
         if m_min is not None:
@@ -1844,6 +1847,11 @@ def generate_layout(layout_name, layout_params, asset_library, stage):
                 if "bounds_max" in zone:
                     zone["bounds_max"] = _affine_remap(
                         zone["bounds_max"], preset_min, preset_max, m_min, m_max)
+        else:
+            print("[WARN] _measure_floor_bounds returned None — using preset "
+                  f"bounds_min={params['bounds_min']} bounds_max={params['bounds_max']}")
+    print(f"[INFO] Final layout bounds: bounds_min={params['bounds_min']} "
+          f"bounds_max={params['bounds_max']}")
 
     idx = 0
     num_racks = 0
