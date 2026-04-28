@@ -1236,6 +1236,155 @@ def _place_dock_leveler(stage, idx, x, y, width=2.4, depth=1.0):
     return idx + 1
 
 
+def _spawn_floor_filling(params, rack_positions, asset_library, stage, idx):
+    """Fill the dead space outside the rack footprint with staging pallets,
+    drum clusters, and crate piles so the warehouse doesn't read as a clump
+    of racks in the middle of an empty box.
+
+    Computes the rack-zone bounding rectangle from rack_positions, then drops
+    activity zones in the strips between that rectangle and the warehouse
+    walls — front (toward -Y), left (toward -X), right (toward +X). Avoids
+    the dock-area corner if dock_area=True.
+    """
+    bmin = params["bounds_min"]
+    bmax = params["bounds_max"]
+    if not rack_positions:
+        return idx, 0
+
+    rxs = [p[0] for p in rack_positions]
+    rys = [p[1] for p in rack_positions]
+    # Rack body extends ±RACK_X_EXTENT/2 along X and ±RACK_DEPTH/2 along Y
+    # for racks rotated 90°, so pad by those when computing the dead-zone.
+    rzone_xmin = min(rxs) - RACK_X_EXTENT / 2.0 - 0.4
+    rzone_xmax = max(rxs) + RACK_X_EXTENT / 2.0 + 0.4
+    rzone_ymin = min(rys) - RACK_DEPTH / 2.0 - 0.5
+    rzone_ymax = max(rys) + RACK_DEPTH / 2.0 + 0.5
+
+    has_dock = params.get("dock_area", False)
+    dock_xmax = bmin[0] + 9.0
+    dock_ymax = bmin[1] + 5.0
+
+    count = 0
+
+    def _drop_loaded_pallet(x, y, rot=None):
+        nonlocal idx, count
+        if "pallet" not in asset_library:
+            return
+        rot = random.uniform(-12, 12) if rot is None else rot
+        idx = _place("pallet", x, y, 0, rot, asset_library, stage, idx)
+        count += 1
+        roll = random.random()
+        if roll < 0.6:
+            idx, n = _stack_boxes(x, y, (1.0, 0.7, 0.4),
+                                  (0.08, 0.10, 0.12), asset_library, stage, idx)
+            count += n
+        elif roll < 0.85:
+            for layer_z in (0.18, 0.55):
+                if random.random() > 0.65:
+                    break
+                bp = random.choice([p for p in ("barrel", "drum") if p in asset_library] or ["box"])
+                idx = _place(bp, x + random.uniform(-0.05, 0.05),
+                             y + random.uniform(-0.05, 0.05), layer_z,
+                             random.uniform(0, 360), asset_library, stage, idx)
+                count += 1
+        else:
+            prop = random.choice([p for p in ("crate", "box_large") if p in asset_library] or ["box"])
+            idx = _place(prop, x, y, 0.18, random.uniform(0, 360),
+                         asset_library, stage, idx)
+            count += 1
+
+    def _drop_drum(x, y, height=0.15):
+        nonlocal idx, count
+        prop = random.choice([p for p in ("barrel", "drum") if p in asset_library] or ["box"])
+        idx = _place(prop, x, y, height, random.uniform(0, 360),
+                     asset_library, stage, idx)
+        count += 1
+
+    # ---------- 1) FRONT STAGING (between racks and -Y wall) ----------
+    front_y_max = rzone_ymin - 0.6
+    front_y_min = bmin[1] + 1.5
+    if front_y_max > front_y_min + 1.0:
+        # Pallet staging grid — two/three rows of loaded pallets.
+        n_rows = 2 if (front_y_max - front_y_min) < 4.5 else 3
+        n_cols = max(3, int((bmax[0] - bmin[0] - 3.0) / 1.9))
+        col_pitch = (bmax[0] - bmin[0] - 3.0) / max(1, n_cols - 1)
+        row_pitch = (front_y_max - front_y_min - 0.5) / max(1, n_rows - 1)
+        x0 = bmin[0] + 1.5
+        for r in range(n_rows):
+            for c in range(n_cols):
+                px = x0 + c * col_pitch + random.uniform(-0.18, 0.18)
+                py = front_y_min + r * row_pitch + random.uniform(-0.15, 0.15)
+                if has_dock and px < dock_xmax and py < dock_ymax:
+                    continue  # leave room for the dock zone
+                if random.random() < 0.85:
+                    _drop_loaded_pallet(px, py)
+
+        # A drum cluster at the front-right (when no dock there).
+        cluster_x = bmax[0] - 2.5
+        cluster_y = (front_y_min + front_y_max) / 2.0
+        for _ in range(random.randint(6, 10)):
+            dx = cluster_x + random.uniform(-1.4, 1.4)
+            dy = cluster_y + random.uniform(-1.4, 1.4)
+            if has_dock and dx < dock_xmax and dy < dock_ymax:
+                continue
+            _drop_drum(dx, dy)
+
+    # ---------- 2) LEFT-WALL STASH (between racks and -X wall) ----------
+    left_x_max = rzone_xmin - 0.6
+    left_x_min = bmin[0] + 1.0
+    if left_x_max > left_x_min + 0.8:
+        # Skip the band near the charging station (around y = bmin[1] + 0.75 * span).
+        charge_y = bmin[1] + (bmax[1] - bmin[1]) * 0.75
+        for _ in range(random.randint(8, 14)):
+            sx = random.uniform(left_x_min, left_x_max)
+            sy = random.uniform(rzone_ymin, rzone_ymax)
+            if abs(sy - charge_y) < 1.5:
+                continue
+            roll = random.random()
+            if roll < 0.5:
+                _drop_drum(sx, sy)
+            elif roll < 0.8:
+                prop = random.choice([p for p in ("crate", "box_large", "box") if p in asset_library] or ["box"])
+                idx = _place(prop, sx, sy, 0, random.uniform(0, 360),
+                             asset_library, stage, idx)
+                count += 1
+            else:
+                _drop_loaded_pallet(sx, sy)
+
+    # ---------- 3) RIGHT-WALL STASH (between racks and +X wall) ----------
+    right_x_min = rzone_xmax + 0.6
+    right_x_max = bmax[0] - 1.0
+    if right_x_max > right_x_min + 0.8:
+        for _ in range(random.randint(8, 14)):
+            sx = random.uniform(right_x_min, right_x_max)
+            sy = random.uniform(rzone_ymin, rzone_ymax)
+            roll = random.random()
+            if roll < 0.45:
+                _drop_loaded_pallet(sx, sy)
+            elif roll < 0.75:
+                _drop_drum(sx, sy)
+            else:
+                prop = random.choice([p for p in ("box_large", "crate", "box") if p in asset_library] or ["box"])
+                idx = _place(prop, sx, sy, 0, random.uniform(0, 360),
+                             asset_library, stage, idx)
+                count += 1
+
+    # ---------- 4) BACK STRIP (if any room behind racks) ----------
+    back_y_min = rzone_ymax + 0.6
+    back_y_max = bmax[1] - 0.8
+    if back_y_max > back_y_min + 0.8:
+        n = random.randint(5, 10)
+        for _ in range(n):
+            bx = random.uniform(bmin[0] + 1.5, bmax[0] - 1.5)
+            by = random.uniform(back_y_min, back_y_max)
+            if random.random() < 0.6:
+                _drop_loaded_pallet(bx, by)
+            else:
+                _drop_drum(bx, by)
+
+    return idx, count
+
+
 def _spawn_polish_pass(params, rack_positions, asset_library, stage, idx):
     """Hazard hatching, ceiling pipe runs, sprinkler grid, hi-vis bollards at dock,
     empty-pallet stacks, forklift parking stall, first-aid kit, wall clock,
@@ -1536,6 +1685,7 @@ def generate_layout(layout_name, layout_params, asset_library, stage):
     if params.get("dock_area", False):
         idx, num_doors = _spawn_dock_doors(params, stage, idx)
 
+    idx, num_floor_fill = _spawn_floor_filling(params, rack_positions, asset_library, stage, idx)
     idx, num_polish = _spawn_polish_pass(params, rack_positions, asset_library, stage, idx)
 
     print(f"[INFO] Spawned {num_racks} racks, {num_shelf_items} shelf items, "
@@ -1543,6 +1693,7 @@ def generate_layout(layout_name, layout_params, asset_library, stage):
           f"{num_stripes} floor stripes, {num_guards} column guards, {num_charge} charge-bay items, "
           f"{num_rack_extras} rack-end details, {num_wall_extras} wall details, "
           f"{num_realism} realism extras, {num_wear} aisle wear, {num_mid_fork} mid-aisle forklift, "
-          f"{num_doors} dock doors, {num_polish} polish-pass items.")
+          f"{num_doors} dock doors, {num_polish} polish-pass items, "
+          f"{num_floor_fill} floor-fill staging items.")
 
     return params["bounds_min"], params["bounds_max"]
