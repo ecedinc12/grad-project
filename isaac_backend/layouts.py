@@ -1828,27 +1828,35 @@ def generate_layout(layout_name, layout_params, asset_library, stage):
     # authored against them) are remapped onto the measured rectangle so the
     # whole layout breathes with the warehouse instead of clumping in the
     # middle when the asset is larger than the preset assumed.
-    user_pinned_bounds = bool(layout_params and (
-        "bounds_min" in layout_params or "bounds_max" in layout_params))
-    print(f"[INFO] Bounds resolution: user_pinned={user_pinned_bounds}, "
-          f"preset bounds_min={params['bounds_min']} bounds_max={params['bounds_max']}, "
+    # The bounds carried by `params` (from the JSON preset and any LLM-supplied
+    # layout_params) are a *design coordinate space* — what the prompt/preset
+    # was authored against. We always remap onto the measured warehouse so the
+    # layout breathes with the actual asset. The LLM defaults to ±6m, which is
+    # smaller than the warehouse interior, so without remapping the layout
+    # clumps in the middle. Pass auto_fit_bounds=False in layout_params to opt
+    # out (e.g. for hand-tuned coordinate scenes).
+    auto_fit = True
+    if layout_params and layout_params.get("auto_fit_bounds") is False:
+        auto_fit = False
+    print(f"[INFO] Bounds resolution: auto_fit={auto_fit}, "
+          f"design bounds_min={params['bounds_min']} bounds_max={params['bounds_max']}, "
           f"layout_params={'<dict>' if layout_params else layout_params}")
-    if not user_pinned_bounds:
+    if auto_fit:
         m_min, m_max = _measure_floor_bounds(stage)
         if m_min is not None:
-            preset_min = params["bounds_min"]
-            preset_max = params["bounds_max"]
+            design_min = params["bounds_min"]
+            design_max = params["bounds_max"]
             params["bounds_min"] = m_min
             params["bounds_max"] = m_max
             for zone in params.get("clutter_zones", []):
                 if "bounds_min" in zone:
                     zone["bounds_min"] = _affine_remap(
-                        zone["bounds_min"], preset_min, preset_max, m_min, m_max)
+                        zone["bounds_min"], design_min, design_max, m_min, m_max)
                 if "bounds_max" in zone:
                     zone["bounds_max"] = _affine_remap(
-                        zone["bounds_max"], preset_min, preset_max, m_min, m_max)
+                        zone["bounds_max"], design_min, design_max, m_min, m_max)
         else:
-            print("[WARN] _measure_floor_bounds returned None — using preset "
+            print("[WARN] _measure_floor_bounds returned None — using design "
                   f"bounds_min={params['bounds_min']} bounds_max={params['bounds_max']}")
     print(f"[INFO] Final layout bounds: bounds_min={params['bounds_min']} "
           f"bounds_max={params['bounds_max']}")
