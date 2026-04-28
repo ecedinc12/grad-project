@@ -1187,11 +1187,11 @@ def _place_first_aid_kit(stage, idx, x, y, z=1.55):
     xf.SetTranslate(Gf.Vec3d(x, y, z))
     cube.CreateDisplayColorAttr([Gf.Vec3f(0.95, 0.95, 0.92)])
     # Red cross — vertical bar + horizontal bar, slightly proud of the box face.
-    for (sx, sy, sz, color) in (
+    for bi, (sx, sy, sz, color) in enumerate((
         (0.04, 0.005, 0.10, (0.85, 0.10, 0.10)),
         (0.10, 0.005, 0.03, (0.85, 0.10, 0.10)),
-    ):
-        bar_path = f"/World/Layout/firstaid_bar_{idx}_{sx}_{sz}"
+    )):
+        bar_path = f"/World/Layout/firstaid_bar_{idx}_{bi}"
         bar = UsdGeom.Cube.Define(stage, bar_path)
         bar.GetSizeAttr().Set(2.0)
         bxf = UsdGeom.XformCommonAPI(bar.GetPrim())
@@ -1212,9 +1212,9 @@ def _place_wall_clock(stage, idx, x, y, z=2.4):
     cxf.SetTranslate(Gf.Vec3d(x, y, z))
     cyl.CreateDisplayColorAttr([Gf.Vec3f(0.95, 0.95, 0.92)])
     # Minute & hour hands as thin cubes
-    for (sx, sz, sy_off, color) in ((0.005, 0.14, -0.04, (0.10, 0.10, 0.10)),
-                                     (0.005, 0.10, -0.04, (0.10, 0.10, 0.10))):
-        h_path = f"/World/Layout/clock_hand_{idx}_{sz}"
+    for hi, (sx, sz, sy_off, color) in enumerate(((0.005, 0.14, -0.04, (0.10, 0.10, 0.10)),
+                                                   (0.005, 0.10, -0.04, (0.10, 0.10, 0.10)))):
+        h_path = f"/World/Layout/clock_hand_{idx}_{hi}"
         hand = UsdGeom.Cube.Define(stage, h_path)
         hand.GetSizeAttr().Set(2.0)
         hxf = UsdGeom.XformCommonAPI(hand.GetPrim())
