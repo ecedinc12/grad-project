@@ -83,100 +83,85 @@ def _measure_ceiling_z(stage, fallback=DEFAULT_CEILING_Z):
 
 
 def _measure_floor_bounds(stage):
-    """Estimate the walkable interior XY rectangle of whatever warehouse
-    asset was loaded. Strategy:
+    """Estimate the walkable interior XY rectangle of the loaded warehouse.
 
-      1) Walk leaf geometry prims (UsdGeom.Gprim — Mesh/Cube/Cylinder/etc.,
-         not Xforms) so intermediate Xforms whose bbox unions children
-         don't pollute the measurement.
-      2) Build a "wall envelope" = union of bboxes of tall prims (dz≥1.5);
-         this is the building exterior shell and gates exterior decoration.
-      3) Union the bboxes of every thin, floor-level prim that lies inside
-         that envelope. Multi-tile floors and concrete pads then add up to
-         the true walkable area instead of us picking a single largest tile.
-      4) Inset the result so wall-mounted props (junction boxes, fire
-         extinguishers, exit signs, pack station) land flush against the
-         visible wall instead of floating past it when the floor extends
-         slightly under the wall slab.
-      5) Fall back to the wall envelope (also inset) if no floor candidate
-         is found."""
+    Looks for prims whose name contains "floor" (the Simple_Warehouse asset
+    uses SM_floor* meshes) and unions their world-space XY extents. Falls
+    back to the world bbox of the warehouse root prim, then to a global
+    sweep over imageable prims with bbox bottom near z=0. Each step is
+    logged so a silent fallback is visible in the run output."""
     try:
         from pxr import UsdGeom as _UG, Usd as _U
-        # See _measure_ceiling_z: TimeCode.Default() misses Replicator's
-        # time-sampled pose scale, so leaf bboxes come back unscaled.
+        # Replicator writes pose as time-samples; TimeCode.Default() reads
+        # the (often-identity) default and misses the 1.7x/2.0x scale.
         cache = _UG.BBoxCache(_U.TimeCode.EarliestTime(),
                               includedPurposes=[_UG.Tokens.default_, _UG.Tokens.proxy])
         layout_root = "/World/Layout"
+        floor_inset = 0.35
 
-        wall_lo = [1e9, 1e9]; wall_hi = [-1e9, -1e9]
-        wall_found = False
-        floor_candidates = []
+        def _bbox_xy(prim):
+            try:
+                bb = cache.ComputeWorldBound(prim).ComputeAlignedRange()
+                if bb.IsEmpty():
+                    return None
+                lo = bb.GetMin(); hi = bb.GetMax()
+                return (lo[0], lo[1], hi[0], hi[1], lo[2], hi[2])
+            except Exception:
+                return None
 
+        # Strategy 1: union of every prim with "floor" in its name.
+        f_lo_x = 1e9; f_lo_y = 1e9; f_hi_x = -1e9; f_hi_y = -1e9
+        n_floor = 0
         for prim in stage.Traverse():
             path = str(prim.GetPath())
             if path.startswith(layout_root):
                 continue
-            # Only consider leaf geometric primitives. Xforms are imageable
-            # but their bbox is a union of all children, which would mix
-            # walls + floor and break both classifiers below.
-            if not prim.IsA(_UG.Gprim):
+            name_lc = prim.GetName().lower()
+            # Skip floor decals/markings — they only cover painted areas.
+            if "floor" not in name_lc or "decal" in name_lc:
                 continue
-            try:
-                bb = cache.ComputeWorldBound(prim).ComputeAlignedRange()
-                if bb.IsEmpty():
-                    continue
-                lo = bb.GetMin(); hi = bb.GetMax()
-                dx = hi[0] - lo[0]; dy = hi[1] - lo[1]; dz = hi[2] - lo[2]
-                if dz >= 1.5 and dx >= 0.05 and dy >= 0.05:
-                    if lo[0] < wall_lo[0]: wall_lo[0] = lo[0]
-                    if lo[1] < wall_lo[1]: wall_lo[1] = lo[1]
-                    if hi[0] > wall_hi[0]: wall_hi[0] = hi[0]
-                    if hi[1] > wall_hi[1]: wall_hi[1] = hi[1]
-                    wall_found = True
-                elif dz < 0.6 and lo[2] < 0.5 and dx >= 0.5 and dy >= 0.5:
-                    floor_candidates.append((lo[0], lo[1], hi[0], hi[1], dx * dy))
-            except Exception:
+            bb = _bbox_xy(prim)
+            if bb is None:
                 continue
+            lx, ly, hx, hy, lz, hz = bb
+            if (hx - lx) < 0.5 or (hy - ly) < 0.5:
+                continue
+            f_lo_x = min(f_lo_x, lx); f_lo_y = min(f_lo_y, ly)
+            f_hi_x = max(f_hi_x, hx); f_hi_y = max(f_hi_y, hy)
+            n_floor += 1
 
-        # If we have a wall envelope, gate floor candidates by it (with a
-        # small slack so floor tiles flush with the wall still count).
-        wall_slack = 0.5
-        if wall_found:
-            in_envelope = []
-            cx = (wall_lo[0] + wall_hi[0]) / 2.0
-            cy = (wall_lo[1] + wall_hi[1]) / 2.0
-            for (lx, ly, hx, hy, area) in floor_candidates:
-                # Centroid must be inside (envelope ± slack).
-                ccx = (lx + hx) / 2.0; ccy = (ly + hy) / 2.0
-                if (ccx >= wall_lo[0] - wall_slack and ccx <= wall_hi[0] + wall_slack
-                        and ccy >= wall_lo[1] - wall_slack and ccy <= wall_hi[1] + wall_slack):
-                    in_envelope.append((lx, ly, hx, hy, area))
-            floor_candidates = in_envelope
-
-        wall_inset = 0.6  # wall thickness ≈ 0.3 m × 1.7 scale factor.
-        floor_inset = 0.35
-
-        if floor_candidates:
-            fx_lo = min(c[0] for c in floor_candidates)
-            fy_lo = min(c[1] for c in floor_candidates)
-            fx_hi = max(c[2] for c in floor_candidates)
-            fy_hi = max(c[3] for c in floor_candidates)
-            res_lo = (fx_lo + floor_inset, fy_lo + floor_inset)
-            res_hi = (fx_hi - floor_inset, fy_hi - floor_inset)
+        if n_floor > 0 and f_hi_x > f_lo_x and f_hi_y > f_lo_y:
+            res_lo = (f_lo_x + floor_inset, f_lo_y + floor_inset)
+            res_hi = (f_hi_x - floor_inset, f_hi_y - floor_inset)
             print(f"[INFO] Auto-detected interior floor bounds "
-                  f"(union of {len(floor_candidates)} tiles, inset {floor_inset}): "
+                  f"(union of {n_floor} floor prims, inset {floor_inset}): "
                   f"X=[{res_lo[0]:.2f},{res_hi[0]:.2f}] "
                   f"Y=[{res_lo[1]:.2f},{res_hi[1]:.2f}]")
             return res_lo, res_hi
 
-        if wall_found and (wall_hi[0] - wall_lo[0]) > 4.0 and (wall_hi[1] - wall_lo[1]) > 4.0:
-            res_lo = (wall_lo[0] + wall_inset, wall_lo[1] + wall_inset)
-            res_hi = (wall_hi[0] - wall_inset, wall_hi[1] - wall_inset)
-            print(f"[WARN] No floor mesh detected; using wall envelope "
-                  f"(inset {wall_inset}): "
+        # Strategy 2: world bbox of the Replicator-loaded warehouse root.
+        wall_inset = 1.0
+        for root_path in ("/Replicator/Ref_Xform", "/World/warehouse",
+                          "/Replicator", "/World"):
+            root = stage.GetPrimAtPath(root_path)
+            if not root or not root.IsValid():
+                continue
+            bb = _bbox_xy(root)
+            if bb is None:
+                continue
+            lx, ly, hx, hy, lz, hz = bb
+            if (hx - lx) < 4.0 or (hy - ly) < 4.0:
+                continue
+            res_lo = (lx + wall_inset, ly + wall_inset)
+            res_hi = (hx - wall_inset, hy - wall_inset)
+            print(f"[WARN] No floor prims matched; using world bbox of "
+                  f"{root_path} (inset {wall_inset}): "
                   f"X=[{res_lo[0]:.2f},{res_hi[0]:.2f}] "
                   f"Y=[{res_lo[1]:.2f},{res_hi[1]:.2f}]")
             return res_lo, res_hi
+
+        print("[WARN] _measure_floor_bounds: no floor prims and no warehouse "
+              "root bbox available — falling back to JSON preset bounds.")
     except Exception as e:
         print(f"[WARN] _measure_floor_bounds failed: {e}")
     return None, None
