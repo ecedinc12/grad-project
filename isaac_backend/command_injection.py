@@ -207,11 +207,15 @@ def reinject_random_commands(spawned_worker_names, visible_bounds=None,
         cmd_list.append(f"{worker_name} Idle {round(random.uniform(3, 8), 1)}")
 
         try:
+            # instant=False so anim.people lets the agent finish its current
+            # command before swapping the queue. instant=True aborts mid-
+            # pathfind and segfaults inside NavigationManager when the new
+            # waypoints can't be routed (libpython3.11/cfunction_call crash).
             agent_manager.inject_command(
                 agent_name=worker_name,
                 command_list=cmd_list,
                 force_inject=True,
-                instant=True,
+                instant=False,
             )
             injected += 1
         except Exception as e:
