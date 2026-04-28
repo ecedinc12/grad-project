@@ -78,6 +78,63 @@ def _measure_ceiling_z(stage, fallback=DEFAULT_CEILING_Z):
     print(f"[WARN] Ceiling auto-detect failed, using fallback {fallback:.2f} m")
     return fallback
 
+
+def _measure_floor_bounds(stage):
+    """Compute the warehouse interior XY bounding box from the stage by
+    unioning the world bbox of every tall non-layout imageable prim. Used
+    so racks/pallets/clutter scale to whatever warehouse asset (and scale)
+    the caller dropped in, instead of being clamped to preset bounds that
+    were authored against a specific warehouse size."""
+    try:
+        from pxr import UsdGeom as _UG, Usd as _U
+        cache = _UG.BBoxCache(_U.TimeCode.Default(),
+                              includedPurposes=[_UG.Tokens.default_, _UG.Tokens.proxy])
+        x_min, y_min = 1e9, 1e9
+        x_max, y_max = -1e9, -1e9
+        layout_root = "/World/Layout"
+        found = False
+        for prim in stage.Traverse():
+            path = str(prim.GetPath())
+            if path.startswith(layout_root):
+                continue
+            if not prim.IsA(_UG.Imageable):
+                continue
+            try:
+                bb = cache.ComputeWorldBound(prim).ComputeAlignedRange()
+                if bb.IsEmpty():
+                    continue
+                lo = bb.GetMin()
+                hi = bb.GetMax()
+                # Only consider tall structure (walls/columns/ceiling) so that
+                # ground-plane decals or stray small props don't shrink the box.
+                if hi[2] - lo[2] < 1.5:
+                    continue
+                x_min = min(x_min, lo[0]); y_min = min(y_min, lo[1])
+                x_max = max(x_max, hi[0]); y_max = max(y_max, hi[1])
+                found = True
+            except Exception:
+                continue
+        if found and (x_max - x_min) > 4.0 and (y_max - y_min) > 4.0:
+            print(f"[INFO] Auto-detected interior bounds: "
+                  f"X=[{x_min:.2f},{x_max:.2f}] Y=[{y_min:.2f},{y_max:.2f}]")
+            return (x_min, y_min), (x_max, y_max)
+    except Exception as e:
+        print(f"[WARN] _measure_floor_bounds failed: {e}")
+    return None, None
+
+
+def _affine_remap(pt, src_min, src_max, dst_min, dst_max):
+    """Map a 2D point from one axis-aligned rectangle to another, per-axis."""
+    out = []
+    for i in (0, 1):
+        s = src_max[i] - src_min[i]
+        if s <= 1e-6:
+            out.append(dst_min[i])
+            continue
+        t = (pt[i] - src_min[i]) / s
+        out.append(dst_min[i] + t * (dst_max[i] - dst_min[i]))
+    return tuple(out)
+
 RACK_FILL_PROBS = {
     "empty": 0.0,
     "sparse": 0.30,
@@ -1720,6 +1777,29 @@ def generate_layout(layout_name, layout_params, asset_library, stage):
     # scale to the environment instead of carrying baked-in numbers.
     if "ceiling_z" not in params:
         params["ceiling_z"] = _measure_ceiling_z(stage)
+
+    # Auto-fit XY bounds to the warehouse asset, unless the caller pinned
+    # bounds explicitly. The preset's bounds_min/max are treated as the
+    # design coordinate system; clutter_zones (and any other bounded params
+    # authored against them) are remapped onto the measured rectangle so the
+    # whole layout breathes with the warehouse instead of clumping in the
+    # middle when the asset is larger than the preset assumed.
+    user_pinned_bounds = bool(layout_params and (
+        "bounds_min" in layout_params or "bounds_max" in layout_params))
+    if not user_pinned_bounds:
+        m_min, m_max = _measure_floor_bounds(stage)
+        if m_min is not None:
+            preset_min = params["bounds_min"]
+            preset_max = params["bounds_max"]
+            params["bounds_min"] = m_min
+            params["bounds_max"] = m_max
+            for zone in params.get("clutter_zones", []):
+                if "bounds_min" in zone:
+                    zone["bounds_min"] = _affine_remap(
+                        zone["bounds_min"], preset_min, preset_max, m_min, m_max)
+                if "bounds_max" in zone:
+                    zone["bounds_max"] = _affine_remap(
+                        zone["bounds_max"], preset_min, preset_max, m_min, m_max)
 
     idx = 0
     num_racks = 0
