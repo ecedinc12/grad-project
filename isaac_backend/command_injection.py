@@ -136,7 +136,7 @@ def inject_commands_after_play(spawned_worker_names, worker_behaviors, simulatio
                 agent_name=worker_name,
                 command_list=command_list,
                 force_inject=True,
-                instant=True,
+                instant=False,
             )
             injected += 1
         except Exception as e:

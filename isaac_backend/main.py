@@ -112,7 +112,7 @@ from isaac_backend.ira_setup import (
     diagnose_usdrt_view,
     bake_animation_graph_into_asset,
 )
-from isaac_backend.command_injection import inject_commands_after_play, reinject_random_commands
+from isaac_backend.command_injection import inject_commands_after_play
 from isaac_backend.vehicle_animation import VehicleAnimator
 
 COCO_CATEGORIES = {
@@ -136,7 +136,6 @@ COCO_CATEGORIES = {
 
 NUM_FRAMES = 200
 SIM_STEPS_PER_FRAME = 2
-REINJECT_INTERVAL = 80
 CAMERA_RANDOMIZE_INTERVAL = 50
 
 
@@ -566,33 +565,12 @@ def main():
         layout_bounds_min=spawn_bounds_min, layout_bounds_max=spawn_bounds_max,
     )
 
-    # Build per-worker zone bounds for zone-aware re-injection.
-    # Maps worker_name → (x_lo, x_hi, y_lo, y_hi) from their anchor_zone hazard bounds.
-    worker_zone_bounds = {}
-    _entities = scene_config.get("entities", [])
-    _hz_map = {z["name"]: z for z in scene_config.get("hazard_zones", [])}
-    _worker_idx = 0
-    for _ent in _entities:
-        if _ent.get("type") == "worker":
-            _worker_idx += 1
-            _wname = f"worker_{_worker_idx:02d}"
-            _zone = _ent.get("anchor_zone")
-            if _zone and _zone in _hz_map:
-                _bmin = _hz_map[_zone]["bounds_min"]
-                _bmax = _hz_map[_zone]["bounds_max"]
-                worker_zone_bounds[_wname] = (_bmin[0], _bmax[0], _bmin[1], _bmax[1])
-
     diagnose_behavior_state("pre-loop")
 
     _progress("Running simulation loop...")
     for step in range(NUM_FRAMES):
         if step % 100 == 0:
             _progress(f"Frame {step}/{NUM_FRAMES}")
-        if step > 0 and step % REINJECT_INTERVAL == 0 and spawned_worker_names:
-            reinject_random_commands(
-                spawned_worker_names, visible_bounds=visible_bounds,
-                worker_zone_bounds=worker_zone_bounds, stage=stage,
-            )
         for _ in range(SIM_STEPS_PER_FRAME):
             world.step(render=False)
         # Update vehicle after physics so the animated position is not overridden
