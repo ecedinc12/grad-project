@@ -638,13 +638,38 @@ def _spawn_racks(params, asset_library, stage, idx):
             y_shift = zone_center - row_center
             row_ys = [y + y_shift for y in row_ys]
 
+        # Per-row bay variation: instead of breaking every row at the same
+        # cross_aisle_every column (which produces identical 5+gap+2 rows),
+        # randomize each row's break columns so adjacent rows show different
+        # bay sizes. The total X span stays consistent so rows still align
+        # to the same x_start.
+        def _row_break_cols(num_breaks):
+            if num_breaks <= 0 or cols <= 2:
+                return set()
+            interior = list(range(1, cols))
+            random.shuffle(interior)
+            picks = sorted(interior[:num_breaks])
+            return set(picks)
+
         for r in range(rows):
             y = row_ys[r]
+            # Each row gets the same number of breaks (so total_x matches),
+            # but their column positions are randomized per row.
+            row_breaks = _row_break_cols(num_cross)
+            # Small per-row x-jitter so rack ends don't form a perfect
+            # vertical line across rows.
+            row_x_jitter = random.uniform(-0.4, 0.4) if rows > 1 else 0.0
             x_offset = 0.0
             for c in range(cols):
-                if c > 0 and cross_every > 0 and c % cross_every == 0:
+                if c in row_breaks:
                     x_offset += cross_w
-                x = x_start + c * rack_x_extent + x_offset
+                # Skip a rack with low probability to leave a true gap that
+                # reads as a put-away pocket / staging void rather than a
+                # uniform wall.
+                drop_rack = random.random() < 0.06
+                x = x_start + c * rack_x_extent + x_offset + row_x_jitter
+                if drop_rack:
+                    continue
                 idx = _place("rack", x, y, 0, 90, asset_library, stage, idx, scale=(1.0, 1.0, rack_z_scale))
                 rack_positions.append((x, y, 90))
                 count += 1
@@ -947,27 +972,51 @@ def _spawn_dock_area(params, asset_library, stage, idx):
     bmax = params["bounds_max"]
     count = 0
 
-    dock_x_start = bmin[0] + 2.0
-    dock_x_end = bmin[0] + 9.0
-    dock_y_start = bmin[1] + 1.0
-    dock_y_end = bmin[1] + 5.0
+    # Fill the entire reserved dock zone instead of a hardcoded corner block —
+    # otherwise the zone reads as empty floor with a small cluster off to the
+    # side. Use ~80% of the dock zone width and keep a 1.5m setback from the
+    # front wall (where dock doors live) and 1m from the rack-zone boundary.
+    dock_frac = params.get("dock_zone_frac", 0.25)
+    total_y_span = bmax[1] - bmin[1]
+    dock_y_top = bmin[1] + dock_frac * total_y_span
 
-    dock_pallet_rows = 2
-    dock_pallet_cols = 4
+    dock_y_start = bmin[1] + 1.5
+    dock_y_end = dock_y_top - 1.0
+    span_x = bmax[0] - bmin[0]
+    dock_x_start = bmin[0] + 0.10 * span_x
+    dock_x_end = bmax[0] - 0.10 * span_x
+
     spacing_x = 1.8
     spacing_y = 2.0
+    avail_x = max(0.0, dock_x_end - dock_x_start)
+    avail_y = max(0.0, dock_y_end - dock_y_start)
+    dock_pallet_cols = max(2, int(avail_x / spacing_x))
+    dock_pallet_rows = max(2, int(avail_y / spacing_y))
 
-    dock_y_total = (dock_pallet_rows - 1) * spacing_y
-    dock_y_center = (dock_y_start + dock_y_end) / 2.0
-    dock_y_base = dock_y_center - dock_y_total / 2.0
+    grid_x = (dock_pallet_cols - 1) * spacing_x
+    grid_y = (dock_pallet_rows - 1) * spacing_y
+    x_base = (dock_x_start + dock_x_end) / 2.0 - grid_x / 2.0
+    y_base = (dock_y_start + dock_y_end) / 2.0 - grid_y / 2.0
+
+    # Drop ~25% of slots so the dock reads as in-use staging rather than a
+    # neat grid. Cluster: each column has a "lane" likelihood — entire columns
+    # may be empty (forklift access lane).
+    skip_cols = set()
+    if dock_pallet_cols >= 4:
+        # Reserve 1–2 random columns as forklift access lanes.
+        n_lanes = random.randint(1, 2)
+        skip_cols = set(random.sample(range(1, dock_pallet_cols - 1), n_lanes))
 
     for r in range(dock_pallet_rows):
         for c in range(dock_pallet_cols):
-            x = dock_x_start + c * spacing_x + random.uniform(-0.2, 0.2)
-            y = dock_y_base + r * spacing_y + random.uniform(-0.2, 0.2)
+            if c in skip_cols:
+                continue
+            if random.random() < 0.20:
+                continue
+            x = x_base + c * spacing_x + random.uniform(-0.2, 0.2)
+            y = y_base + r * spacing_y + random.uniform(-0.2, 0.2)
             idx = _place("pallet", x, y, 0, random.uniform(-15, 15), asset_library, stage, idx)
             count += 1
-            # Dock pallets always carry at least one box; second/third are probabilistic.
             idx, n = _stack_boxes(x, y, (1.0, 0.70, 0.40), (0.10, 0.12, 0.12), asset_library, stage, idx)
             count += n
 
@@ -981,6 +1030,84 @@ def _spawn_dock_area(params, asset_library, stage, idx):
         count += 1
 
     print(f"[INFO] Spawned dock area with {count} items")
+    return idx, count
+
+
+def _spawn_bulk_stock(params, asset_library, stage, idx):
+    """Fill the bulk-stock zone (back of warehouse, behind rack rows) with
+    irregular clusters of palletised stock — overflow from racked storage.
+    Without this the back ~20% of the floor reads as a bare strip."""
+    if "pallet" not in asset_library:
+        return idx, 0
+    bmin = params["bounds_min"]
+    bmax = params["bounds_max"]
+    dock_frac = params.get("dock_zone_frac", 0.25)
+    storage_frac = params.get("storage_zone_frac", 0.55)
+    bulk_frac = 1.0 - dock_frac - storage_frac
+    if bulk_frac < 0.05:
+        return idx, 0
+
+    total_y_span = bmax[1] - bmin[1]
+    bulk_y_bottom = bmax[1] - bulk_frac * total_y_span
+    bulk_y_top = bmax[1] - 1.2  # back-wall clearance
+    bulk_y_bot = bulk_y_bottom + 0.6
+    span_x = bmax[0] - bmin[0]
+    bulk_x_start = bmin[0] + 0.08 * span_x
+    bulk_x_end = bmax[0] - 0.08 * span_x
+
+    avail_y = max(0.0, bulk_y_top - bulk_y_bot)
+    avail_x = max(0.0, bulk_x_end - bulk_x_start)
+    if avail_x < 2.0 or avail_y < 1.5:
+        return idx, 0
+
+    count = 0
+    # Build 2–4 cluster centres along X, then drop a small irregular
+    # rectangle of pallets around each centre. Clusters of varying sizes
+    # break the grid look; the empty between them reads as a forklift lane.
+    n_clusters = random.randint(2, 4)
+    cluster_xs = sorted(
+        random.uniform(bulk_x_start + 1.0, bulk_x_end - 1.0)
+        for _ in range(n_clusters)
+    )
+    for cx in cluster_xs:
+        # Cluster footprint: 2-3 wide × 1-2 deep.
+        cw = random.randint(2, 3)
+        cd = random.randint(1, 2) if avail_y >= 3.0 else 1
+        spacing_x = 1.6
+        spacing_y = 1.6
+        cluster_w = (cw - 1) * spacing_x
+        cluster_d = (cd - 1) * spacing_y
+        if cx - cluster_w / 2.0 < bulk_x_start or cx + cluster_w / 2.0 > bulk_x_end:
+            continue
+        cy = (bulk_y_bot + bulk_y_top) / 2.0 + random.uniform(-0.4, 0.4)
+        x0 = cx - cluster_w / 2.0
+        y0 = cy - cluster_d / 2.0
+        for r in range(cd):
+            for c in range(cw):
+                if random.random() < 0.18:
+                    continue
+                x = x0 + c * spacing_x + random.uniform(-0.15, 0.15)
+                y = y0 + r * spacing_y + random.uniform(-0.15, 0.15)
+                rot = random.uniform(-12, 12)
+                idx = _place("pallet", x, y, 0, rot, asset_library, stage, idx)
+                count += 1
+                # Bulk stock is taller / heavier — favour tall stacks and drums.
+                roll = random.random()
+                if roll < 0.55:
+                    idx, n = _stack_boxes(x, y, (1.0, 0.85, 0.55), (0.08, 0.08, 0.10),
+                                          asset_library, stage, idx)
+                    count += n
+                elif roll < 0.80 and "drum" in asset_library:
+                    idx = _place("drum", x, y, 0.15, random.uniform(0, 360),
+                                 asset_library, stage, idx)
+                    count += 1
+                    if random.random() < 0.5:
+                        idx = _place("drum", x + random.uniform(-0.05, 0.05),
+                                     y + random.uniform(-0.05, 0.05), 0.55,
+                                     random.uniform(0, 360), asset_library, stage, idx)
+                        count += 1
+
+    print(f"[INFO] Spawned bulk stock with {count} items across {n_clusters} clusters")
     return idx, count
 
 
@@ -2006,12 +2133,20 @@ def generate_layout(layout_name, layout_params, asset_library, stage):
         rack_positions, params, asset_library, stage, idx
     )
 
-    idx, num_pallets = _spawn_pallets(params, asset_library, stage, idx)
+    # When dock_area is enabled, _spawn_dock_area is the canonical dock-zone
+    # populator — gate _spawn_pallets off to avoid two competing pallet grids
+    # in the same Y band.
+    if params.get("dock_area", False):
+        num_pallets = 0
+    else:
+        idx, num_pallets = _spawn_pallets(params, asset_library, stage, idx)
 
     idx, num_clutter = _spawn_clutter(params, asset_library, stage, idx)
 
     if params.get("dock_area", False):
         idx, num_dock_items = _spawn_dock_area(params, asset_library, stage, idx)
+
+    idx, num_bulk = _spawn_bulk_stock(params, asset_library, stage, idx)
 
     idx, num_stripes = _spawn_floor_markings(rack_positions, params, stage, idx)
     idx, num_guards = _spawn_column_guards(rack_positions, stage, idx)
@@ -2030,6 +2165,7 @@ def generate_layout(layout_name, layout_params, asset_library, stage):
 
     print(f"[INFO] Spawned {num_racks} racks, {num_shelf_items} shelf items, "
           f"{num_pallets} pallets, {num_clutter} clutter props, {num_dock_items} dock items, "
+          f"{num_bulk} bulk-stock items, "
           f"{num_stripes} floor stripes, {num_guards} column guards, {num_charge} charge-bay items, "
           f"{num_rack_extras} rack-end details, {num_wall_extras} wall details, "
           f"{num_realism} realism extras, {num_wear} aisle wear, {num_mid_fork} mid-aisle forklift, "
