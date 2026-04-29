@@ -654,22 +654,18 @@ def _spawn_racks(params, asset_library, stage, idx):
         for r in range(rows):
             y = row_ys[r]
             # Each row gets the same number of breaks (so total_x matches),
-            # but their column positions are randomized per row.
+            # but their column positions are randomized per row so adjacent
+            # rows show different bay structures instead of a uniform 5+gap+2.
             row_breaks = _row_break_cols(num_cross)
             # Small per-row x-jitter so rack ends don't form a perfect
-            # vertical line across rows.
-            row_x_jitter = random.uniform(-0.4, 0.4) if rows > 1 else 0.0
+            # vertical line across rows. Kept small so floor-marking and
+            # rack-end-detail consumers still see a clean row signature.
+            row_x_jitter = random.uniform(-0.2, 0.2) if rows > 1 else 0.0
             x_offset = 0.0
             for c in range(cols):
                 if c in row_breaks:
                     x_offset += cross_w
-                # Skip a rack with low probability to leave a true gap that
-                # reads as a put-away pocket / staging void rather than a
-                # uniform wall.
-                drop_rack = random.random() < 0.06
                 x = x_start + c * rack_x_extent + x_offset + row_x_jitter
-                if drop_rack:
-                    continue
                 idx = _place("rack", x, y, 0, 90, asset_library, stage, idx, scale=(1.0, 1.0, rack_z_scale))
                 rack_positions.append((x, y, 90))
                 count += 1
@@ -988,10 +984,17 @@ def _spawn_dock_area(params, asset_library, stage, idx):
 
     spacing_x = 1.8
     spacing_y = 2.0
-    avail_x = max(0.0, dock_x_end - dock_x_start)
-    avail_y = max(0.0, dock_y_end - dock_y_start)
-    dock_pallet_cols = max(2, int(avail_x / spacing_x))
-    dock_pallet_rows = max(2, int(avail_y / spacing_y))
+    avail_x = dock_x_end - dock_x_start
+    avail_y = dock_y_end - dock_y_start
+    # Hard guard: if the dock zone is too small (small warehouse or
+    # mis-tuned dock_zone_frac) bail rather than spawn pallets in a
+    # negative-size band, which can produce degenerate USD bboxes.
+    if avail_x < 3.0 or avail_y < 2.0:
+        print(f"[INFO] Dock zone too small (avail_x={avail_x:.2f}, "
+              f"avail_y={avail_y:.2f}) — skipping dock fill")
+        return idx, count
+    dock_pallet_cols = max(2, min(8, int(avail_x / spacing_x)))
+    dock_pallet_rows = max(2, min(3, int(avail_y / spacing_y)))
 
     grid_x = (dock_pallet_cols - 1) * spacing_x
     grid_y = (dock_pallet_rows - 1) * spacing_y
@@ -1061,10 +1064,11 @@ def _spawn_bulk_stock(params, asset_library, stage, idx):
         return idx, 0
 
     count = 0
-    # Build 2–4 cluster centres along X, then drop a small irregular
+    # Build 2–3 cluster centres along X, then drop a small irregular
     # rectangle of pallets around each centre. Clusters of varying sizes
     # break the grid look; the empty between them reads as a forklift lane.
-    n_clusters = random.randint(2, 4)
+    # Capped at 3 clusters to keep total prim count bounded.
+    n_clusters = random.randint(2, 3)
     cluster_xs = sorted(
         random.uniform(bulk_x_start + 1.0, bulk_x_end - 1.0)
         for _ in range(n_clusters)
