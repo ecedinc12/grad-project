@@ -39,7 +39,7 @@ WALL_CLEARANCE = 0.9
 # computed for some reason — overridden at runtime by _measure_ceiling_z.
 DEFAULT_CEILING_Z = 8.4
 # Fraction of the measured ceiling height we want racks to reach.
-RACK_CEILING_FILL = 0.60
+RACK_CEILING_FILL = 0.68
 # Vertical pitch between adjacent rack shelves, scaled with rack height.
 SHELF_PITCH_FRACTION = 0.22
 
@@ -672,19 +672,31 @@ def _spawn_racks(params, asset_library, stage, idx):
 
         for r in range(rows):
             y = row_ys[r]
-            # Each row gets the same number of breaks (so total_x matches),
-            # but their column positions are randomized per row so adjacent
-            # rows show different bay structures instead of a uniform 5+gap+2.
+            # Per-row column count: some rows are shorter than others so the
+            # rack block stops looking like a rectangle. Drop 0–2 columns at
+            # random per row.
+            if cols >= 5:
+                row_cols = cols - random.choice([0, 0, 1, 1, 2])
+            else:
+                row_cols = cols
+
+            # Per-row break randomization: different bay split each row.
             row_breaks = _row_break_cols(num_cross)
-            # Small per-row x-jitter so rack ends don't form a perfect
-            # vertical line across rows. Kept small so floor-marking and
-            # rack-end-detail consumers still see a clean row signature.
-            row_x_jitter = random.uniform(-0.2, 0.2) if rows > 1 else 0.0
+
+            # Per-row x-stagger: each row's start position is offset so rack
+            # ends form a staggered, not-aligned silhouette. Larger than the
+            # tiny ±0.2 m jitter — this is what kills the rectangle look.
+            row_x_stagger = random.uniform(-rack_x_extent * 0.6,
+                                           rack_x_extent * 0.6) if rows > 1 else 0.0
+
             x_offset = 0.0
-            for c in range(cols):
+            for c in range(row_cols):
                 if c in row_breaks:
                     x_offset += cross_w
-                x = x_start + c * rack_x_extent + x_offset + row_x_jitter
+                x = x_start + c * rack_x_extent + x_offset + row_x_stagger
+                # Bound check: don't push racks past the warehouse walls.
+                if x < bmin[0] + WALL_CLEARANCE or x > bmax[0] - WALL_CLEARANCE:
+                    continue
                 idx = _place("rack", x, y, 0, 90, asset_library, stage, idx, scale=(1.0, 1.0, rack_z_scale))
                 rack_positions.append((x, y, 90))
                 count += 1
@@ -2163,6 +2175,157 @@ def _spawn_aisle_floor_wear(rack_positions, params, stage, idx):
     return idx, count
 
 
+def _spawn_main_aisle_treatment(rack_positions, params, asset_library, stage, idx):
+    """Identify the main drive aisle (widest gap between rows) and dress it
+    so it visibly reads as the primary thoroughfare:
+      • Heavy yellow centerline stripe down its length (in addition to the
+        two parallel edge stripes from _spawn_floor_markings).
+      • Hi-vis bollards or cones at both ends to channel traffic.
+      • A coloured aisle name sign hung overhead.
+      • Floor direction arrows at the entrance.
+    Without this, every aisle reads identically and there's no visible
+    'main area' for forklifts to traverse.
+    """
+    if not rack_positions:
+        return idx, 0
+    bmin = params["bounds_min"]
+    bmax = params["bounds_max"]
+
+    rows = {}
+    for (rx, ry, rrot) in rack_positions:
+        if rrot == 90:
+            key = round(ry * 2) / 2.0
+            rows.setdefault(key, []).append(rx)
+    sorted_ys = sorted(rows.keys())
+    if len(sorted_ys) < 2:
+        return idx, 0
+
+    aisles = []
+    for i in range(len(sorted_ys) - 1):
+        y_a, y_b = sorted_ys[i], sorted_ys[i + 1]
+        gap = abs(y_b - y_a) - RACK_DEPTH
+        y_mid = (y_a + y_b) / 2.0
+        xs = rows[y_a] + rows[y_b]
+        x_lo, x_hi = min(xs) - 0.9, max(xs) + 0.9
+        aisles.append({"y": y_mid, "x_lo": x_lo, "x_hi": x_hi, "gap": gap})
+
+    main = max(aisles, key=lambda a: a["gap"])
+    count = 0
+
+    # Heavy yellow centerline (in addition to the existing edge stripes).
+    yellow_hi = (0.97, 0.84, 0.10)
+    cx = (main["x_lo"] + main["x_hi"]) / 2.0
+    length = main["x_hi"] - main["x_lo"]
+    idx = _paint_floor_stripe(stage, idx, cx, main["y"],
+                              length, 0.20, yellow_hi, z=0.014)
+    count += 1
+
+    # Bollards / cones at each end of the main aisle to channel approach.
+    for end_x in (main["x_lo"] - 0.8, main["x_hi"] + 0.8):
+        if abs(end_x - bmin[0]) < 0.5 or abs(end_x - bmax[0]) < 0.5:
+            continue  # too close to wall
+        idx = _place_hi_vis_bollard(stage, idx, end_x, main["y"] - 0.6, height=0.95)
+        idx = _place_hi_vis_bollard(stage, idx, end_x, main["y"] + 0.6, height=0.95)
+        count += 2
+        if "cone" in asset_library:
+            idx = _place("cone", end_x + 0.4 * (1 if end_x > cx else -1),
+                         main["y"], 0, 0, asset_library, stage, idx)
+            count += 1
+
+    # Overhead aisle sign — orange band so it stands out from the picker
+    # signs already placed by realism extras.
+    sign_z = params.get("ceiling_z", DEFAULT_CEILING_Z) - 1.0
+    idx = _place_aisle_sign(stage, idx, cx, main["y"], (0.95, 0.45, 0.05), z=sign_z)
+    count += 2
+
+    # Floor direction arrows at the entrance from the dock side.
+    arrow_y = main["y"] - 1.0 if main["y"] > 0 else main["y"] + 1.0
+    idx = _place_floor_arrow(stage, idx, cx - 1.5, arrow_y, rot_z=0)
+    idx = _place_floor_arrow(stage, idx, cx + 1.5, arrow_y, rot_z=0)
+    count += 2
+
+    print(f"[INFO] Main drive aisle identified at y={main['y']:.2f} "
+          f"(gap={main['gap']:.2f}m), {count} treatment items spawned")
+    return idx, count
+
+
+def _spawn_marshalling_band(params, asset_library, stage, idx):
+    """A 'staging lane' band between the dock zone and the rack zone —
+    pallets organised in two parallel lanes pointing toward the dock,
+    with cones marking the lane boundary. Reads as outbound marshalling /
+    pre-shipping area where pickers drop completed orders for forklift
+    pickup."""
+    if "pallet" not in asset_library:
+        return idx, 0
+    bmin = params["bounds_min"]
+    bmax = params["bounds_max"]
+    dock_frac = params.get("dock_zone_frac", 0.25)
+    total_y_span = bmax[1] - bmin[1]
+    dock_y_top = bmin[1] + dock_frac * total_y_span
+    # Marshalling band sits in the 1m strip just behind the dock zone, in
+    # front of the racks.
+    band_y_lo = dock_y_top - 0.4
+    band_y_hi = dock_y_top + 1.4
+    if band_y_hi - band_y_lo < 1.0:
+        return idx, 0
+    span_x = bmax[0] - bmin[0]
+    band_x_start = bmin[0] + 0.18 * span_x
+    band_x_end = bmax[0] - 0.18 * span_x
+    avail_x = band_x_end - band_x_start
+    if avail_x < 4.0:
+        return idx, 0
+
+    # Two parallel lanes of palletised orders.
+    lane_ys = [band_y_lo + 0.4, band_y_hi - 0.4]
+    spacing = 1.7
+    n_pallets = max(2, min(6, int(avail_x / spacing)))
+    grid_x = (n_pallets - 1) * spacing
+    x0 = (band_x_start + band_x_end) / 2.0 - grid_x / 2.0
+    count = 0
+    box_props = [p for p in ("box", "box_small", "crate") if p in asset_library]
+
+    for ly in lane_ys:
+        for c in range(n_pallets):
+            if random.random() < 0.20:
+                continue  # gap = active picking lane
+            x = x0 + c * spacing + random.uniform(-0.18, 0.18)
+            y = ly + random.uniform(-0.10, 0.10)
+            idx = _place("pallet", x, y, 0, random.uniform(-10, 10),
+                         asset_library, stage, idx)
+            count += 1
+            # Outbound: usually has 1–2 boxes representing a completed order.
+            if box_props and random.random() < 0.85:
+                idx = _place(random.choice(box_props),
+                             x + random.uniform(-0.10, 0.10),
+                             y + random.uniform(-0.10, 0.10),
+                             0.14, random.uniform(0, 360),
+                             asset_library, stage, idx)
+                count += 1
+                if random.random() < 0.45:
+                    idx = _place(random.choice(box_props),
+                                 x + random.uniform(-0.12, 0.12),
+                                 y + random.uniform(-0.12, 0.12),
+                                 0.42, random.uniform(0, 360),
+                                 asset_library, stage, idx)
+                    count += 1
+
+    # Cones along the centerline between the two lanes — separates lane
+    # traffic, makes the band read as a worked-on staging area.
+    if "cone" in asset_library:
+        cone_y = (lane_ys[0] + lane_ys[1]) / 2.0
+        cone_spacing = max(2.0, avail_x / 5.0)
+        n_cones = max(2, int(avail_x / cone_spacing))
+        for c in range(n_cones):
+            cx = band_x_start + (c + 0.5) * (avail_x / n_cones)
+            idx = _place("cone", cx + random.uniform(-0.2, 0.2),
+                         cone_y + random.uniform(-0.1, 0.1),
+                         0, 0, asset_library, stage, idx)
+            count += 1
+
+    print(f"[INFO] Spawned marshalling band with {count} items")
+    return idx, count
+
+
 def _spawn_human_imperfection(rack_positions, params, asset_library, stage, idx):
     """Small 'someone was just here' details that sell realism harder than
     any layout-level structure. Examples:
@@ -2425,6 +2588,8 @@ def generate_layout(layout_name, layout_params, asset_library, stage):
     idx, num_wall_extras = _spawn_wall_details(params, asset_library, stage, idx)
     idx, num_realism = _spawn_realism_extras(params, rack_positions, stage, idx)
     idx, num_wear = _spawn_aisle_floor_wear(rack_positions, params, stage, idx)
+    idx, num_main_aisle = _spawn_main_aisle_treatment(rack_positions, params, asset_library, stage, idx)
+    idx, num_marshal = _spawn_marshalling_band(params, asset_library, stage, idx)
     idx, num_human = _spawn_human_imperfection(rack_positions, params, asset_library, stage, idx)
     idx, num_mid_fork = _spawn_mid_aisle_forklift(rack_positions, params, asset_library, stage, idx)
     num_doors = 0
@@ -2440,6 +2605,7 @@ def generate_layout(layout_name, layout_params, asset_library, stage):
           f"{num_stripes} floor stripes, {num_guards} column guards, {num_charge} charge-bay items, "
           f"{num_rack_extras} rack-end details, {num_wall_extras} wall details, "
           f"{num_realism} realism extras, {num_wear} aisle wear, "
+          f"{num_main_aisle} main-aisle treatment, {num_marshal} marshalling-band items, "
           f"{num_human} human-imperfection items, {num_mid_fork} mid-aisle forklift, "
           f"{num_doors} dock doors, {num_polish} polish-pass items, "
           f"{num_floor_fill} floor-fill staging items.")
