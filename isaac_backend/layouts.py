@@ -670,24 +670,22 @@ def _spawn_racks(params, asset_library, stage, idx):
             picks = sorted(interior[:num_breaks])
             return set(picks)
 
+        # Pick at most one row to drop a single column from — keeps the row
+        # block from reading as a perfect rectangle without making every row
+        # a different length (which is what produced the chaotic look).
+        short_row = random.randrange(rows) if (rows >= 2 and cols >= 5) else -1
+
         for r in range(rows):
             y = row_ys[r]
-            # Per-row column count: some rows are shorter than others so the
-            # rack block stops looking like a rectangle. Drop 0–2 columns at
-            # random per row.
-            if cols >= 5:
-                row_cols = cols - random.choice([0, 0, 1, 1, 2])
-            else:
-                row_cols = cols
+            row_cols = cols - 1 if r == short_row else cols
 
             # Per-row break randomization: different bay split each row.
             row_breaks = _row_break_cols(num_cross)
 
-            # Per-row x-stagger: each row's start position is offset so rack
-            # ends form a staggered, not-aligned silhouette. Larger than the
-            # tiny ±0.2 m jitter — this is what kills the rectangle look.
-            row_x_stagger = random.uniform(-rack_x_extent * 0.6,
-                                           rack_x_extent * 0.6) if rows > 1 else 0.0
+            # Per-row x-stagger: small ragged-edge offset so rows don't form
+            # a perfect grid, but small enough that rows still visually align
+            # and the wall clamp below doesn't silently drop edge racks.
+            row_x_stagger = random.uniform(-0.25, 0.25) if rows > 1 else 0.0
 
             x_offset = 0.0
             for c in range(row_cols):
@@ -1316,6 +1314,37 @@ def _spawn_floor_markings(rack_positions, params, stage, idx):
         idx = _paint_floor_stripe(stage, idx, (bmin[0] + bmax[0]) / 2.0, y_edge,
                                   (bmax[0] - bmin[0]) - 2 * margin, 0.10, border_color)
         count += 1
+
+    # Functional-zone boundary stripes — make dock / storage / bulk split
+    # readable at a glance. Bands derive from the same dock_zone_frac /
+    # storage_zone_frac params used by _spawn_racks, so they always line up
+    # with the actual rack-block edges.
+    dock_frac = params.get("dock_zone_frac", 0.25)
+    storage_frac = params.get("storage_zone_frac", 0.55)
+    bulk_frac = max(0.0, 1.0 - dock_frac - storage_frac)
+    span_y = bmax[1] - bmin[1]
+    span_x = bmax[0] - bmin[0]
+    cx = (bmin[0] + bmax[0]) / 2.0
+    stripe_len = span_x - 2 * margin
+    # Yellow/black contrast pair: a thicker outer band + a thinner inner
+    # band painted on top so the boundary reads as a hazard line.
+    boundary_outer = (0.95, 0.80, 0.10)
+    boundary_inner = (0.10, 0.10, 0.10)
+
+    def _paint_boundary(y):
+        nonlocal idx, count
+        idx = _paint_floor_stripe(stage, idx, cx, y, stripe_len, 0.30,
+                                  boundary_outer)
+        count += 1
+        idx = _paint_floor_stripe(stage, idx, cx, y, stripe_len, 0.10,
+                                  boundary_inner, z=0.014)
+        count += 1
+
+    if dock_frac > 0.05:
+        _paint_boundary(bmin[1] + dock_frac * span_y)
+    if bulk_frac > 0.05:
+        _paint_boundary(bmax[1] - bulk_frac * span_y)
+
     return idx, count
 
 
