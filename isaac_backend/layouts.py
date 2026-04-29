@@ -583,8 +583,8 @@ def _spawn_racks(params, asset_library, stage, idx):
     # Auto-fit rows: if aisle_widths is provided, use its average for estimation;
     # otherwise fall back to uniform aisle_width. This gives a better first
     # approximation when the user specifies a wide main aisle.
+    storage_height = storage_frac * total_y_span
     if rows == "auto" or rows is None:
-        storage_height = storage_frac * total_y_span
         available_y = storage_height - 2 * WALL_CLEARANCE
         if aisle_widths_list and len(aisle_widths_list) > 0:
             avg_aw = sum(aisle_widths_list) / len(aisle_widths_list)
@@ -594,6 +594,25 @@ def _spawn_racks(params, asset_library, stage, idx):
         rows = max(1, int((available_y + avg_aw) / avg_row_pitch))
     if max_rows > 0:
         rows = min(rows, max_rows)
+
+    # Hard clamp: averaging aisle widths under-counts when one aisle is wide
+    # (e.g. [2.5, 4.0, 2.5]). Compute the *exact* row-block height for the
+    # current `rows` count and shrink until it fits the storage zone — this
+    # is what keeps racks from bleeding into the dock and bulk zones.
+    def _row_block_height(n):
+        if n <= 1:
+            return RACK_DEPTH
+        gaps = []
+        for r in range(n - 1):
+            if aisle_widths_list:
+                gaps.append(aisle_widths_list[r % len(aisle_widths_list)])
+            else:
+                gaps.append(aw)
+        return n * RACK_DEPTH + sum(gaps)
+
+    storage_budget = storage_height - 2 * WALL_CLEARANCE
+    while rows > 1 and _row_block_height(rows) > storage_budget:
+        rows -= 1
 
     count = 0
     rack_positions = []
@@ -771,6 +790,29 @@ def _populate_rack_shelves(rack_positions, params, asset_library, stage, idx):
 
     has_pallet_asset = "pallet" in asset_library
 
+    # Personality distribution for racks. Real warehouses don't have uniform
+    # fill — some bays are empty (waiting put-away), some are overstocked
+    # (double-stacked cargo), most are normal. Pick a personality per rack
+    # and let it modulate fill probability, slot count, mix variety.
+    #   empty       → no cargo at all (just decks)
+    #   sparse      → one or two slots filled, lots of gaps
+    #   normal      → fill_prob baseline
+    #   overstocked → near-full + occasional double layer
+    PERSONALITIES = [
+        ("empty",       0.12),
+        ("sparse",      0.18),
+        ("normal",      0.52),
+        ("overstocked", 0.18),
+    ]
+    def _pick_personality():
+        roll = random.random()
+        cum = 0.0
+        for name, p in PERSONALITIES:
+            cum += p
+            if roll < cum:
+                return name
+        return "normal"
+
     for pos in rack_positions:
         # Tolerate older 2-tuple positions in case of partial upgrade.
         if len(pos) == 3:
@@ -779,18 +821,20 @@ def _populate_rack_shelves(rack_positions, params, asset_library, stage, idx):
             rx, ry = pos
             rrot = 90
 
+        # Per-rack shelf z-jitter: shelves don't all sit at exactly the same
+        # height across the warehouse. ±3cm reads as installation tolerance.
+        rack_z_jitter = random.uniform(-0.03, 0.03)
+        rack_shelf_zs = [sh + rack_z_jitter for sh in shelf_heights]
+
         # One shelf level per rack is randomly skipped to break up the uniform
-        # vertical pattern across the warehouse — empty/missing decks read as
-        # a stocking-in-progress shelving unit.
-        skip_level = random.randint(0, len(shelf_heights) - 1) if (
-            len(shelf_heights) > 1 and random.random() < 0.35
+        # vertical pattern across the warehouse.
+        skip_level = random.randint(0, len(rack_shelf_zs) - 1) if (
+            len(rack_shelf_zs) > 1 and random.random() < 0.35
         ) else -1
         rack_shelf_heights = [
-            sh for i, sh in enumerate(shelf_heights) if i != skip_level
+            sh for i, sh in enumerate(rack_shelf_zs) if i != skip_level
         ]
 
-        # Place a horizontal deck plank at each shelf level so the rack reads
-        # as a real loaded shelving unit instead of a bare frame.
         if has_shelf_asset:
             for shelf_z in rack_shelf_heights:
                 idx = _place("rack_shelf", rx, ry, shelf_z, rrot, asset_library, stage, idx)
@@ -799,33 +843,51 @@ def _populate_rack_shelves(rack_positions, params, asset_library, stage, idx):
         if fill_prob <= 0.0:
             continue
 
-        # Per-rack fill bias so some bays look overstocked, some near-empty —
-        # uniform fill across all racks reads as artificial.
-        rack_bias = random.gauss(0.0, 0.25)
-        rack_fill_prob = max(0.0, min(1.0, fill_prob + rack_bias))
-        # One dominant SKU per rack with occasional mixing — looks more like real stocking.
-        primary_prop = random.choice(SHELF_PROPS)
-        # Some racks store cargo on pallets (palletized SKUs), others bare-shelf.
+        personality = _pick_personality()
+        if personality == "empty":
+            # No cargo at all — bay reads as awaiting put-away.
+            continue
+        elif personality == "sparse":
+            rack_fill_prob = max(0.10, min(0.45, fill_prob * 0.4))
+            allow_double = False
+        elif personality == "overstocked":
+            rack_bias = random.gauss(0.10, 0.10)
+            rack_fill_prob = max(0.0, min(1.0, fill_prob + 0.20 + rack_bias))
+            allow_double = True
+        else:
+            rack_bias = random.gauss(0.0, 0.20)
+            rack_fill_prob = max(0.0, min(1.0, fill_prob + rack_bias))
+            allow_double = random.random() < 0.10
+
+        # SKU mixing: most racks have a dominant SKU, but ~25% are mixed
+        # (multiple suppliers / consolidation bay).
+        if random.random() < 0.25:
+            primary_prop = None  # signal to randomize per-slot
+        else:
+            primary_prop = random.choice(SHELF_PROPS)
         rack_uses_pallets = has_pallet_asset and random.random() < 0.55
 
         ang = math.radians(rrot)
         cos_a, sin_a = math.cos(ang), math.sin(ang)
         for shelf_z in rack_shelf_heights:
+            # Some shelves on a rack are completely empty even within a
+            # non-empty rack — partial put-away pattern.
+            if random.random() < 0.18:
+                continue
             for slot in range(SHELF_POSITIONS_PER_LEVEL):
                 if random.random() > rack_fill_prob:
                     continue
-                prop = primary_prop if random.random() < 0.7 else random.choice(SHELF_PROPS)
-                # Distribute slots evenly along the shelf length, with mild jitter.
+                if primary_prop is None:
+                    prop = random.choice(SHELF_PROPS)
+                else:
+                    prop = primary_prop if random.random() < 0.75 else random.choice(SHELF_PROPS)
                 slot_frac = (slot + 0.5) / SHELF_POSITIONS_PER_LEVEL  # 0..1
-                local_along = (slot_frac - 0.5) * 2.2 + random.uniform(-0.10, 0.10)
+                local_along = (slot_frac - 0.5) * 2.2 + random.uniform(-0.12, 0.12)
                 local_depth = random.uniform(-0.18, 0.18)
-                # Rotate local (along, depth) → world (x, y) using rack orientation.
                 world_dx = local_along * cos_a - local_depth * sin_a
                 world_dy = local_along * sin_a + local_depth * cos_a
                 x = rx + world_dx
                 y = ry + world_dy
-                # Palletized racks: thin pallet under the cargo, cargo lifted
-                # by pallet thickness. Reads much better than floating boxes.
                 z_base = shelf_z + random.uniform(-0.02, 0.02)
                 if rack_uses_pallets:
                     idx = _place("pallet", x, y, z_base, rrot, asset_library, stage, idx)
@@ -833,9 +895,22 @@ def _populate_rack_shelves(rack_positions, params, asset_library, stage, idx):
                     z_box = z_base + 0.14
                 else:
                     z_box = z_base
-                rot = rrot + random.uniform(-15, 15)
+                # Wider rotation envelope on overstocked / mixed bays —
+                # cargo gets nudged out of square when crammed in.
+                rot_envelope = 25 if (allow_double or primary_prop is None) else 15
+                rot = rrot + random.uniform(-rot_envelope, rot_envelope)
                 idx = _place(prop, x, y, z_box, rot, asset_library, stage, idx)
                 cargo_count += 1
+                # Overstocked bays get a 2nd cargo layer occasionally —
+                # double-stacked / piled higher than the shelf was designed for.
+                if allow_double and random.random() < 0.35:
+                    prop2 = random.choice(SHELF_PROPS)
+                    idx = _place(prop2, x + random.uniform(-0.08, 0.08),
+                                 y + random.uniform(-0.08, 0.08),
+                                 z_box + 0.32,
+                                 rot + random.uniform(-10, 10),
+                                 asset_library, stage, idx)
+                    cargo_count += 1
 
     print(f"[INFO] Populated rack shelves: {deck_count} decks, {cargo_count} cargo items "
           f"(fill={fill_level}, prob={fill_prob:.0%})")
@@ -1999,8 +2074,12 @@ def _spawn_dock_doors(params, stage, idx):
 
 
 def _spawn_aisle_floor_wear(rack_positions, params, stage, idx):
-    """Tire scuffs running down each aisle centerline, plus an oil stain in
-    one random aisle for variety."""
+    """Traffic-pattern wear:
+      • Main drive aisle (widest gap) gets full-length heavy double tracks.
+      • Picking aisles get lighter, intermittent scuffs.
+      • Rack-end turnarounds get extra dense scuffing where forklifts pivot.
+      • Oil drips concentrate in the main aisle, not random side aisles.
+    """
     if not rack_positions:
         return idx, 0
     bmin = params["bounds_min"]
@@ -2011,25 +2090,212 @@ def _spawn_aisle_floor_wear(rack_positions, params, stage, idx):
             key = round(ry * 2) / 2.0
             rows.setdefault(key, []).append(rx)
     sorted_ys = sorted(rows.keys())
+    aisle_info = []
+    for i in range(len(sorted_ys) - 1):
+        y_a, y_b = sorted_ys[i], sorted_ys[i + 1]
+        gap = abs(y_b - y_a) - RACK_DEPTH
+        y_mid = (y_a + y_b) / 2.0
+        xs = rows[y_a] + rows[y_b]
+        x_lo, x_hi = min(xs) - 0.8, max(xs) + 0.8
+        aisle_info.append({"y": y_mid, "x_lo": x_lo, "x_hi": x_hi, "gap": gap})
+
+    if not aisle_info:
+        return idx, 0
+
+    # Identify the main aisle: widest gap. Everything else is a picker.
+    main_aisle = max(aisle_info, key=lambda a: a["gap"])
+    count = 0
+
+    for a in aisle_info:
+        is_main = a is main_aisle
+        x_mid = (a["x_lo"] + a["x_hi"]) / 2.0
+        length = a["x_hi"] - a["x_lo"]
+        if is_main:
+            # Two full-length wheel tracks, slightly wider apart (heavier veh.).
+            for offset in (-0.55, 0.55):
+                idx = _place_tire_scuff(stage, idx, x_mid, a["y"] + offset,
+                                        length, rot_z=0)
+                count += 1
+            # A faint third "trail" off-center where forks scrape on turn-in.
+            if random.random() < 0.5:
+                idx = _place_tire_scuff(stage, idx, x_mid,
+                                        a["y"] + random.choice([-0.20, 0.20]),
+                                        length * 0.6, rot_z=0)
+                count += 1
+        else:
+            # Picker aisles: lighter, shorter intermittent scuffs (foot/walk
+            # behind not constant traffic). 60% chance the picker has any
+            # visible track at all.
+            if random.random() < 0.6:
+                seg_len = length * random.uniform(0.4, 0.7)
+                seg_x = x_mid + random.uniform(-length * 0.15, length * 0.15)
+                offset = random.choice([-0.40, 0.40])
+                idx = _place_tire_scuff(stage, idx, seg_x, a["y"] + offset,
+                                        seg_len, rot_z=0)
+                count += 1
+
+    # Rack-end turnaround scuffs: forklifts pivot at the end of every aisle,
+    # creating dense overlapping scuffing 1–2 rack-widths out from the row
+    # endpoints. Place a short transverse scuff at each row's leftmost and
+    # rightmost rack.
+    for ry_key, xs in rows.items():
+        for end_x in (min(xs) - 1.4, max(xs) + 1.4):
+            if random.random() < 0.55:
+                idx = _place_tire_scuff(stage, idx, end_x, ry_key,
+                                        1.4, rot_z=90 + random.uniform(-15, 15))
+                count += 1
+
+    # Oil stains: prefer the main aisle, with one plausible drip path.
+    n_stains = random.randint(2, 3)
+    for _ in range(n_stains):
+        if random.random() < 0.75:  # main aisle bias
+            ox = random.uniform(main_aisle["x_lo"] + 1.0, main_aisle["x_hi"] - 1.0)
+            oy = main_aisle["y"] + random.uniform(-0.25, 0.25)
+            radius = random.uniform(0.28, 0.45)
+        else:
+            a = random.choice(aisle_info)
+            ox = random.uniform(a["x_lo"] + 1.0, a["x_hi"] - 1.0)
+            oy = a["y"] + random.uniform(-0.20, 0.20)
+            radius = random.uniform(0.20, 0.30)
+        idx = _place_oil_stain(stage, idx, ox, oy, radius=radius)
+        count += 1
+
+    return idx, count
+
+
+def _spawn_human_imperfection(rack_positions, params, asset_library, stage, idx):
+    """Small 'someone was just here' details that sell realism harder than
+    any layout-level structure. Examples:
+      • Crooked pallets parked off-square against rack faces
+      • A box on the floor next to (not on) a pallet — dropped
+      • A tipped cone
+      • A small carton 'spilled' next to a rack upright
+      • Items leaning against rack legs
+    """
+    if not rack_positions:
+        return idx, 0
+    has_box = "box" in asset_library or "box_small" in asset_library
+    has_pallet = "pallet" in asset_library
+    has_cone = "cone" in asset_library
+    has_crate = "crate" in asset_library
+
+    bmin = params["bounds_min"]
+    bmax = params["bounds_max"]
+
+    # Group racks by row to find aisle midlines and rack endpoints.
+    rows = {}
+    for (rx, ry, rrot) in rack_positions:
+        if rrot == 90:
+            key = round(ry * 2) / 2.0
+            rows.setdefault(key, []).append(rx)
+    sorted_ys = sorted(rows.keys())
     aisle_mids = []
     for i in range(len(sorted_ys) - 1):
         y_mid = (sorted_ys[i] + sorted_ys[i + 1]) / 2.0
-        xs = rows[sorted_ys[i]] + rows[sorted_ys[i + 1]]
-        x_lo, x_hi = min(xs) - 0.8, max(xs) + 0.8
-        aisle_mids.append((y_mid, x_lo, x_hi))
+        aisle_mids.append((y_mid, sorted_ys[i], sorted_ys[i + 1]))
+
     count = 0
-    for (y_mid, x_lo, x_hi) in aisle_mids:
-        # Two parallel scuff tracks ~1.0m apart — left and right wheel tracks.
-        for offset in (-0.50, 0.50):
-            idx = _place_tire_scuff(stage, idx, (x_lo + x_hi) / 2.0,
-                                    y_mid + offset, x_hi - x_lo, rot_z=0)
+    box_props = [p for p in ("box", "box_small", "crate") if p in asset_library]
+    if not box_props:
+        box_props = ["box"]
+
+    # 1. Crooked pallets parked askew against a rack face. 2-4 across the
+    #    warehouse. Sit at the front edge of a rack with 8-25° rotation off
+    #    the rack's long axis.
+    if has_pallet and aisle_mids:
+        for _ in range(random.randint(2, 4)):
+            y_mid, ya, yb = random.choice(aisle_mids)
+            face_y_choice = random.choice([ya, yb])
+            xs = rows[face_y_choice]
+            x_pick = random.choice(xs) + random.uniform(-0.4, 0.4)
+            # Pallet sits in the aisle, just in front of the rack face.
+            offset_into_aisle = random.uniform(0.55, 0.95)
+            if face_y_choice == ya:
+                py = ya - offset_into_aisle  # ya is the back row → step toward y_mid
+                if ya > y_mid:
+                    py = ya - offset_into_aisle
+                else:
+                    py = ya + offset_into_aisle
+            else:
+                if yb > y_mid:
+                    py = yb - offset_into_aisle
+                else:
+                    py = yb + offset_into_aisle
+            crooked_rot = 90 + random.uniform(-25, 25)
+            idx = _place("pallet", x_pick, py, 0, crooked_rot, asset_library, stage, idx)
             count += 1
-    if aisle_mids and random.random() < 0.7:
-        y_mid, x_lo, x_hi = random.choice(aisle_mids)
-        ox = random.uniform(x_lo + 1.0, x_hi - 1.0)
-        idx = _place_oil_stain(stage, idx, ox, y_mid + random.uniform(-0.2, 0.2),
-                               radius=0.35)
+            # Half the time the crooked pallet has cargo, half the time it's
+            # bare (someone dropped it and walked away).
+            if random.random() < 0.5 and box_props:
+                idx = _place(random.choice(box_props),
+                             x_pick + random.uniform(-0.10, 0.10),
+                             py + random.uniform(-0.10, 0.10),
+                             0.14, crooked_rot + random.uniform(-15, 15),
+                             asset_library, stage, idx)
+                count += 1
+
+    # 2. Dropped box on the floor next to a pallet location — outside the
+    #    rack footprint. Place a small box at a random rack endpoint.
+    if box_props and rack_positions:
+        for _ in range(random.randint(1, 3)):
+            rx, ry, _ = random.choice(rack_positions)
+            # Off the end of the rack in +X or -X, on the floor.
+            dx = random.choice([-1.6, 1.6]) + random.uniform(-0.2, 0.2)
+            dy = random.uniform(-0.4, 0.4)
+            prop = random.choice(box_props)
+            # Tilt slightly — box landed askew.
+            rot = random.uniform(0, 360)
+            idx = _place(prop, rx + dx, ry + dy, 0, rot, asset_library, stage, idx)
+            count += 1
+
+    # 3. Tipped / fallen cone — 50% chance of one tipped cone somewhere.
+    if has_cone and random.random() < 0.6:
+        rx, ry, _ = random.choice(rack_positions)
+        cx = rx + random.uniform(-1.8, 1.8)
+        cy = ry + random.uniform(0.7, 1.4) * random.choice([-1, 1])
+        # Lay cone on its side: pitch ~85° from upright.
+        idx = _place("cone", cx, cy, 0.12, random.uniform(0, 360),
+                     asset_library, stage, idx, scale=(1.0, 1.0, 1.0))
         count += 1
+
+    # 4. Spilled carton next to a rack upright — small box partially out
+    #    onto the floor with a sibling box already fallen.
+    if box_props and rack_positions and random.random() < 0.7:
+        rx, ry, _ = random.choice(rack_positions)
+        upright_x = rx + random.choice([-1.4, 1.4])
+        upright_y = ry
+        # Spilled main box, leaning.
+        idx = _place(random.choice(box_props),
+                     upright_x + random.uniform(-0.15, 0.15),
+                     upright_y + random.uniform(0.3, 0.7) * random.choice([-1, 1]),
+                     0.0,
+                     random.uniform(0, 360), asset_library, stage, idx)
+        count += 1
+        # Companion small spillover.
+        if "box_small" in asset_library:
+            idx = _place("box_small",
+                         upright_x + random.uniform(-0.4, 0.4),
+                         upright_y + random.uniform(0.5, 0.9) * random.choice([-1, 1]),
+                         0.0,
+                         random.uniform(0, 360), asset_library, stage, idx)
+            count += 1
+
+    # 5. Items leaning against rack legs — a crate or barrel propped up at
+    #    a rack endpoint. 1-2 across the warehouse.
+    if rack_positions and (has_crate or "barrel" in asset_library):
+        for _ in range(random.randint(1, 2)):
+            rx, ry, _ = random.choice(rack_positions)
+            # Sit just outside the rack endpoint, against the upright.
+            side = random.choice([-1, 1])
+            lx = rx + side * 1.45 + random.uniform(-0.10, 0.10)
+            ly = ry + random.uniform(-0.25, 0.25)
+            prop = random.choice([p for p in ("crate", "barrel", "box_large")
+                                  if p in asset_library] or ["box"])
+            idx = _place(prop, lx, ly, 0, random.uniform(0, 360),
+                         asset_library, stage, idx)
+            count += 1
+
+    print(f"[INFO] Spawned {count} human-imperfection items")
     return idx, count
 
 
@@ -2159,6 +2425,7 @@ def generate_layout(layout_name, layout_params, asset_library, stage):
     idx, num_wall_extras = _spawn_wall_details(params, asset_library, stage, idx)
     idx, num_realism = _spawn_realism_extras(params, rack_positions, stage, idx)
     idx, num_wear = _spawn_aisle_floor_wear(rack_positions, params, stage, idx)
+    idx, num_human = _spawn_human_imperfection(rack_positions, params, asset_library, stage, idx)
     idx, num_mid_fork = _spawn_mid_aisle_forklift(rack_positions, params, asset_library, stage, idx)
     num_doors = 0
     if params.get("dock_area", False):
@@ -2172,7 +2439,8 @@ def generate_layout(layout_name, layout_params, asset_library, stage):
           f"{num_bulk} bulk-stock items, "
           f"{num_stripes} floor stripes, {num_guards} column guards, {num_charge} charge-bay items, "
           f"{num_rack_extras} rack-end details, {num_wall_extras} wall details, "
-          f"{num_realism} realism extras, {num_wear} aisle wear, {num_mid_fork} mid-aisle forklift, "
+          f"{num_realism} realism extras, {num_wear} aisle wear, "
+          f"{num_human} human-imperfection items, {num_mid_fork} mid-aisle forklift, "
           f"{num_doors} dock doors, {num_polish} polish-pass items, "
           f"{num_floor_fill} floor-fill staging items.")
 
