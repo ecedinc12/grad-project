@@ -1016,6 +1016,24 @@ def _spawn_clutter(params, asset_library, stage, idx):
     bmax = params["bounds_max"]
     count = 0
 
+    # Zone-ownership guard: when dock_area=True, _spawn_dock_area is the
+    # canonical populator for the dock Y-band. Skip any clutter zone that
+    # sits mostly inside that band so the LLM-generated "dock_staging" zone
+    # doesn't overlay the dock layout with another 30 props.
+    has_dock = params.get("dock_area", False)
+    dock_y_top = None
+    if has_dock:
+        dock_frac = params.get("dock_zone_frac", 0.25)
+        dock_y_top = bmin[1] + dock_frac * (bmax[1] - bmin[1])
+
+    def _zone_in_dock_band(zmin, zmax):
+        if dock_y_top is None:
+            return False
+        zone_h = max(1e-3, zmax[1] - zmin[1])
+        # Fraction of the zone's Y span that falls below dock_y_top.
+        overlap = max(0.0, min(zmax[1], dock_y_top) - zmin[1])
+        return (overlap / zone_h) >= 0.6
+
     if zones:
         for zone in zones:
             n = _count_clutter_for_density(zone.get("density", density))
@@ -1027,6 +1045,10 @@ def _spawn_clutter(params, asset_library, stage, idx):
                     available_types = ["box"]
             zbmin = tuple(zone.get("bounds_min", bmin))
             zbmax = tuple(zone.get("bounds_max", bmax))
+            if _zone_in_dock_band(zbmin, zbmax):
+                print(f"[INFO] Skipping clutter_zone '{zone.get('area', '?')}' "
+                      f"— overlaps dock band (owned by _spawn_dock_area)")
+                continue
             for _ in range(n):
                 prop = random.choice(available_types)
                 x = random.uniform(zbmin[0], zbmax[0])
@@ -1051,75 +1073,132 @@ def _spawn_clutter(params, asset_library, stage, idx):
 
 
 def _spawn_dock_area(params, asset_library, stage, idx):
+    """Populate the reserved dock zone with content that reads as a dock —
+    not as another rack row.
+
+    Dock zones in real warehouses are dominated by *open floor* (forklift
+    turning radius) with discrete staging clusters in front of each dock
+    door. The polish pass already paints hazard hatches, dock-leveler
+    plates, and bollards at the door line; this function adds:
+      - One small staging cluster (2–4 pallets, irregular, not gridded)
+        per door, set back from the door itself so bollards/hatches stay
+        visible
+      - An empty-pallet stack near a side wall (returns)
+      - 1–2 hand-truck-ish stubs (drums / cones) in the open apron
+      - A few cones along the apron edge to mark the lane
+
+    The middle of the zone is left intentionally open. That open apron is
+    what visually distinguishes the dock from the dense racked storage
+    zone behind it.
+    """
     bmin = params["bounds_min"]
     bmax = params["bounds_max"]
     count = 0
 
-    # Fill the entire reserved dock zone instead of a hardcoded corner block —
-    # otherwise the zone reads as empty floor with a small cluster off to the
-    # side. Use ~80% of the dock zone width and keep a 1.5m setback from the
-    # front wall (where dock doors live) and 1m from the rack-zone boundary.
     dock_frac = params.get("dock_zone_frac", 0.25)
     total_y_span = bmax[1] - bmin[1]
     dock_y_top = bmin[1] + dock_frac * total_y_span
 
-    dock_y_start = bmin[1] + 1.5
-    dock_y_end = dock_y_top - 1.0
+    # Front-wall setback covers door / leveler / hatch / bollard line.
+    dock_y_door = bmin[1] + 1.6
+    # Staging clusters sit between the door line and the storage boundary,
+    # but only in the back-half of the dock zone — front-half stays open
+    # for trucks backing in / forklift apron.
+    dock_y_apron = (dock_y_door + dock_y_top) / 2.0
+    dock_y_stage_lo = dock_y_apron + 0.2
+    dock_y_stage_hi = dock_y_top - 1.0
+
     span_x = bmax[0] - bmin[0]
     dock_x_start = bmin[0] + 0.10 * span_x
     dock_x_end = bmax[0] - 0.10 * span_x
-
-    spacing_x = 1.8
-    spacing_y = 2.0
     avail_x = dock_x_end - dock_x_start
-    avail_y = dock_y_end - dock_y_start
-    # Hard guard: if the dock zone is too small (small warehouse or
-    # mis-tuned dock_zone_frac) bail rather than spawn pallets in a
-    # negative-size band, which can produce degenerate USD bboxes.
-    if avail_x < 3.0 or avail_y < 2.0:
+    avail_y = dock_y_stage_hi - dock_y_stage_lo
+    if avail_x < 3.0 or avail_y < 1.0:
         print(f"[INFO] Dock zone too small (avail_x={avail_x:.2f}, "
               f"avail_y={avail_y:.2f}) — skipping dock fill")
         return idx, count
-    dock_pallet_cols = max(2, min(8, int(avail_x / spacing_x)))
-    dock_pallet_rows = max(2, min(3, int(avail_y / spacing_y)))
 
-    grid_x = (dock_pallet_cols - 1) * spacing_x
-    grid_y = (dock_pallet_rows - 1) * spacing_y
-    x_base = (dock_x_start + dock_x_end) / 2.0 - grid_x / 2.0
-    y_base = (dock_y_start + dock_y_end) / 2.0 - grid_y / 2.0
+    # The polish pass places dock doors at fractions 0.25 / 0.5 / 0.75 of the
+    # bounds X range. Mirror that here so each cluster lines up with a door.
+    door_fracs = (0.25, 0.5, 0.75)
+    door_xs = [bmin[0] + f * span_x for f in door_fracs]
 
-    # Drop ~25% of slots so the dock reads as in-use staging rather than a
-    # neat grid. Cluster: each column has a "lane" likelihood — entire columns
-    # may be empty (forklift access lane).
-    skip_cols = set()
-    if dock_pallet_cols >= 4:
-        # Reserve 1–2 random columns as forklift access lanes.
-        n_lanes = random.randint(1, 2)
-        skip_cols = set(random.sample(range(1, dock_pallet_cols - 1), n_lanes))
+    # Drop a 0–1 cluster gap at random so one door reads as "currently in use"
+    # (truck backed in, no staged pallets in front of it).
+    active_door = random.choice(door_fracs)
 
-    for r in range(dock_pallet_rows):
-        for c in range(dock_pallet_cols):
-            if c in skip_cols:
-                continue
-            if random.random() < 0.20:
-                continue
-            x = x_base + c * spacing_x + random.uniform(-0.2, 0.2)
-            y = y_base + r * spacing_y + random.uniform(-0.2, 0.2)
-            idx = _place("pallet", x, y, 0, random.uniform(-15, 15), asset_library, stage, idx)
+    has_pallet = "pallet" in asset_library
+    box_props = [p for p in ("box", "box_small", "crate") if p in asset_library]
+
+    for door_x, frac in zip(door_xs, door_fracs):
+        if frac == active_door:
+            continue  # leave this door's apron open
+        if not has_pallet:
+            continue
+        # 2–4 pallets in an irregular cluster behind the door, NOT a grid.
+        cluster_n = random.randint(2, 4)
+        cluster_cy = random.uniform(dock_y_stage_lo, dock_y_stage_hi - 0.1)
+        for _ in range(cluster_n):
+            px = door_x + random.uniform(-1.0, 1.0)
+            py = cluster_cy + random.uniform(-0.6, 0.6)
+            # Clamp to dock zone X bounds.
+            px = max(dock_x_start, min(dock_x_end, px))
+            py = max(dock_y_stage_lo, min(dock_y_stage_hi, py))
+            idx = _place("pallet", px, py, 0, random.uniform(-20, 20),
+                         asset_library, stage, idx)
             count += 1
-            idx, n = _stack_boxes(x, y, (1.0, 0.70, 0.40), (0.10, 0.12, 0.12), asset_library, stage, idx)
-            count += n
+            # Roughly half the staged pallets carry an outbound order
+            # (1–2 boxes, no tall stacks — that's the storage-zone look).
+            roll = random.random()
+            if roll < 0.55 and box_props:
+                idx = _place(random.choice(box_props),
+                             px + random.uniform(-0.10, 0.10),
+                             py + random.uniform(-0.10, 0.10),
+                             0.14, random.uniform(0, 360),
+                             asset_library, stage, idx)
+                count += 1
+                if random.random() < 0.35:
+                    idx = _place(random.choice(box_props),
+                                 px + random.uniform(-0.12, 0.12),
+                                 py + random.uniform(-0.12, 0.12),
+                                 0.42, random.uniform(0, 360),
+                                 asset_library, stage, idx)
+                    count += 1
 
-    for _ in range(random.randint(3, 6)):
-        x = random.uniform(dock_x_start - 1.0, dock_x_end + 1.0)
-        y = random.uniform(dock_y_start - 1.0, dock_y_end + 1.0)
-        prop = random.choice(["barrel", "drum", "box_large", "cone"])
-        if prop not in asset_library:
-            prop = "box"
-        idx = _place(prop, x, y, 0, random.uniform(0, 360), asset_library, stage, idx)
-        count += 1
+    # Empty-pallet stack tucked against one wall (returns / dunnage).
+    if has_pallet:
+        wall_side = random.choice((-1, 1))
+        ep_x = (bmin[0] + 1.4) if wall_side < 0 else (bmax[0] - 1.4)
+        ep_y = random.uniform(dock_y_stage_lo, dock_y_stage_hi)
+        idx, n = _place_empty_pallet_stack(stage, idx, ep_x, ep_y,
+                                           asset_library,
+                                           count=random.randint(4, 7),
+                                           rot_z=random.uniform(-8, 8))
+        count += n
 
-    print(f"[INFO] Spawned dock area with {count} items")
+    # Apron edge cones — a sparse line marking where the staging band ends
+    # and the truck apron begins. Reads as "do not stage past this line".
+    if "cone" in asset_library:
+        n_cones = max(3, int(span_x / 3.5))
+        for c in range(n_cones):
+            cx = dock_x_start + (c + 0.5) * (avail_x / n_cones)
+            cy = dock_y_apron + random.uniform(-0.15, 0.15)
+            idx = _place("cone", cx + random.uniform(-0.25, 0.25), cy,
+                         0, random.uniform(0, 360), asset_library, stage, idx)
+            count += 1
+
+    # 2–3 stray drums / barrels in the apron — not a cluster, just litter.
+    drum_props = [p for p in ("barrel", "drum") if p in asset_library]
+    if drum_props:
+        for _ in range(random.randint(2, 3)):
+            sx = random.uniform(dock_x_start + 0.5, dock_x_end - 0.5)
+            sy = random.uniform(dock_y_door + 0.4, dock_y_apron - 0.3)
+            idx = _place(random.choice(drum_props), sx, sy, 0.15,
+                         random.uniform(0, 360), asset_library, stage, idx)
+            count += 1
+
+    print(f"[INFO] Spawned dock area with {count} items "
+          f"(active_door_frac={active_door})")
     return idx, count
 
 
@@ -1748,10 +1827,13 @@ def _spawn_floor_filling(params, rack_positions, asset_library, stage, idx):
     drum clusters, and crate piles so the warehouse doesn't read as a clump
     of racks in the middle of an empty box.
 
-    Computes the rack-zone bounding rectangle from rack_positions, then drops
-    activity zones in the strips between that rectangle and the warehouse
-    walls — front (toward -Y), left (toward -X), right (toward +X). Avoids
-    the dock-area corner if dock_area=True.
+    Zone ownership: each functional Y-band has a single canonical populator.
+    `_spawn_dock_area` owns the dock zone, `_spawn_bulk_stock` owns the bulk
+    zone, and the preset's `clutter_zones` (left_wall_stash / right_wall_stash)
+    own the side strips. This function only fills the *gap* between the rack
+    block and the storage-zone boundaries, plus the side strips when no
+    preset clutter zone covers them — so it can never overlay the dock or
+    bulk owners with a competing pallet grid.
     """
     bmin = params["bounds_min"]
     bmax = params["bounds_max"]
@@ -1768,8 +1850,26 @@ def _spawn_floor_filling(params, rack_positions, asset_library, stage, idx):
     rzone_ymax = max(rys) + RACK_DEPTH / 2.0 + 0.5
 
     has_dock = params.get("dock_area", False)
-    dock_xmax = bmin[0] + 9.0
-    dock_ymax = bmin[1] + 5.0
+    dock_frac = params.get("dock_zone_frac", 0.25)
+    storage_frac = params.get("storage_zone_frac", 0.55)
+    bulk_frac = max(0.0, 1.0 - dock_frac - storage_frac)
+    total_y_span = bmax[1] - bmin[1]
+    dock_y_top = bmin[1] + dock_frac * total_y_span
+    bulk_y_bottom = bmax[1] - bulk_frac * total_y_span
+
+    # Side strips have a preset owner if any clutter_zone overlaps them.
+    side_clutter_zones = params.get("clutter_zones", []) or []
+    def _strip_has_preset_owner(x_lo, x_hi, y_lo, y_hi):
+        for z in side_clutter_zones:
+            zmin = z.get("bounds_min")
+            zmax = z.get("bounds_max")
+            if zmin is None or zmax is None:
+                continue
+            # Axis-aligned overlap test.
+            if zmax[0] >= x_lo and zmin[0] <= x_hi and \
+               zmax[1] >= y_lo and zmin[1] <= y_hi:
+                return True
+        return False
 
     count = 0
 
@@ -1807,9 +1907,13 @@ def _spawn_floor_filling(params, rack_positions, asset_library, stage, idx):
                      asset_library, stage, idx)
         count += 1
 
-    # ---------- 1) FRONT STAGING (between racks and -Y wall) ----------
+    # ---------- 1) FRONT STAGING (between racks and dock zone) ----------
+    # Only fills the *gap* between the rack block and dock_y_top — never the
+    # dock zone itself (owned by _spawn_dock_area when dock_area=True). When
+    # no dock zone is configured, falls back to filling all the way to the
+    # front wall so non-dock presets still get foreground content.
     front_y_max = rzone_ymin - 0.6
-    front_y_min = bmin[1] + 1.5
+    front_y_min = (dock_y_top + 0.4) if has_dock else (bmin[1] + 1.5)
     if front_y_max > front_y_min + 1.0:
         # Pallet staging grid — two/three rows of loaded pallets.
         n_rows = 2 if (front_y_max - front_y_min) < 4.5 else 3
@@ -1821,25 +1925,23 @@ def _spawn_floor_filling(params, rack_positions, asset_library, stage, idx):
             for c in range(n_cols):
                 px = x0 + c * col_pitch + random.uniform(-0.18, 0.18)
                 py = front_y_min + r * row_pitch + random.uniform(-0.15, 0.15)
-                if has_dock and px < dock_xmax and py < dock_ymax:
-                    continue  # leave room for the dock zone
                 if random.random() < 0.85:
                     _drop_loaded_pallet(px, py)
 
-        # A drum cluster at the front-right (when no dock there).
-        cluster_x = bmax[0] - 2.5
-        cluster_y = (front_y_min + front_y_max) / 2.0
-        for _ in range(random.randint(6, 10)):
-            dx = cluster_x + random.uniform(-1.4, 1.4)
-            dy = cluster_y + random.uniform(-1.4, 1.4)
-            if has_dock and dx < dock_xmax and dy < dock_ymax:
-                continue
-            _drop_drum(dx, dy)
+        # A drum cluster at the front-right (only when no dock owns the band).
+        if not has_dock:
+            cluster_x = bmax[0] - 2.5
+            cluster_y = (front_y_min + front_y_max) / 2.0
+            for _ in range(random.randint(6, 10)):
+                dx = cluster_x + random.uniform(-1.4, 1.4)
+                dy = cluster_y + random.uniform(-1.4, 1.4)
+                _drop_drum(dx, dy)
 
     # ---------- 2) LEFT-WALL STASH (between racks and -X wall) ----------
     left_x_max = rzone_xmin - 0.6
     left_x_min = bmin[0] + 1.0
-    if left_x_max > left_x_min + 0.8:
+    if left_x_max > left_x_min + 0.8 and \
+       not _strip_has_preset_owner(left_x_min, left_x_max, rzone_ymin, rzone_ymax):
         # Skip the band near the charging station (around y = bmin[1] + 0.75 * span).
         charge_y = bmin[1] + (bmax[1] - bmin[1]) * 0.75
         for _ in range(random.randint(8, 14)):
@@ -1861,7 +1963,8 @@ def _spawn_floor_filling(params, rack_positions, asset_library, stage, idx):
     # ---------- 3) RIGHT-WALL STASH (between racks and +X wall) ----------
     right_x_min = rzone_xmax + 0.6
     right_x_max = bmax[0] - 1.0
-    if right_x_max > right_x_min + 0.8:
+    if right_x_max > right_x_min + 0.8 and \
+       not _strip_has_preset_owner(right_x_min, right_x_max, rzone_ymin, rzone_ymax):
         for _ in range(random.randint(8, 14)):
             sx = random.uniform(right_x_min, right_x_max)
             sy = random.uniform(rzone_ymin, rzone_ymax)
@@ -1876,9 +1979,12 @@ def _spawn_floor_filling(params, rack_positions, asset_library, stage, idx):
                              asset_library, stage, idx)
                 count += 1
 
-    # ---------- 4) BACK STRIP (if any room behind racks) ----------
+    # ---------- 4) BACK STRIP (between racks and bulk zone) ----------
+    # Only fills the gap between the rack block and bulk_y_bottom. The bulk
+    # zone proper is owned by _spawn_bulk_stock (irregular clusters with
+    # forklift lanes), so we never overlay a random pallet field on top of it.
     back_y_min = rzone_ymax + 0.6
-    back_y_max = bmax[1] - 0.8
+    back_y_max = (bulk_y_bottom - 0.4) if bulk_frac >= 0.05 else (bmax[1] - 0.8)
     if back_y_max > back_y_min + 0.8:
         n = random.randint(5, 10)
         for _ in range(n):
@@ -2262,9 +2368,10 @@ def _spawn_marshalling_band(params, asset_library, stage, idx):
     dock_frac = params.get("dock_zone_frac", 0.25)
     total_y_span = bmax[1] - bmin[1]
     dock_y_top = bmin[1] + dock_frac * total_y_span
-    # Marshalling band sits in the 1m strip just behind the dock zone, in
-    # front of the racks.
-    band_y_lo = dock_y_top - 0.4
+    # Marshalling band sits entirely on the storage side of the dock/storage
+    # boundary so it doesn't overlap the dock-area cluster pattern. ~1m thick
+    # band starting just inside the storage zone.
+    band_y_lo = dock_y_top + 0.2
     band_y_hi = dock_y_top + 1.4
     if band_y_hi - band_y_lo < 1.0:
         return idx, 0
