@@ -246,6 +246,7 @@ def _resolve_params(layout_name, layout_params, layouts):
         "bounds_max": tuple(preset.get("bounds_max", [12.0, 12.0])),
         "clutter_density": preset.get("clutter_density", "high"),
         "clutter_zones": [dict(z) for z in preset.get("clutter_zones", [])],
+        "rack_zones": [dict(z) for z in preset.get("rack_zones", [])],
         "pallet_rows": preset.get("pallet_rows", 3),
         "pallet_cols": preset.get("pallet_cols", 2),
         "rack_fill": preset.get("rack_fill", "medium"),
@@ -262,6 +263,7 @@ def _resolve_params(layout_name, layout_params, layouts):
         for key in (
             "rack_pattern", "rack_rows", "rack_cols", "target_rack_height", "aisle_width",
             "bounds_min", "bounds_max", "clutter_density", "clutter_zones",
+            "rack_zones",
             "pallet_rows", "pallet_cols", "rack_fill", "dock_area",
             "max_rows", "max_cols", "cross_aisle_every", "cross_aisle_width",
             "aisle_widths", "dock_zone_frac", "storage_zone_frac",
@@ -270,7 +272,7 @@ def _resolve_params(layout_name, layout_params, layouts):
                 val = layout_params[key]
                 if key in ("bounds_min", "bounds_max"):
                     params[key] = tuple(val)
-                elif key == "clutter_zones":
+                elif key in ("clutter_zones", "rack_zones"):
                     params[key] = [dict(z) for z in val]
                 elif key == "aisle_widths" and val is not None:
                     params[key] = list(val)
@@ -523,7 +525,177 @@ def _place(asset_id, x, y, z, rot_z, asset_library, stage, idx, scale=None):
     return idx + 1
 
 
+def _place_rows_in_band(zone, x_lo, x_hi, y_lo, y_hi, ceiling_z,
+                         asset_library, stage, idx):
+    """Place a block of rack rows inside one (x_lo..x_hi, y_lo..y_hi) sub-band.
+
+    Each sub-zone overrides global rack params: pattern (EW or NS rows),
+    aisle_width, target_rack_height, rack count. Returns the resolved height
+    so adjacent sub-zones can read tall vs short, and so the per-rack shelf
+    populator can scale shelves to the *zone's* height instead of a single
+    warehouse-wide value.
+    """
+    pattern = zone.get("pattern", "rows")
+    aw = float(zone.get("aisle_width", 2.5))
+    rows = zone.get("rows", "auto")
+    cols = zone.get("cols", "auto")
+    target_h = zone.get("target_rack_height", "auto")
+    if target_h in (None, "auto"):
+        target_h = ceiling_z * RACK_CEILING_FILL
+    target_h = float(target_h)
+    rack_z_scale = target_h / 2.4
+
+    perpendicular = pattern in ("rows_perp", "rows_NS", "rows_perpendicular")
+
+    if perpendicular:
+        # Rack long-axis runs along Y (rrot=0). Rows iterate along X, each
+        # row's racks sit along Y at RACK_X_EXTENT pitch.
+        rrot = 0
+        primary_lo = x_lo + WALL_CLEARANCE
+        primary_hi = x_hi - WALL_CLEARANCE
+        secondary_lo = y_lo + WALL_CLEARANCE
+        secondary_hi = y_hi - WALL_CLEARANCE
+    else:
+        rrot = 90
+        primary_lo = y_lo + WALL_CLEARANCE
+        primary_hi = y_hi - WALL_CLEARANCE
+        secondary_lo = x_lo + WALL_CLEARANCE
+        secondary_hi = x_hi - WALL_CLEARANCE
+
+    primary_avail = primary_hi - primary_lo
+    secondary_avail = secondary_hi - secondary_lo
+    if primary_avail < RACK_DEPTH or secondary_avail < RACK_X_EXTENT * 0.5:
+        return idx, [], target_h, 0
+
+    row_pitch = RACK_DEPTH + aw
+    if rows in (None, "auto"):
+        rows = max(1, int((primary_avail + aw) / row_pitch))
+    rows = int(rows)
+    while rows > 1 and (rows * RACK_DEPTH + (rows - 1) * aw) > primary_avail:
+        rows -= 1
+
+    if cols in (None, "auto"):
+        cols = max(1, int(secondary_avail / RACK_X_EXTENT))
+    cols = int(cols)
+    if cols < 1 or rows < 1:
+        return idx, [], target_h, 0
+
+    block_primary = rows * RACK_DEPTH + max(0, rows - 1) * aw
+    primary_center = (primary_lo + primary_hi) / 2.0
+    primary_start = primary_center - block_primary / 2.0 + RACK_DEPTH / 2.0
+
+    block_secondary = max(0, cols - 1) * RACK_X_EXTENT
+    secondary_center = (secondary_lo + secondary_hi) / 2.0
+    secondary_start = secondary_center - block_secondary / 2.0
+
+    positions = []
+    count = 0
+    for r in range(rows):
+        primary = primary_start + r * row_pitch
+        for c in range(cols):
+            secondary = secondary_start + c * RACK_X_EXTENT
+            if perpendicular:
+                rx, ry = primary, secondary
+            else:
+                rx, ry = secondary, primary
+            if rx < x_lo + WALL_CLEARANCE or rx > x_hi - WALL_CLEARANCE:
+                continue
+            if ry < y_lo + WALL_CLEARANCE or ry > y_hi - WALL_CLEARANCE:
+                continue
+            idx = _place("rack", rx, ry, 0, rrot, asset_library, stage, idx,
+                         scale=(1.0, 1.0, rack_z_scale))
+            positions.append((rx, ry, rrot))
+            count += 1
+    return idx, positions, target_h, count
+
+
+def _spawn_racks_from_zones(params, asset_library, stage, idx):
+    """Multi-zone rack dispatcher. Each zone in `rack_zones` carves a
+    sub-rectangle out of the storage band (or the full layout if the zone
+    asks to ignore the band) and places racks with its own pattern, aisle
+    width, height, and orientation. Returns total racks plus a sidecar dict
+    `_rack_height_at` so `_populate_rack_shelves` can scale shelves per-zone.
+    """
+    bmin = params["bounds_min"]
+    bmax = params["bounds_max"]
+    ceiling_z = params.get("ceiling_z", DEFAULT_CEILING_Z)
+    rack_zones = params.get("rack_zones", []) or []
+
+    dock_frac = params.get("dock_zone_frac", 0.25)
+    storage_frac = params.get("storage_zone_frac", 0.55)
+    span_y = bmax[1] - bmin[1]
+    span_x = bmax[0] - bmin[0]
+    storage_y_lo = bmin[1] + dock_frac * span_y
+    storage_y_hi = storage_y_lo + storage_frac * span_y
+
+    all_positions = []
+    height_lookup = {}
+    total = 0
+    max_height = 0.0
+
+    for i, zone in enumerate(rack_zones):
+        full_bounds = bool(zone.get("full_bounds", False))
+        if full_bounds:
+            base_x_lo, base_x_hi = bmin[0], bmax[0]
+            base_y_lo, base_y_hi = bmin[1], bmax[1]
+        else:
+            base_x_lo, base_x_hi = bmin[0], bmax[0]
+            base_y_lo, base_y_hi = storage_y_lo, storage_y_hi
+
+        y_frac = zone.get("y_frac", [0.0, 1.0])
+        x_frac = zone.get("x_frac", [0.0, 1.0])
+        zy_lo = base_y_lo + y_frac[0] * (base_y_hi - base_y_lo)
+        zy_hi = base_y_lo + y_frac[1] * (base_y_hi - base_y_lo)
+        zx_lo = base_x_lo + x_frac[0] * (base_x_hi - base_x_lo)
+        zx_hi = base_x_lo + x_frac[1] * (base_x_hi - base_x_lo)
+
+        # Inset interior edges so adjacent zones don't merge into one block.
+        gap = 0.4
+        if y_frac[0] > 0.001:
+            zy_lo += gap
+        if y_frac[1] < 0.999:
+            zy_hi -= gap
+        if x_frac[0] > 0.001:
+            zx_lo += gap
+        if x_frac[1] < 0.999:
+            zx_hi -= gap
+
+        if (zy_hi - zy_lo) < 1.5 or (zx_hi - zx_lo) < 1.5:
+            print(f"[WARN] rack_zone {i} '{zone.get('name','?')}' "
+                  f"too small after inset; skipping")
+            continue
+
+        idx, zpos, resolved_h, n = _place_rows_in_band(
+            zone, zx_lo, zx_hi, zy_lo, zy_hi, ceiling_z,
+            asset_library, stage, idx
+        )
+        zone_fill = zone.get("rack_fill")
+        for p in zpos:
+            all_positions.append(p)
+            key = (round(p[0], 2), round(p[1], 2))
+            height_lookup[key] = (resolved_h, zone_fill)
+        total += n
+        if resolved_h > max_height:
+            max_height = resolved_h
+
+        print(f"[INFO] rack_zone {i} '{zone.get('name','?')}': "
+              f"pattern={zone.get('pattern','rows')} "
+              f"rows={zone.get('rows','auto')} cols={zone.get('cols','auto')} "
+              f"aisle={aw_dump(zone)} h={resolved_h:.2f}m → {n} racks")
+
+    params["_resolved_rack_height"] = max_height or (ceiling_z * RACK_CEILING_FILL)
+    params["_rack_height_at"] = height_lookup
+    return idx, total, all_positions
+
+
+def aw_dump(zone):
+    return zone.get("aisle_width", "?")
+
+
 def _spawn_racks(params, asset_library, stage, idx):
+    if params.get("rack_zones"):
+        return _spawn_racks_from_zones(params, asset_library, stage, idx)
+
     pattern = params["rack_pattern"]
     rows = params["rack_rows"]
     cols = params["rack_cols"]
@@ -784,19 +956,24 @@ def _spawn_racks(params, asset_library, stage, idx):
 
 
 def _populate_rack_shelves(rack_positions, params, asset_library, stage, idx):
-    fill_level = params.get("rack_fill", "medium")
-    fill_prob = RACK_FILL_PROBS.get(fill_level, 0.60)
+    fill_level_global = params.get("rack_fill", "medium")
+    fill_prob_global = RACK_FILL_PROBS.get(fill_level_global, 0.60)
     deck_count = 0
     cargo_count = 0
     has_shelf_asset = "rack_shelf" in asset_library
-    
-    # Use the rack height that _spawn_racks resolved (auto-scaled to ceiling).
-    rack_height = params.get("_resolved_rack_height") or (
+
+    # Per-rack height/fill sidecar populated by _spawn_racks_from_zones.
+    # When absent (single-zone path), every rack falls back to the
+    # warehouse-wide resolved height + fill level.
+    height_lookup = params.get("_rack_height_at", {}) or {}
+    rack_height_global = params.get("_resolved_rack_height") or (
         params.get("ceiling_z", DEFAULT_CEILING_Z) * RACK_CEILING_FILL
     )
-    shelf_spacing = max(0.7, rack_height * SHELF_PITCH_FRACTION)
-    num_shelves = max(2, int(rack_height / shelf_spacing))
-    shelf_heights = [0.15 + i * shelf_spacing for i in range(num_shelves)]
+
+    def _shelf_heights_for(h):
+        spacing = max(0.7, h * SHELF_PITCH_FRACTION)
+        n = max(2, int(h / spacing))
+        return [0.15 + i * spacing for i in range(n)]
 
     has_pallet_asset = "pallet" in asset_library
 
@@ -830,6 +1007,16 @@ def _populate_rack_shelves(rack_positions, params, asset_library, stage, idx):
         else:
             rx, ry = pos
             rrot = 90
+
+        key = (round(rx, 2), round(ry, 2))
+        if key in height_lookup:
+            this_height, zone_fill = height_lookup[key]
+            fill_prob = RACK_FILL_PROBS.get(zone_fill or fill_level_global,
+                                            fill_prob_global)
+        else:
+            this_height = rack_height_global
+            fill_prob = fill_prob_global
+        shelf_heights = _shelf_heights_for(this_height)
 
         # Per-rack shelf z-jitter: shelves don't all sit at exactly the same
         # height across the warehouse. ±3cm reads as installation tolerance.
@@ -923,7 +1110,8 @@ def _populate_rack_shelves(rack_positions, params, asset_library, stage, idx):
                     cargo_count += 1
 
     print(f"[INFO] Populated rack shelves: {deck_count} decks, {cargo_count} cargo items "
-          f"(fill={fill_level}, prob={fill_prob:.0%})")
+          f"(global_fill={fill_level_global}, prob={fill_prob_global:.0%}, "
+          f"per_zone_overrides={len(height_lookup)})")
     return idx, deck_count + cargo_count
 
 
@@ -2641,6 +2829,429 @@ def _spawn_mid_aisle_forklift(rack_positions, params, asset_library, stage, idx)
     return idx, count
 
 
+_GLYPH_3x5 = {
+    "A": "010101111101101", "B": "110101110101110", "C": "011100100100011",
+    "D": "110101101101110", "E": "111100110100111", "F": "111100110100100",
+    "G": "011100101101011", "H": "101101111101101", "I": "111010010010111",
+    "J": "001001001101010", "K": "101110100110101", "L": "100100100100111",
+    "M": "101111111101101", "N": "101111111111101", "O": "010101101101010",
+    "P": "110101110100100", "Q": "010101101111011", "R": "110101110110101",
+    "S": "011100010001110", "T": "111010010010010", "U": "101101101101010",
+    "V": "101101101010010", "W": "101101111111101", "X": "101101010101101",
+    "Y": "101101010010010", "Z": "111001010100111",
+    "0": "111101101101111", "1": "010110010010111", "2": "110001010100111",
+    "3": "111001010001111", "4": "101101111001001", "5": "111100111001111",
+    "6": "011100111101111", "7": "111001010100100", "8": "111101111101111",
+    "9": "111101111001110", "-": "000000111000000", " ": "000000000000000",
+}
+
+
+def _draw_floor_glyph(stage, idx, text, x_center, y_center, cell_size=0.18,
+                       color=(0.06, 0.06, 0.06), z=0.018, rot_z=0):
+    """Render `text` (3x5 bitmap font) as thin floor cubes centered at
+    (x_center, y_center). Used for painted aisle codes."""
+    chars = list(text.upper())
+    n = len(chars)
+    char_w_cells, gap_cells = 3, 1
+    total_cells_x = n * char_w_cells + max(0, n - 1) * gap_cells
+    total_w = total_cells_x * cell_size
+    total_h = 5 * cell_size
+    ang = math.radians(rot_z)
+    cos_a, sin_a = math.cos(ang), math.sin(ang)
+    sx = -total_w / 2.0 + cell_size / 2.0
+    sy = -total_h / 2.0 + cell_size / 2.0
+    placed = 0
+    for ci, ch in enumerate(chars):
+        bits = _GLYPH_3x5.get(ch, _GLYPH_3x5[" "])
+        for r in range(5):
+            for c in range(3):
+                if bits[r * 3 + c] != "1":
+                    continue
+                lx = sx + (ci * (char_w_cells + gap_cells) + c) * cell_size
+                ly = sy + (4 - r) * cell_size
+                wx = x_center + lx * cos_a - ly * sin_a
+                wy = y_center + lx * sin_a + ly * cos_a
+                path = f"/World/Layout/glyph_{idx}_{placed}"
+                cube = UsdGeom.Cube.Define(stage, path)
+                cube.GetSizeAttr().Set(2.0)
+                xf = UsdGeom.XformCommonAPI(cube.GetPrim())
+                xf.SetScale(Gf.Vec3f(cell_size / 2.0 * 0.9,
+                                     cell_size / 2.0 * 0.9, 0.012))
+                xf.SetTranslate(Gf.Vec3d(wx, wy, z))
+                xf.SetRotate(Gf.Vec3f(0, 0, rot_z),
+                             UsdGeom.XformCommonAPI.RotationOrderXYZ)
+                cube.CreateDisplayColorAttr([Gf.Vec3f(*color)])
+                placed += 1
+    return idx + placed
+
+
+def _place_painted_aisle_code(stage, idx, x, y, text, rot_z=0,
+                               tile_color=(0.92, 0.78, 0.10)):
+    """Big colored floor tile with a black aisle code (e.g. 'A-1') stamped on top."""
+    text = (text or "")[:4]
+    n = max(1, len(text))
+    cell = 0.18
+    char_w = 3 * cell
+    gap = 1 * cell
+    tile_w = n * char_w + max(0, n - 1) * gap + 0.40
+    tile_h = 5 * cell + 0.30
+    path = f"/World/Layout/aisle_code_tile_{idx}"
+    cube = UsdGeom.Cube.Define(stage, path)
+    cube.GetSizeAttr().Set(2.0)
+    xf = UsdGeom.XformCommonAPI(cube.GetPrim())
+    xf.SetScale(Gf.Vec3f(tile_w / 2.0, tile_h / 2.0, 0.010))
+    xf.SetTranslate(Gf.Vec3d(x, y, 0.012))
+    xf.SetRotate(Gf.Vec3f(0, 0, rot_z),
+                 UsdGeom.XformCommonAPI.RotationOrderXYZ)
+    cube.CreateDisplayColorAttr([Gf.Vec3f(*tile_color)])
+    return _draw_floor_glyph(stage, idx + 1, text, x, y, cell_size=cell,
+                              color=(0.06, 0.06, 0.06), z=0.018, rot_z=rot_z)
+
+
+def _place_aisle_mirror(stage, idx, x, y, height=2.4):
+    """Convex blind-corner safety mirror — black pole + circular mirror disc + bezel."""
+    pole_path = f"/World/Layout/mirror_pole_{idx}"
+    pole = UsdGeom.Cylinder.Define(stage, pole_path)
+    pole.GetRadiusAttr().Set(0.04)
+    pole.GetHeightAttr().Set(height)
+    pole.GetAxisAttr().Set("Z")
+    pxf = UsdGeom.XformCommonAPI(pole.GetPrim())
+    pxf.SetTranslate(Gf.Vec3d(x, y, height / 2.0))
+    pole.CreateDisplayColorAttr([Gf.Vec3f(0.10, 0.10, 0.10)])
+    disc_path = f"/World/Layout/mirror_disc_{idx}"
+    disc = UsdGeom.Cylinder.Define(stage, disc_path)
+    disc.GetRadiusAttr().Set(0.40)
+    disc.GetHeightAttr().Set(0.05)
+    disc.GetAxisAttr().Set("Y")
+    dxf = UsdGeom.XformCommonAPI(disc.GetPrim())
+    dxf.SetTranslate(Gf.Vec3d(x, y, height - 0.15))
+    disc.CreateDisplayColorAttr([Gf.Vec3f(0.78, 0.82, 0.85)])
+    bezel_path = f"/World/Layout/mirror_bezel_{idx}"
+    bezel = UsdGeom.Cylinder.Define(stage, bezel_path)
+    bezel.GetRadiusAttr().Set(0.42)
+    bezel.GetHeightAttr().Set(0.04)
+    bezel.GetAxisAttr().Set("Y")
+    bxf = UsdGeom.XformCommonAPI(bezel.GetPrim())
+    bxf.SetTranslate(Gf.Vec3d(x, y - 0.005, height - 0.15))
+    bezel.CreateDisplayColorAttr([Gf.Vec3f(0.10, 0.10, 0.10)])
+    return idx + 3
+
+
+def _place_zone_sign(stage, idx, x, y, z, text, band_color, rot_z=0):
+    """Large suspended zone sign — white panel with a colored top band, the
+    label rendered as black 3x5 glyphs on the +Y face, and two black cables
+    going up to the ceiling."""
+    text = (text or "")[:8]
+    n = max(1, len(text))
+    cell = 0.20
+    char_w = 3 * cell
+    gap = 1 * cell
+    glyph_w = n * char_w + max(0, n - 1) * gap
+    panel_w = glyph_w + 0.6
+    panel_h = 5 * cell + 0.4
+    body_path = f"/World/Layout/zonesign_body_{idx}"
+    body = UsdGeom.Cube.Define(stage, body_path)
+    body.GetSizeAttr().Set(2.0)
+    bxf = UsdGeom.XformCommonAPI(body.GetPrim())
+    bxf.SetScale(Gf.Vec3f(panel_w / 2.0, 0.04, panel_h / 2.0))
+    bxf.SetTranslate(Gf.Vec3d(x, y, z))
+    bxf.SetRotate(Gf.Vec3f(0, 0, rot_z),
+                  UsdGeom.XformCommonAPI.RotationOrderXYZ)
+    body.CreateDisplayColorAttr([Gf.Vec3f(0.96, 0.96, 0.94)])
+    band_path = f"/World/Layout/zonesign_band_{idx}"
+    band = UsdGeom.Cube.Define(stage, band_path)
+    band.GetSizeAttr().Set(2.0)
+    bndxf = UsdGeom.XformCommonAPI(band.GetPrim())
+    bndxf.SetScale(Gf.Vec3f(panel_w / 2.0, 0.045, 0.10))
+    bndxf.SetTranslate(Gf.Vec3d(x, y, z + panel_h / 2.0 - 0.10))
+    bndxf.SetRotate(Gf.Vec3f(0, 0, rot_z),
+                    UsdGeom.XformCommonAPI.RotationOrderXYZ)
+    band.CreateDisplayColorAttr([Gf.Vec3f(*band_color)])
+    for sgn_i, sgn in enumerate((-1, 1)):
+        cable_path = f"/World/Layout/zonesign_cable_{idx}_{sgn_i}"
+        cable = UsdGeom.Cylinder.Define(stage, cable_path)
+        cable.GetRadiusAttr().Set(0.012)
+        cable.GetHeightAttr().Set(1.0)
+        cable.GetAxisAttr().Set("Z")
+        cxf = UsdGeom.XformCommonAPI(cable.GetPrim())
+        cxf.SetTranslate(Gf.Vec3d(x + sgn * panel_w * 0.4,
+                                   y, z + panel_h / 2.0 + 0.5))
+        cable.CreateDisplayColorAttr([Gf.Vec3f(0.10, 0.10, 0.10)])
+    chars = list(text.upper())
+    glyph_y = y + 0.05
+    glyph_x_start = x - glyph_w / 2.0 + cell / 2.0
+    glyph_z_top = z + panel_h / 2.0 - 0.30
+    placed = 0
+    for ci, ch in enumerate(chars):
+        bits = _GLYPH_3x5.get(ch, _GLYPH_3x5[" "])
+        for r in range(5):
+            for c in range(3):
+                if bits[r * 3 + c] != "1":
+                    continue
+                gx = glyph_x_start + (ci * (3 + 1) + c) * cell
+                gz = glyph_z_top - (r + 1) * cell
+                path = f"/World/Layout/zonesign_g_{idx}_{placed}"
+                cube = UsdGeom.Cube.Define(stage, path)
+                cube.GetSizeAttr().Set(2.0)
+                gxf = UsdGeom.XformCommonAPI(cube.GetPrim())
+                gxf.SetScale(Gf.Vec3f(cell / 2.0 * 0.85, 0.02,
+                                       cell / 2.0 * 0.85))
+                gxf.SetTranslate(Gf.Vec3d(gx, glyph_y, gz))
+                cube.CreateDisplayColorAttr([Gf.Vec3f(0.06, 0.06, 0.06)])
+                placed += 1
+    return idx + 4 + placed
+
+
+def _place_conveyor_run(stage, idx, x_start, y_start, x_end, y_end,
+                         height=0.80):
+    """Straight roller conveyor between two endpoints — deck + rails + rollers + legs."""
+    dx = x_end - x_start
+    dy = y_end - y_start
+    length = math.sqrt(dx * dx + dy * dy)
+    if length < 1.0:
+        return idx
+    rot_z = math.degrees(math.atan2(dy, dx))
+    cx = (x_start + x_end) / 2.0
+    cy = (y_start + y_end) / 2.0
+    width = 0.55
+    deck_path = f"/World/Layout/conv_deck_{idx}"
+    deck = UsdGeom.Cube.Define(stage, deck_path)
+    deck.GetSizeAttr().Set(2.0)
+    dxf = UsdGeom.XformCommonAPI(deck.GetPrim())
+    dxf.SetScale(Gf.Vec3f(length / 2.0, width / 2.0, 0.04))
+    dxf.SetTranslate(Gf.Vec3d(cx, cy, height))
+    dxf.SetRotate(Gf.Vec3f(0, 0, rot_z),
+                  UsdGeom.XformCommonAPI.RotationOrderXYZ)
+    deck.CreateDisplayColorAttr([Gf.Vec3f(0.30, 0.30, 0.32)])
+    ang = math.radians(rot_z)
+    cos_a, sin_a = math.cos(ang), math.sin(ang)
+    for sgn_i, sgn in enumerate((-1, 1)):
+        local_y = sgn * (width / 2.0 + 0.02)
+        rx = cx - local_y * sin_a
+        ry = cy + local_y * cos_a
+        rail_path = f"/World/Layout/conv_rail_{idx}_{sgn_i}"
+        rail = UsdGeom.Cube.Define(stage, rail_path)
+        rail.GetSizeAttr().Set(2.0)
+        rxf = UsdGeom.XformCommonAPI(rail.GetPrim())
+        rxf.SetScale(Gf.Vec3f(length / 2.0, 0.025, 0.08))
+        rxf.SetTranslate(Gf.Vec3d(rx, ry, height + 0.08))
+        rxf.SetRotate(Gf.Vec3f(0, 0, rot_z),
+                      UsdGeom.XformCommonAPI.RotationOrderXYZ)
+        rail.CreateDisplayColorAttr([Gf.Vec3f(0.22, 0.22, 0.24)])
+    n_rollers = max(4, int(length / 0.18))
+    for k in range(n_rollers):
+        t = (k + 0.5) / n_rollers
+        local_along = -length / 2.0 + t * length
+        rx = cx + local_along * cos_a
+        ry = cy + local_along * sin_a
+        roller_path = f"/World/Layout/conv_roller_{idx}_{k}"
+        roller = UsdGeom.Cylinder.Define(stage, roller_path)
+        roller.GetRadiusAttr().Set(0.04)
+        roller.GetHeightAttr().Set(width - 0.05)
+        roller.GetAxisAttr().Set("Y")
+        rxf = UsdGeom.XformCommonAPI(roller.GetPrim())
+        rxf.SetTranslate(Gf.Vec3d(rx, ry, height + 0.05))
+        rxf.SetRotate(Gf.Vec3f(0, 0, rot_z),
+                      UsdGeom.XformCommonAPI.RotationOrderXYZ)
+        roller.CreateDisplayColorAttr([Gf.Vec3f(0.55, 0.55, 0.58)])
+    n_legs = max(2, int(length / 1.5))
+    for L in range(n_legs):
+        t = L / max(1, n_legs - 1) if n_legs > 1 else 0.5
+        local_along = -length / 2.0 + t * length
+        lx = cx + local_along * cos_a
+        ly = cy + local_along * sin_a
+        for sgn_i, sgn in enumerate((-1, 1)):
+            local_y = sgn * width / 2.0
+            wx = lx - local_y * sin_a
+            wy = ly + local_y * cos_a
+            leg_path = f"/World/Layout/conv_leg_{idx}_{L}_{sgn_i}"
+            leg = UsdGeom.Cube.Define(stage, leg_path)
+            leg.GetSizeAttr().Set(2.0)
+            lxf = UsdGeom.XformCommonAPI(leg.GetPrim())
+            lxf.SetScale(Gf.Vec3f(0.04, 0.04, height / 2.0))
+            lxf.SetTranslate(Gf.Vec3d(wx, wy, height / 2.0))
+            leg.CreateDisplayColorAttr([Gf.Vec3f(0.20, 0.20, 0.22)])
+    return idx + 1
+
+
+def _place_office_enclosure(stage, idx, cx, cy, width=3.6, depth=2.6,
+                             height=2.2, rot_z=0):
+    """Three-wall partitioned office: solid lower band + glass upper band on
+    three sides, the +Y side open to the warehouse floor. Inside: floor tile,
+    desk against the back wall, monitor, chair, coffee mug."""
+    wall_color = (0.85, 0.86, 0.86)
+    glass_color = (0.55, 0.65, 0.72)
+    ang = math.radians(rot_z)
+    cos_a, sin_a = math.cos(ang), math.sin(ang)
+    walls = [
+        (-width / 2.0, 0.0, 0.06, depth),
+        ( width / 2.0, 0.0, 0.06, depth),
+        ( 0.0, -depth / 2.0, width, 0.06),
+    ]
+    for wi, (lx, ly, sx, sy) in enumerate(walls):
+        wx = cx + lx * cos_a - ly * sin_a
+        wy = cy + lx * sin_a + ly * cos_a
+        path = f"/World/Layout/office_wall_{idx}_{wi}"
+        cube = UsdGeom.Cube.Define(stage, path)
+        cube.GetSizeAttr().Set(2.0)
+        xf = UsdGeom.XformCommonAPI(cube.GetPrim())
+        xf.SetScale(Gf.Vec3f(sx / 2.0, sy / 2.0, 0.6))
+        xf.SetTranslate(Gf.Vec3d(wx, wy, 0.6))
+        xf.SetRotate(Gf.Vec3f(0, 0, rot_z),
+                     UsdGeom.XformCommonAPI.RotationOrderXYZ)
+        cube.CreateDisplayColorAttr([Gf.Vec3f(*wall_color)])
+        if not cube.GetPrim().HasAPI(UsdPhysics.CollisionAPI):
+            UsdPhysics.CollisionAPI.Apply(cube.GetPrim())
+        glass_path = f"/World/Layout/office_glass_{idx}_{wi}"
+        glass = UsdGeom.Cube.Define(stage, glass_path)
+        glass.GetSizeAttr().Set(2.0)
+        gxf = UsdGeom.XformCommonAPI(glass.GetPrim())
+        gxf.SetScale(Gf.Vec3f(sx / 2.0 * 0.95, sy / 2.0 * 0.95,
+                               (height - 1.2) / 2.0))
+        gxf.SetTranslate(Gf.Vec3d(wx, wy, 1.2 + (height - 1.2) / 2.0))
+        gxf.SetRotate(Gf.Vec3f(0, 0, rot_z),
+                      UsdGeom.XformCommonAPI.RotationOrderXYZ)
+        glass.CreateDisplayColorAttr([Gf.Vec3f(*glass_color)])
+    floor_path = f"/World/Layout/office_floor_{idx}"
+    floor = UsdGeom.Cube.Define(stage, floor_path)
+    floor.GetSizeAttr().Set(2.0)
+    fxf = UsdGeom.XformCommonAPI(floor.GetPrim())
+    fxf.SetScale(Gf.Vec3f(width / 2.0 - 0.05, depth / 2.0 - 0.05, 0.012))
+    fxf.SetTranslate(Gf.Vec3d(cx, cy, 0.014))
+    fxf.SetRotate(Gf.Vec3f(0, 0, rot_z),
+                  UsdGeom.XformCommonAPI.RotationOrderXYZ)
+    floor.CreateDisplayColorAttr([Gf.Vec3f(0.55, 0.45, 0.35)])
+
+    def _local_to_world(lx, ly):
+        return cx + lx * cos_a - ly * sin_a, cy + lx * sin_a + ly * cos_a
+
+    desk_x, desk_y = _local_to_world(0.0, -depth / 2.0 + 0.5)
+    desk_path = f"/World/Layout/office_desk_{idx}"
+    desk = UsdGeom.Cube.Define(stage, desk_path)
+    desk.GetSizeAttr().Set(2.0)
+    dexf = UsdGeom.XformCommonAPI(desk.GetPrim())
+    dexf.SetScale(Gf.Vec3f(0.65, 0.30, 0.04))
+    dexf.SetTranslate(Gf.Vec3d(desk_x, desk_y, 0.74))
+    dexf.SetRotate(Gf.Vec3f(0, 0, rot_z),
+                   UsdGeom.XformCommonAPI.RotationOrderXYZ)
+    desk.CreateDisplayColorAttr([Gf.Vec3f(0.35, 0.28, 0.20)])
+
+    mon_x, mon_y = _local_to_world(0.0, -depth / 2.0 + 0.4)
+    mon_path = f"/World/Layout/office_monitor_{idx}"
+    mon = UsdGeom.Cube.Define(stage, mon_path)
+    mon.GetSizeAttr().Set(2.0)
+    moxf = UsdGeom.XformCommonAPI(mon.GetPrim())
+    moxf.SetScale(Gf.Vec3f(0.30, 0.04, 0.18))
+    moxf.SetTranslate(Gf.Vec3d(mon_x, mon_y, 1.05))
+    moxf.SetRotate(Gf.Vec3f(0, 0, rot_z),
+                   UsdGeom.XformCommonAPI.RotationOrderXYZ)
+    mon.CreateDisplayColorAttr([Gf.Vec3f(0.08, 0.08, 0.10)])
+
+    ch_x, ch_y = _local_to_world(0.0, -depth / 2.0 + 1.2)
+    chair_path = f"/World/Layout/office_chair_{idx}"
+    chair = UsdGeom.Cylinder.Define(stage, chair_path)
+    chair.GetRadiusAttr().Set(0.22)
+    chair.GetHeightAttr().Set(0.50)
+    chair.GetAxisAttr().Set("Z")
+    chxf = UsdGeom.XformCommonAPI(chair.GetPrim())
+    chxf.SetTranslate(Gf.Vec3d(ch_x, ch_y, 0.25))
+    chair.CreateDisplayColorAttr([Gf.Vec3f(0.15, 0.15, 0.18)])
+
+    mug_x, mug_y = _local_to_world(0.4, -depth / 2.0 + 0.4)
+    mug_path = f"/World/Layout/office_mug_{idx}"
+    mug = UsdGeom.Cylinder.Define(stage, mug_path)
+    mug.GetRadiusAttr().Set(0.045)
+    mug.GetHeightAttr().Set(0.10)
+    mug.GetAxisAttr().Set("Z")
+    muxf = UsdGeom.XformCommonAPI(mug.GetPrim())
+    muxf.SetTranslate(Gf.Vec3d(mug_x, mug_y, 0.84))
+    mug.CreateDisplayColorAttr([Gf.Vec3f(0.92, 0.92, 0.88)])
+    return idx + 12
+
+
+def _spawn_realism_layer(rack_positions, params, asset_library, stage, idx):
+    """Top-5 realism additions: suspended zone signs, glass-walled office
+    enclosure, roller conveyor along the side wall, blind-corner safety
+    mirrors at row endpoints, painted floor aisle codes (A-1, B-2…) at row
+    entries. Each lives outside the existing polish/realism passes so it can
+    be toggled or extended independently."""
+    bmin = params["bounds_min"]
+    bmax = params["bounds_max"]
+    cx = (bmin[0] + bmax[0]) / 2.0
+    ceiling_z = params.get("ceiling_z", DEFAULT_CEILING_Z)
+    count = 0
+
+    dock_frac = params.get("dock_zone_frac", 0.25)
+    storage_frac = params.get("storage_zone_frac", 0.55)
+    bulk_frac = max(0.0, 1.0 - dock_frac - storage_frac)
+    span_y = bmax[1] - bmin[1]
+    sign_z = ceiling_z - 1.0
+    zone_specs = [
+        ("DOCK", bmin[1] + dock_frac * 0.55 * span_y, (0.95, 0.45, 0.05)),
+        ("STORAGE", bmin[1] + (dock_frac + storage_frac * 0.5) * span_y,
+         (0.20, 0.55, 0.90)),
+    ]
+    if bulk_frac > 0.05:
+        zone_specs.append(("BULK",
+                            bmax[1] - bulk_frac * 0.5 * span_y,
+                            (0.30, 0.70, 0.35)))
+    for label, sy, band in zone_specs:
+        idx = _place_zone_sign(stage, idx, cx, sy, sign_z, label, band)
+        count += 1
+
+    office_w, office_d = 3.6, 2.6
+    office_cx = bmin[0] + office_w / 2.0 + 0.5
+    office_cy = bmax[1] - office_d / 2.0 - 0.5
+    idx = _place_office_enclosure(stage, idx, office_cx, office_cy,
+                                   width=office_w, depth=office_d,
+                                   height=2.2, rot_z=0)
+    count += 1
+
+    cv_x = bmax[0] - 1.2
+    cv_y_start = bmax[1] - 1.6
+    cv_y_end = bmin[1] + dock_frac * span_y + 0.8
+    if abs(cv_y_end - cv_y_start) > 4.0:
+        idx = _place_conveyor_run(stage, idx, cv_x, cv_y_start,
+                                   cv_x, cv_y_end, height=0.80)
+        count += 1
+
+    rows = {}
+    for (rx, ry, rrot) in rack_positions:
+        if rrot == 90:
+            key = round(ry * 2) / 2.0
+            rows.setdefault(key, []).append(rx)
+    for key, xs in rows.items():
+        x_lo = min(xs) - 1.6
+        x_hi = max(xs) + 1.6
+        if x_lo > bmin[0] + 0.4:
+            idx = _place_aisle_mirror(stage, idx, x_lo, key)
+            count += 1
+        if x_hi < bmax[0] - 0.4:
+            idx = _place_aisle_mirror(stage, idx, x_hi, key)
+            count += 1
+
+    palette = [(0.95, 0.78, 0.10), (0.95, 0.45, 0.05),
+               (0.30, 0.70, 0.35), (0.20, 0.55, 0.90),
+               (0.85, 0.20, 0.55), (0.55, 0.30, 0.75)]
+    for ri, key in enumerate(sorted(rows.keys())):
+        xs = rows[key]
+        code_x = max(xs) + 2.4
+        if code_x > bmax[0] - 0.6:
+            code_x = min(xs) - 2.4
+            if code_x < bmin[0] + 0.6:
+                continue
+        letter = chr(ord("A") + (ri % 26))
+        code = f"{letter}-{ri + 1}"
+        idx = _place_painted_aisle_code(stage, idx, code_x, key, code,
+                                         rot_z=0,
+                                         tile_color=palette[ri % len(palette)])
+        count += 1
+
+    print(f"[INFO] Spawned realism layer: {count} grouped items "
+          f"(zone signs / office / conveyor / mirrors / aisle codes)")
+    return idx, count
+
+
 def generate_layout(layout_name, layout_params, asset_library, stage):
     params = _resolve_params(layout_name, layout_params, LAYOUTS)
 
@@ -2734,6 +3345,7 @@ def generate_layout(layout_name, layout_params, asset_library, stage):
 
     idx, num_floor_fill = _spawn_floor_filling(params, rack_positions, asset_library, stage, idx)
     idx, num_polish = _spawn_polish_pass(params, rack_positions, asset_library, stage, idx)
+    idx, num_realism_layer = _spawn_realism_layer(rack_positions, params, asset_library, stage, idx)
 
     print(f"[INFO] Spawned {num_racks} racks, {num_shelf_items} shelf items, "
           f"{num_pallets} pallets, {num_clutter} clutter props, {num_dock_items} dock items, "
@@ -2744,6 +3356,7 @@ def generate_layout(layout_name, layout_params, asset_library, stage):
           f"{num_main_aisle} main-aisle treatment, {num_marshal} marshalling-band items, "
           f"{num_human} human-imperfection items, {num_mid_fork} mid-aisle forklift, "
           f"{num_doors} dock doors, {num_polish} polish-pass items, "
-          f"{num_floor_fill} floor-fill staging items.")
+          f"{num_floor_fill} floor-fill staging items, "
+          f"{num_realism_layer} realism-layer items.")
 
     return params["bounds_min"], params["bounds_max"]

@@ -1,6 +1,6 @@
 {
   "standard_warehouse": {
-    "description": "Working warehouse floor sized to fill the 1.7x-scaled warehouse.usd interior (~±11m). Cross-aisles break long rack rows into bays, a wide main drive aisle separates two narrow picking aisles, and functional zones (dock, storage, bulk) keep the front open for active operations.",
+    "description": "Working warehouse floor sized to fill the 1.7x-scaled warehouse.usd interior (~±11m). Three visually distinct rack sub-zones — a low pick-face area near the dock, a tall bulk reserve at the back, and a perpendicular cross-row in between — so areas read as different rather than one repeating rack farm.",
     "keywords": [
       "default",
       "standard",
@@ -21,6 +21,41 @@
     "cross_aisle_width": 3.5,
     "dock_zone_frac": 0.25,
     "storage_zone_frac": 0.55,
+    "rack_zones": [
+      {
+        "name": "pick_face",
+        "y_frac": [0.0, 0.32],
+        "x_frac": [0.0, 1.0],
+        "pattern": "rows",
+        "rows": 2,
+        "cols": "auto",
+        "aisle_width": 2.2,
+        "target_rack_height": 2.4,
+        "rack_fill": "medium"
+      },
+      {
+        "name": "cross_row",
+        "y_frac": [0.36, 0.58],
+        "x_frac": [0.18, 0.82],
+        "pattern": "rows_perp",
+        "rows": 2,
+        "cols": "auto",
+        "aisle_width": 1.8,
+        "target_rack_height": 3.6,
+        "rack_fill": "full"
+      },
+      {
+        "name": "bulk_reserve",
+        "y_frac": [0.62, 1.0],
+        "x_frac": [0.0, 1.0],
+        "pattern": "rows",
+        "rows": 2,
+        "cols": "auto",
+        "aisle_width": 3.6,
+        "target_rack_height": 5.6,
+        "rack_fill": "sparse"
+      }
+    ],
     "bounds_min": [
       -11.0,
       -11.0
