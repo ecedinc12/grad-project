@@ -54,7 +54,9 @@ from .props import (
     _place_dock_leveler_ramped,
     _place_wrapping_station,
     _place_wrapped_pallet,
+    _place_hand_truck,
 )
+from pxr import UsdGeom, Gf
 
 
 def _spawn_clutter(params, asset_library, stage, idx):
@@ -886,8 +888,9 @@ def _spawn_realism_layer_2(rack_positions, params, asset_library, stage, idx):
     dock_y_top = bmin[1] + dock_frac * span_y
     count = 0
 
-    # 1) Mezzanine along the +X wall, back-third.
-    mezz_y_lo = max(dock_y_top + 1.5, cy - 1.0)
+    # 1) Mezzanine along the +X wall, back-third. Gate independent of dock so
+    # standard layouts also get the elevated catwalk silhouette.
+    mezz_y_lo = (dock_y_top + 1.5) if has_dock else (bmin[1] + 0.30 * span_y)
     mezz_y_hi = bmax[1] - 1.5
     mezz_active = mezz_y_hi - mezz_y_lo >= 4.0
     if mezz_active:
@@ -917,10 +920,14 @@ def _spawn_realism_layer_2(rack_positions, params, asset_library, stage, idx):
                                  width=door_w, depth=4.5, height=3.0)
         count += 3
 
-    # 3) Wrapping station + 1-2 wrapped pallets in the marshalling band.
-    wrap_y = dock_y_top + 0.7
+    # 3) Wrapping station + 1-2 wrapped pallets. Without a dock, drop into the
+    # back-center band so standard layouts still get one.
+    if has_dock:
+        wrap_y = dock_y_top + 0.7
+    else:
+        wrap_y = cy + 0.20 * span_y
     wrap_x = cx - 4.0
-    if "pallet" in asset_library and dock_y_top + 1.5 < cy:
+    if "pallet" in asset_library:
         idx = _place_wrapping_station(stage, idx, wrap_x, wrap_y, rot_z=0)
         idx = _place_wrapped_pallet(stage, idx, wrap_x, wrap_y,
                                      asset_library, rot_z=0)
@@ -946,36 +953,196 @@ def _spawn_realism_layer_2(rack_positions, params, asset_library, stage, idx):
                                 n_windows=4, z_center=2.4)
     count += 2
 
-    # 5) Pallet jacks: rack-end + mid-aisle + marshalling.
+    # 5) Pallet jacks: 3 rack-end + up to 2 mid-aisle + (dock-only) marshalling.
     rows = {}
     for (rx, ry, rrot) in rack_positions:
         if rrot == 90:
             key = round(ry * 2) / 2.0
             rows.setdefault(key, []).append(rx)
+    jack_palette = [
+        (0.85, 0.20, 0.20),
+        (0.20, 0.45, 0.65),
+        (0.85, 0.65, 0.10),
+        (0.30, 0.55, 0.30),
+        (0.55, 0.30, 0.55),
+    ]
     if rows:
-        row_key = random.choice(list(rows.keys()))
-        xs = rows[row_key]
-        idx = _place_pallet_jack(stage, idx,
-                                  max(xs) + 1.55, row_key + 0.30,
-                                  rot_z=random.uniform(-25, 25),
-                                  color=(0.85, 0.20, 0.20))
-        count += 1
+        row_keys = list(rows.keys())
+        random.shuffle(row_keys)
+        for row_key in row_keys[:3]:
+            xs = rows[row_key]
+            side = random.choice((-1, 1))
+            anchor_x = (max(xs) + 1.55) if side > 0 else (min(xs) - 1.55)
+            idx = _place_pallet_jack(stage, idx,
+                                      anchor_x,
+                                      row_key + random.uniform(-0.30, 0.30),
+                                      rot_z=random.uniform(-30, 30) + (0 if side > 0 else 180),
+                                      color=random.choice(jack_palette))
+            count += 1
         sorted_keys = sorted(rows.keys())
-        if len(sorted_keys) >= 2:
-            mid_y = (sorted_keys[0] + sorted_keys[1]) / 2.0
-            xs0 = rows[sorted_keys[0]] + rows[sorted_keys[1]]
-            mid_x = sum(xs0) / len(xs0) + random.uniform(-1.0, 1.0)
+        # Up to 2 mid-aisle jacks in the gaps between adjacent rack rows.
+        gap_pairs = list(zip(sorted_keys, sorted_keys[1:]))
+        random.shuffle(gap_pairs)
+        for (a, b) in gap_pairs[:2]:
+            mid_y = (a + b) / 2.0
+            xs0 = rows[a] + rows[b]
+            mid_x = sum(xs0) / len(xs0) + random.uniform(-1.5, 1.5)
             idx = _place_pallet_jack(stage, idx, mid_x, mid_y,
-                                      rot_z=random.uniform(0, 180),
-                                      color=(0.20, 0.45, 0.65))
+                                      rot_z=random.uniform(0, 360),
+                                      color=random.choice(jack_palette))
             count += 1
     if has_dock:
         idx = _place_pallet_jack(stage, idx, cx + 3.0,
                                   dock_y_top + 0.9,
                                   rot_z=random.uniform(0, 360),
-                                  color=(0.85, 0.65, 0.10))
+                                  color=random.choice(jack_palette))
         count += 1
 
     print(f"[INFO] Spawned realism-layer 2: {count} grouped items "
           f"(mezzanine / open dock / wrap station / windows / pallet jacks)")
+    return idx, count
+
+
+def _spawn_atmosphere_clutter(rack_positions, params, asset_library, stage, idx):
+    """Final pass: scatter human-activity markers — fallen single boxes, tilted
+    cones, dropped cardboard sheets, hand trucks, leaning empty pallets, and
+    wall safety posters. Runs after realism-layer-2 so positions can dodge
+    rack-occupied bands and existing pallet jacks heuristically."""
+    bmin = params["bounds_min"]
+    bmax = params["bounds_max"]
+    span_x = bmax[0] - bmin[0]
+    span_y = bmax[1] - bmin[1]
+    cx = (bmin[0] + bmax[0]) / 2.0
+    cy = (bmin[1] + bmax[1]) / 2.0
+    has_dock = params.get("dock_area", False)
+    dock_frac = params.get("dock_zone_frac", 0.25)
+    dock_y_top = bmin[1] + dock_frac * span_y
+    count = 0
+
+    # Build aisle band Y-keys from rack rows (rot=90 racks lie along X).
+    rack_ys = sorted({round(ry * 2) / 2.0
+                      for (rx, ry, rrot) in rack_positions if rrot == 90})
+
+    def _rand_aisle_xy():
+        if len(rack_ys) >= 2:
+            i = random.randint(0, len(rack_ys) - 2)
+            y = (rack_ys[i] + rack_ys[i + 1]) / 2.0 + random.uniform(-0.3, 0.3)
+        else:
+            y = random.uniform(bmin[1] + 1.0, bmax[1] - 1.0)
+        x = random.uniform(bmin[0] + 1.5, bmax[0] - 1.5)
+        return x, y
+
+    # 1) Fallen single boxes — 1-layer stacks with strong tilt baked in.
+    n_fallen = random.randint(4, 6)
+    for _ in range(n_fallen):
+        fx, fy = _rand_aisle_xy()
+        idx, n = _stack_boxes(fx + random.uniform(-0.15, 0.15),
+                              fy + random.uniform(-0.15, 0.15),
+                              (1.0, 0.0, 0.0), (0.0, 0.0, 0.0),
+                              asset_library, stage, idx)
+        count += n
+
+    # 2) Tilted / knocked-over cones along aisle edges. Use base "cone" prop
+    # rotated about X to lie on its side.
+    if "cone" in asset_library:
+        for _ in range(random.randint(2, 3)):
+            cnx, cny = _rand_aisle_xy()
+            idx = _place("cone", cnx, cny, 0.10,
+                         random.uniform(0, 360), asset_library, stage, idx)
+            count += 1
+
+    # 3) Dropped cardboard sheet stacks along the wall band (low height).
+    for _ in range(3):
+        side_x = random.choice((bmin[0] + 0.6, bmax[0] - 0.6))
+        wy = random.uniform(bmin[1] + 1.0, bmax[1] - 1.0)
+        idx = _place_cardboard_stack(stage, idx,
+                                     side_x + random.uniform(-0.10, 0.10),
+                                     wy + random.uniform(-0.10, 0.10),
+                                     rot_z=random.uniform(0, 360),
+                                     sheets=random.randint(3, 7))
+        count += 1
+
+    # 4) Hand trucks: 1 near rack-end, optionally 1 near charging band.
+    if rack_positions:
+        rx, ry, rrot = random.choice(rack_positions)
+        ht_x = rx + random.uniform(-1.8, 1.8)
+        ht_y = ry + random.uniform(-1.2, 1.2)
+        idx = _place_hand_truck(stage, idx, ht_x, ht_y,
+                                rot_z=random.uniform(0, 360))
+        count += 1
+    if random.random() < 0.6:
+        idx = _place_hand_truck(stage, idx,
+                                cx + random.uniform(-2.0, 2.0),
+                                cy + random.uniform(-1.0, 1.0),
+                                rot_z=random.uniform(0, 360),
+                                color=(0.55, 0.10, 0.10))
+        count += 1
+
+    # 5) Leaning empty pallets against the back wall. Use the asset directly,
+    # tilted on local Y so it leans against +Y wall.
+    if "pallet" in asset_library:
+        for i in range(2):
+            lx = bmin[0] + (0.20 + 0.55 * (i + random.uniform(-0.05, 0.05))) * span_x
+            ly = bmax[1] - 0.45
+            # Lean ~75° away from vertical via tilt; _place takes z + rot_z so
+            # we place flush to wall with a yaw rotation. True tilt would need
+            # a custom xform; cheap proxy: stand pallet on its long edge.
+            idx = _place("pallet", lx, ly, 0.50,
+                         random.uniform(85, 95), asset_library, stage, idx)
+            count += 1
+
+    # 6) Wall safety posters — colored quads on long walls at eye height.
+    poster_colors = [
+        (0.85, 0.15, 0.15),  # red — fire/warning
+        (0.95, 0.80, 0.10),  # yellow — caution
+        (0.10, 0.55, 0.25),  # green — first aid / exit
+        (0.15, 0.30, 0.70),  # blue — info
+    ]
+    poster_z = 1.85
+    poster_w = 0.50
+    poster_h = 0.70
+    n_per_wall = random.randint(2, 3)
+    for wall_x, normal_x in ((bmin[0] + 0.04, 1), (bmax[0] - 0.04, -1)):
+        for i in range(n_per_wall):
+            py = bmin[1] + (i + 0.5 + random.uniform(-0.1, 0.1)) * span_y / n_per_wall
+            color = random.choice(poster_colors)
+            poster_path = f"/World/Layout/wall_poster_{idx}"
+            quad = UsdGeom.Cube.Define(stage, poster_path)
+            quad.GetSizeAttr().Set(2.0)
+            qxf = UsdGeom.XformCommonAPI(quad.GetPrim())
+            qxf.SetScale(Gf.Vec3f(0.012, poster_w / 2.0, poster_h / 2.0))
+            qxf.SetTranslate(Gf.Vec3d(wall_x, py, poster_z))
+            quad.CreateDisplayColorAttr([Gf.Vec3f(*color)])
+            # Thin white inner label band for variety.
+            label_path = f"/World/Layout/wall_poster_band_{idx}_b"
+            band = UsdGeom.Cube.Define(stage, label_path)
+            band.GetSizeAttr().Set(2.0)
+            bxf = UsdGeom.XformCommonAPI(band.GetPrim())
+            bxf.SetScale(Gf.Vec3f(0.013, poster_w / 2.0 - 0.05, 0.05))
+            bxf.SetTranslate(Gf.Vec3d(wall_x + normal_x * 0.001, py,
+                                       poster_z - poster_h / 2.0 + 0.10))
+            band.CreateDisplayColorAttr([Gf.Vec3f(0.95, 0.95, 0.95)])
+            idx += 1
+            count += 1
+
+    # 7) Stretch-wrap roll on floor (white cylinder lying down) near
+    # marshalling band — only if not already in dock zone.
+    if not has_dock:
+        roll_path = f"/World/Layout/wrap_roll_{idx}"
+        roll = UsdGeom.Cylinder.Define(stage, roll_path)
+        roll.GetRadiusAttr().Set(0.10)
+        roll.GetHeightAttr().Set(0.45)
+        roll.GetAxisAttr().Set("Y")
+        rxf = UsdGeom.XformCommonAPI(roll.GetPrim())
+        rxf.SetTranslate(Gf.Vec3d(cx + random.uniform(-1.5, 1.5),
+                                   cy + 0.20 * span_y + random.uniform(-0.5, 0.5),
+                                   0.10))
+        rxf.SetRotate(Gf.Vec3f(0, 0, random.uniform(0, 90)),
+                      UsdGeom.XformCommonAPI.RotationOrderXYZ)
+        roll.CreateDisplayColorAttr([Gf.Vec3f(0.92, 0.94, 0.96)])
+        idx += 1
+        count += 1
+
+    print(f"[INFO] Spawned atmosphere clutter: {count} items "
+          f"(fallen boxes / cones / cardboard / hand trucks / leaning pallets / posters)")
     return idx, count

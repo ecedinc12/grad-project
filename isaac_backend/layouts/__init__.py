@@ -42,6 +42,7 @@ from .realism import (
     _spawn_polish_pass,
     _spawn_realism_layer,
     _spawn_realism_layer_2,
+    _spawn_atmosphere_clutter,
 )
 
 
@@ -140,6 +141,7 @@ def generate_layout(layout_name, layout_params, asset_library, stage):
     idx, num_polish = _spawn_polish_pass(params, rack_positions, asset_library, stage, idx)
     idx, num_realism_layer = _spawn_realism_layer(rack_positions, params, asset_library, stage, idx)
     idx, num_realism_layer_2 = _spawn_realism_layer_2(rack_positions, params, asset_library, stage, idx)
+    idx, num_atmosphere = _spawn_atmosphere_clutter(rack_positions, params, asset_library, stage, idx)
 
     print(f"[INFO] Spawned {num_racks} racks, {num_shelf_items} shelf items, "
           f"{num_pallets} pallets, {num_clutter} clutter props, {num_dock_items} dock items, "
@@ -152,7 +154,8 @@ def generate_layout(layout_name, layout_params, asset_library, stage):
           f"{num_doors} dock doors, {num_polish} polish-pass items, "
           f"{num_floor_fill} floor-fill staging items, "
           f"{num_realism_layer} realism-layer items, "
-          f"{num_realism_layer_2} realism-layer-2 items.")
+          f"{num_realism_layer_2} realism-layer-2 items, "
+          f"{num_atmosphere} atmosphere-clutter items.")
 
     return params["bounds_min"], params["bounds_max"]
 

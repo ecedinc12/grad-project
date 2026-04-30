@@ -1259,3 +1259,70 @@ def _place_wrapped_pallet(stage, idx, x, y, asset_library, rot_z=0):
             seam.CreateDisplayColorAttr([Gf.Vec3f(0.60, 0.72, 0.82)])
             seams_placed += 1
     return idx + 1 + seams_placed
+
+
+def _place_hand_truck(stage, idx, x, y, rot_z=0, color=(0.18, 0.18, 0.20)):
+    """Two-wheel hand truck (dolly): vertical back-plate, L-shaped foot at the
+    base, single tubular handle bar across the top, two rubber wheels on a
+    transverse axle. Smaller than a pallet jack; reads as 'parked against
+    rack-end'."""
+    ang = math.radians(rot_z)
+    cos_a, sin_a = math.cos(ang), math.sin(ang)
+
+    def _to_world(lx, ly):
+        return x + lx * cos_a - ly * sin_a, y + lx * sin_a + ly * cos_a
+
+    # Back plate — thin upright slab, ~1.1m tall, ~0.45m wide.
+    bx, by = _to_world(0, 0)
+    plate_path = f"/World/Layout/handtruck_plate_{idx}"
+    plate = UsdGeom.Cube.Define(stage, plate_path)
+    plate.GetSizeAttr().Set(2.0)
+    pxf = UsdGeom.XformCommonAPI(plate.GetPrim())
+    pxf.SetScale(Gf.Vec3f(0.025, 0.225, 0.55))
+    pxf.SetTranslate(Gf.Vec3d(bx, by, 0.60))
+    pxf.SetRotate(Gf.Vec3f(0, 0, rot_z),
+                  UsdGeom.XformCommonAPI.RotationOrderXYZ)
+    plate.CreateDisplayColorAttr([Gf.Vec3f(*color)])
+
+    # L-foot — flat tongue extending forward at floor level.
+    fx_local, fy_local = 0.20, 0.0
+    fwx, fwy = _to_world(fx_local, fy_local)
+    foot_path = f"/World/Layout/handtruck_foot_{idx}"
+    foot = UsdGeom.Cube.Define(stage, foot_path)
+    foot.GetSizeAttr().Set(2.0)
+    fxf = UsdGeom.XformCommonAPI(foot.GetPrim())
+    fxf.SetScale(Gf.Vec3f(0.20, 0.21, 0.015))
+    fxf.SetTranslate(Gf.Vec3d(fwx, fwy, 0.025))
+    fxf.SetRotate(Gf.Vec3f(0, 0, rot_z),
+                  UsdGeom.XformCommonAPI.RotationOrderXYZ)
+    foot.CreateDisplayColorAttr([Gf.Vec3f(*color)])
+
+    # Handle bar — single horizontal cylinder across the top of the plate.
+    hx, hy = _to_world(0, 0)
+    handle_path = f"/World/Layout/handtruck_handle_{idx}"
+    handle = UsdGeom.Cylinder.Define(stage, handle_path)
+    handle.GetRadiusAttr().Set(0.025)
+    handle.GetHeightAttr().Set(0.46)
+    handle.GetAxisAttr().Set("Y")
+    hxf = UsdGeom.XformCommonAPI(handle.GetPrim())
+    hxf.SetTranslate(Gf.Vec3d(hx, hy, 1.18))
+    hxf.SetRotate(Gf.Vec3f(0, 0, rot_z),
+                  UsdGeom.XformCommonAPI.RotationOrderXYZ)
+    handle.CreateDisplayColorAttr([Gf.Vec3f(0.10, 0.10, 0.10)])
+
+    # Two wheels at the base of the plate, on a transverse axle.
+    for wi, sgn in enumerate((-1, 1)):
+        wlx, wly = 0.02, sgn * 0.24
+        wwx, wwy = _to_world(wlx, wly)
+        wheel_path = f"/World/Layout/handtruck_wheel_{idx}_{wi}"
+        w = UsdGeom.Cylinder.Define(stage, wheel_path)
+        w.GetRadiusAttr().Set(0.10)
+        w.GetHeightAttr().Set(0.04)
+        w.GetAxisAttr().Set("Y")
+        wxf = UsdGeom.XformCommonAPI(w.GetPrim())
+        wxf.SetTranslate(Gf.Vec3d(wwx, wwy, 0.10))
+        wxf.SetRotate(Gf.Vec3f(0, 0, rot_z),
+                      UsdGeom.XformCommonAPI.RotationOrderXYZ)
+        w.CreateDisplayColorAttr([Gf.Vec3f(0.08, 0.08, 0.08)])
+
+    return idx + 1

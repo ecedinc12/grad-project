@@ -10,6 +10,7 @@ from .placement import (
 from .props import (
     _place_dock_door,
     _place_empty_pallet_stack,
+    _place_wrapped_pallet,
 )
 
 
@@ -40,14 +41,27 @@ def _spawn_pallets(params, asset_library, stage, idx):
         for c in range(pallet_cols_grid):
             x = x_start + c * spacing_x + random.uniform(-0.12, 0.12)
             y = y_start - r * spacing_y + random.uniform(-0.12, 0.12)
-            idx = _place("pallet", x, y, 0, random.uniform(-8, 8), asset_library, stage, idx)
-            count += 1
 
             cargo_roll = random.random()
-            if cargo_roll < 0.70:
-                idx, n = _stack_boxes(x, y, (1.0, 0.65, 0.35), (0.08, 0.10, 0.12), asset_library, stage, idx)
+            # 50% bare box stack, 20% shrinkwrapped, 15% barrel/drum,
+            # 10% empty pallet, 5% mixed (boxes + 1 stray drum on top).
+            if cargo_roll < 0.50:
+                idx = _place("pallet", x, y, 0, random.uniform(-8, 8),
+                             asset_library, stage, idx)
+                count += 1
+                idx, n = _stack_boxes(x, y, (1.0, 0.65, 0.35),
+                                      (0.08, 0.10, 0.12),
+                                      asset_library, stage, idx)
                 count += n
-            elif cargo_roll < 0.90:
+            elif cargo_roll < 0.70:
+                idx = _place_wrapped_pallet(stage, idx, x, y,
+                                             asset_library,
+                                             rot_z=random.uniform(-8, 8))
+                count += 1
+            elif cargo_roll < 0.85:
+                idx = _place("pallet", x, y, 0, random.uniform(-8, 8),
+                             asset_library, stage, idx)
+                count += 1
                 barrel_prop = random.choice(["barrel", "drum"])
                 idx = _place(barrel_prop, x + random.uniform(-0.05, 0.05),
                               y + random.uniform(-0.05, 0.05), 0.15,
@@ -59,6 +73,23 @@ def _spawn_pallets(params, asset_library, stage, idx):
                                   y + random.uniform(-0.05, 0.05), 0.55,
                                   random.uniform(0, 360), asset_library, stage, idx)
                     count += 1
+            elif cargo_roll < 0.95:
+                idx = _place("pallet", x, y, 0, random.uniform(-8, 8),
+                             asset_library, stage, idx)
+                count += 1
+            else:
+                idx = _place("pallet", x, y, 0, random.uniform(-8, 8),
+                             asset_library, stage, idx)
+                count += 1
+                idx, n = _stack_boxes(x, y, (1.0, 0.65, 0.35),
+                                      (0.08, 0.10, 0.12),
+                                      asset_library, stage, idx)
+                count += n
+                idx = _place(random.choice(["barrel", "drum"]),
+                              x + random.uniform(-0.20, 0.20),
+                              y + random.uniform(-0.20, 0.20), 0.95,
+                              random.uniform(0, 360), asset_library, stage, idx)
+                count += 1
 
     return idx, count
 
