@@ -12,7 +12,7 @@ the script in an unrouteable state.
 import math
 
 
-AGENT_RADIUS = 0.5
+AGENT_RADIUS = 0.6
 DEFAULT_MAX_RADIUS = 4.0
 DEFAULT_NUM_RINGS = 8
 DEFAULT_SAMPLES_PER_RING = 12
@@ -71,17 +71,17 @@ def get_worker_pos(stage, worker_name):
         return None
 
 
-def snap_target(origin_xy, target_xy, navmesh=None,
-                agent_radius=AGENT_RADIUS,
-                max_radius=DEFAULT_MAX_RADIUS,
-                num_rings=DEFAULT_NUM_RINGS,
-                samples_per_ring=DEFAULT_SAMPLES_PER_RING):
-    """Return a (x, y) reachable from origin_xy on the navmesh.
+def try_snap_target(origin_xy, target_xy, navmesh=None,
+                    agent_radius=AGENT_RADIUS,
+                    max_radius=DEFAULT_MAX_RADIUS,
+                    num_rings=DEFAULT_NUM_RINGS,
+                    samples_per_ring=DEFAULT_SAMPLES_PER_RING):
+    """Return a reachable (x, y) near target_xy, or None if none found.
 
     If target_xy is already reachable, returns it unchanged. Otherwise
-    spirals outward from target_xy and returns the nearest reachable
-    sample. Falls back to origin_xy if nothing within max_radius works,
-    so the worker stays in place rather than stalling.
+    spirals outward and returns the nearest reachable sample. Returns
+    None when nothing within max_radius is reachable — caller should
+    drop the command rather than ship an unrouteable target.
 
     No-op (returns target_xy) when no navmesh is available.
     """
@@ -96,7 +96,6 @@ def snap_target(origin_xy, target_xy, navmesh=None,
     tx, ty = float(target_xy[0]), float(target_xy[1])
     for ring in range(1, num_rings + 1):
         r = (ring / num_rings) * max_radius
-        # Rotate ring start each step so adjacent rings don't sample identical angles.
         phase = (ring % 2) * (math.pi / samples_per_ring)
         for s in range(samples_per_ring):
             angle = phase + (s / samples_per_ring) * 2.0 * math.pi
@@ -104,7 +103,23 @@ def snap_target(origin_xy, target_xy, navmesh=None,
             if _is_reachable(navmesh, origin_xy, cand, agent_radius):
                 return cand
 
-    print(f"[WARN] navmesh_utils: no reachable point within {max_radius}m of "
-          f"({tx:.2f}, {ty:.2f}) from origin ({origin_xy[0]:.2f}, {origin_xy[1]:.2f}); "
-          f"holding at origin")
-    return (float(origin_xy[0]), float(origin_xy[1]))
+    return None
+
+
+def snap_target(origin_xy, target_xy, navmesh=None,
+                agent_radius=AGENT_RADIUS,
+                max_radius=DEFAULT_MAX_RADIUS,
+                num_rings=DEFAULT_NUM_RINGS,
+                samples_per_ring=DEFAULT_SAMPLES_PER_RING):
+    """Backward-compatible wrapper: falls back to origin_xy on miss."""
+    snapped = try_snap_target(origin_xy, target_xy, navmesh=navmesh,
+                              agent_radius=agent_radius,
+                              max_radius=max_radius,
+                              num_rings=num_rings,
+                              samples_per_ring=samples_per_ring)
+    if snapped is None:
+        print(f"[WARN] navmesh_utils: no reachable point within {max_radius}m of "
+              f"({float(target_xy[0]):.2f}, {float(target_xy[1]):.2f}) from origin "
+              f"({origin_xy[0]:.2f}, {origin_xy[1]:.2f}); holding at origin")
+        return (float(origin_xy[0]), float(origin_xy[1]))
+    return snapped

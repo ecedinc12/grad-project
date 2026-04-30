@@ -10,7 +10,7 @@ import time
 import random
 
 import isaac_backend.ira_setup as _ira
-from isaac_backend.navmesh_utils import get_navmesh, get_worker_pos, snap_target
+from isaac_backend.navmesh_utils import get_navmesh, get_worker_pos, try_snap_target
 
 WAREHOUSE_X_RANGE = (-5.5, 5.5)
 WAREHOUSE_Y_RANGE = (-5.5, 5.5)
@@ -59,7 +59,11 @@ def _build_command_list(worker_behaviors, worker_name, visible_bounds=None,
                         x = max(visible_bounds[0], min(visible_bounds[1], x))
                         y = max(visible_bounds[2], min(visible_bounds[3], y))
                     if navmesh is not None and prev_xy is not None:
-                        snapped = snap_target(prev_xy, (x, y), navmesh=navmesh)
+                        snapped = try_snap_target(prev_xy, (x, y), navmesh=navmesh)
+                        if snapped is None:
+                            print(f"[WARN] {worker_name} GoTo ({x:.2f},{y:.2f}) "
+                                  f"unreachable from ({prev_xy[0]:.2f},{prev_xy[1]:.2f}); dropping")
+                            continue
                         if snapped != (x, y):
                             print(f"[INFO] {worker_name} GoTo snapped "
                                   f"({x:.2f},{y:.2f}) -> ({snapped[0]:.2f},{snapped[1]:.2f})")
@@ -195,7 +199,9 @@ def reinject_random_commands(spawned_worker_names, visible_bounds=None,
             wx = round(random.uniform(x_lo, x_hi), 1)
             wy = round(random.uniform(y_lo, y_hi), 1)
             if navmesh is not None and prev_xy is not None:
-                snapped = snap_target(prev_xy, (wx, wy), navmesh=navmesh)
+                snapped = try_snap_target(prev_xy, (wx, wy), navmesh=navmesh)
+                if snapped is None:
+                    continue
                 wx, wy = round(snapped[0], 2), round(snapped[1], 2)
                 prev_xy = (wx, wy)
             cmd_list.append(f"{worker_name} GoTo {wx} {wy} 0.0 0")
@@ -205,6 +211,8 @@ def reinject_random_commands(spawned_worker_names, visible_bounds=None,
                 else:
                     cmd_list.append(f"{worker_name} LookAround {round(random.uniform(1, 3), 1)}")
         cmd_list.append(f"{worker_name} Idle {round(random.uniform(3, 8), 1)}")
+        if not any(" GoTo " in c for c in cmd_list):
+            cmd_list = [f"{worker_name} Idle {round(random.uniform(3, 8), 1)}"]
 
         try:
             # instant=False so anim.people lets the agent finish its current
