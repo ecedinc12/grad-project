@@ -13,6 +13,7 @@ from .geometry import (
     _affine_remap,
     _resolve_params,
 )
+from .materials import reset_material_cache
 from .rack import (
     _spawn_racks,
     _populate_rack_shelves,
@@ -47,6 +48,7 @@ from .realism import (
 
 
 def generate_layout(layout_name, layout_params, asset_library, stage):
+    reset_material_cache()
     params = _resolve_params(layout_name, layout_params, LAYOUTS)
 
     # Measure the actual interior height of whatever warehouse asset was loaded

@@ -14,6 +14,7 @@ from pxr import UsdGeom, Gf, UsdPhysics
 
 from .geometry import DEFAULT_CEILING_Z
 from .placement import _place, _draw_floor_glyph, _GLYPH_3x5
+from .materials import bind_material
 
 
 def _place_column_guard(stage, idx, x, y, height=0.55):
@@ -27,7 +28,7 @@ def _place_column_guard(stage, idx, x, y, height=0.55):
     prim = cyl.GetPrim()
     xf = UsdGeom.XformCommonAPI(prim)
     xf.SetTranslate(Gf.Vec3d(x, y, height / 2.0))
-    cyl.CreateDisplayColorAttr([Gf.Vec3f(0.95, 0.78, 0.05)])
+    bind_material(stage, cyl, "M_YellowSafetyPaint", (0.95, 0.78, 0.05))
     if not prim.HasAPI(UsdPhysics.CollisionAPI):
         UsdPhysics.CollisionAPI.Apply(prim)
     # Hazard chevron — three thin black bands wrapping the post. Slightly
@@ -43,7 +44,7 @@ def _place_column_guard(stage, idx, x, y, height=0.55):
         band.GetAxisAttr().Set("Z")
         bxf = UsdGeom.XformCommonAPI(band.GetPrim())
         bxf.SetTranslate(Gf.Vec3d(x, y, bz))
-        band.CreateDisplayColorAttr([Gf.Vec3f(0.05, 0.05, 0.05)])
+        bind_material(stage, band, "M_PlasticMatte", (0.05, 0.05, 0.05))
     return idx + 1
 
 
@@ -57,7 +58,7 @@ def _place_charger_box(stage, idx, x, y, rot_z=0):
     xf.SetScale(Gf.Vec3f(0.45, 0.35, 0.55))  # ~0.9m wide, 0.7m deep, 1.1m tall
     xf.SetTranslate(Gf.Vec3d(x, y, 0.55))
     xf.SetRotate(Gf.Vec3f(0, 0, rot_z), UsdGeom.XformCommonAPI.RotationOrderXYZ)
-    cube.CreateDisplayColorAttr([Gf.Vec3f(0.32, 0.34, 0.38)])
+    bind_material(stage, cube, "M_PaintedWall", (0.32, 0.34, 0.38))
     if not prim.HasAPI(UsdPhysics.CollisionAPI):
         UsdPhysics.CollisionAPI.Apply(prim)
     return idx + 1
@@ -74,7 +75,7 @@ def _place_shelf_placard(stage, idx, x, y, z, rot_z, band_color=None):
     xf.SetScale(Gf.Vec3f(0.18, 0.02, 0.06))
     xf.SetTranslate(Gf.Vec3d(x, y, z))
     xf.SetRotate(Gf.Vec3f(0, 0, rot_z), UsdGeom.XformCommonAPI.RotationOrderXYZ)
-    cube.CreateDisplayColorAttr([Gf.Vec3f(0.95, 0.95, 0.92)])
+    bind_material(stage, cube, "M_PlasticMatte", (0.95, 0.95, 0.92))
     used = 1
     if band_color is not None:
         band_path = f"/World/Layout/placard_band_{idx}"
@@ -85,7 +86,7 @@ def _place_shelf_placard(stage, idx, x, y, z, rot_z, band_color=None):
         bxf.SetScale(Gf.Vec3f(0.18, 0.022, 0.018))
         bxf.SetTranslate(Gf.Vec3d(x, y, z + 0.045))
         bxf.SetRotate(Gf.Vec3f(0, 0, rot_z), UsdGeom.XformCommonAPI.RotationOrderXYZ)
-        band.CreateDisplayColorAttr([Gf.Vec3f(*band_color)])
+        bind_material(stage, band, "M_PlasticMatte", band_color)
         used += 1
     return idx + used
 
@@ -100,7 +101,7 @@ def _place_fire_extinguisher(stage, idx, x, y):
     prim = cyl.GetPrim()
     xf = UsdGeom.XformCommonAPI(prim)
     xf.SetTranslate(Gf.Vec3d(x, y, 1.10))
-    cyl.CreateDisplayColorAttr([Gf.Vec3f(0.78, 0.08, 0.07)])
+    bind_material(stage, cyl, "M_PlasticGloss", (0.78, 0.08, 0.07))
     # Backplate
     bp_path = f"/World/Layout/fire_ext_plate_{idx}"
     plate = UsdGeom.Cube.Define(stage, bp_path)
@@ -108,7 +109,7 @@ def _place_fire_extinguisher(stage, idx, x, y):
     pxf = UsdGeom.XformCommonAPI(plate.GetPrim())
     pxf.SetScale(Gf.Vec3f(0.18, 0.02, 0.32))
     pxf.SetTranslate(Gf.Vec3d(x, y - 0.06, 1.10))
-    plate.CreateDisplayColorAttr([Gf.Vec3f(0.85, 0.85, 0.82)])
+    bind_material(stage, plate, "M_PaintedWall", (0.85, 0.85, 0.82))
     return idx + 2
 
 
@@ -121,7 +122,7 @@ def _place_exit_sign(stage, idx, x, y, z=2.6):
     xf = UsdGeom.XformCommonAPI(prim)
     xf.SetScale(Gf.Vec3f(0.30, 0.04, 0.14))
     xf.SetTranslate(Gf.Vec3d(x, y, z))
-    cube.CreateDisplayColorAttr([Gf.Vec3f(0.10, 0.85, 0.25)])
+    bind_material(stage, cube, "M_Emissive", (0.10, 0.85, 0.25))
     return idx + 1
 
 
@@ -134,7 +135,7 @@ def _place_trash_bin(stage, idx, x, y, color=(0.18, 0.42, 0.18)):
     prim = cyl.GetPrim()
     xf = UsdGeom.XformCommonAPI(prim)
     xf.SetTranslate(Gf.Vec3d(x, y, 0.375))
-    cyl.CreateDisplayColorAttr([Gf.Vec3f(*color)])
+    bind_material(stage, cyl, "M_PlasticMatte", color)
     if not prim.HasAPI(UsdPhysics.CollisionAPI):
         UsdPhysics.CollisionAPI.Apply(prim)
     return idx + 1
@@ -150,7 +151,7 @@ def _place_pack_table(stage, idx, x, y, rot_z=0):
     xf.SetScale(Gf.Vec3f(0.90, 0.40, 0.04))
     xf.SetTranslate(Gf.Vec3d(x, y, 0.85))
     xf.SetRotate(Gf.Vec3f(0, 0, rot_z), UsdGeom.XformCommonAPI.RotationOrderXYZ)
-    cube.CreateDisplayColorAttr([Gf.Vec3f(0.55, 0.40, 0.25)])
+    bind_material(stage, cube, "M_Wood", (0.55, 0.40, 0.25))
     if not prim.HasAPI(UsdPhysics.CollisionAPI):
         UsdPhysics.CollisionAPI.Apply(prim)
     # Four legs
@@ -164,7 +165,7 @@ def _place_pack_table(stage, idx, x, y, rot_z=0):
         lxf = UsdGeom.XformCommonAPI(leg.GetPrim())
         lxf.SetScale(Gf.Vec3f(0.04, 0.04, 0.42))
         lxf.SetTranslate(Gf.Vec3d(wx, wy, 0.42))
-        leg.CreateDisplayColorAttr([Gf.Vec3f(0.45, 0.32, 0.18)])
+        bind_material(stage, leg, "M_Wood", (0.45, 0.32, 0.18))
     return idx + 1
 
 
@@ -179,7 +180,7 @@ def _place_cardboard_stack(stage, idx, x, y, rot_z=0, sheets=8):
     xf.SetScale(Gf.Vec3f(0.55, 0.40, h))
     xf.SetTranslate(Gf.Vec3d(x, y, h))
     xf.SetRotate(Gf.Vec3f(0, 0, rot_z), UsdGeom.XformCommonAPI.RotationOrderXYZ)
-    cube.CreateDisplayColorAttr([Gf.Vec3f(0.72, 0.55, 0.32)])
+    bind_material(stage, cube, "M_Cardboard", (0.72, 0.55, 0.32))
     return idx + 1
 
 
@@ -196,7 +197,7 @@ def _place_floor_arrow(stage, idx, x, y, rot_z=0):
     sxf.SetScale(Gf.Vec3f(0.55, 0.07, 0.012))
     sxf.SetTranslate(Gf.Vec3d(x, y, 0.013))
     sxf.SetRotate(Gf.Vec3f(0, 0, rot_z), UsdGeom.XformCommonAPI.RotationOrderXYZ)
-    sh.CreateDisplayColorAttr([Gf.Vec3f(*yellow)])
+    bind_material(stage, sh, "M_YellowSafetyPaint", yellow)
     # Head — two angled bars
     for sgn_i, sgn in enumerate((-1, 1)):
         hd_path = f"/World/Layout/arrow_head_{idx}_{sgn_i}"
@@ -210,7 +211,7 @@ def _place_floor_arrow(stage, idx, x, y, rot_z=0):
         wy = y + local_x * sin_a + local_y * cos_a
         hxf.SetTranslate(Gf.Vec3d(wx, wy, 0.013))
         hxf.SetRotate(Gf.Vec3f(0, 0, rot_z + sgn * 35), UsdGeom.XformCommonAPI.RotationOrderXYZ)
-        hd.CreateDisplayColorAttr([Gf.Vec3f(*yellow)])
+        bind_material(stage, hd, "M_YellowSafetyPaint", yellow)
     return idx + 3
 
 
@@ -231,7 +232,7 @@ def _place_caution_sign(stage, idx, x, y, rot_z=0):
         wy = y + local_x * sin_a
         xf.SetTranslate(Gf.Vec3d(wx, wy, 0.32))
         xf.SetRotate(Gf.Vec3f(0, tilt, rot_z), UsdGeom.XformCommonAPI.RotationOrderXYZ)
-        cube.CreateDisplayColorAttr([Gf.Vec3f(*yellow)])
+        bind_material(stage, cube, "M_PlasticGloss", yellow)
     return idx + 2
 
 
@@ -244,7 +245,7 @@ def _place_wall_junction_box(stage, idx, x, y, z=1.4):
     xf = UsdGeom.XformCommonAPI(prim)
     xf.SetScale(Gf.Vec3f(0.18, 0.04, 0.25))
     xf.SetTranslate(Gf.Vec3d(x, y, z))
-    cube.CreateDisplayColorAttr([Gf.Vec3f(0.45, 0.47, 0.50)])
+    bind_material(stage, cube, "M_PaintedWall", (0.45, 0.47, 0.50))
     return idx + 1
 
 
@@ -259,7 +260,7 @@ def _place_overhead_light(stage, idx, x, y, z=None, length=2.0):
     xf = UsdGeom.XformCommonAPI(prim)
     xf.SetScale(Gf.Vec3f(length / 2.0, 0.10, 0.04))
     xf.SetTranslate(Gf.Vec3d(x, y, z))
-    cube.CreateDisplayColorAttr([Gf.Vec3f(0.96, 0.96, 0.92)])
+    bind_material(stage, cube, "M_Emissive", (0.96, 0.96, 0.92))
     return idx + 1
 
 
@@ -271,14 +272,14 @@ def _place_aisle_sign(stage, idx, x, y, band_color, z=2.8):
     bxf = UsdGeom.XformCommonAPI(body.GetPrim())
     bxf.SetScale(Gf.Vec3f(0.22, 0.02, 0.16))
     bxf.SetTranslate(Gf.Vec3d(x, y, z))
-    body.CreateDisplayColorAttr([Gf.Vec3f(0.96, 0.96, 0.94)])
+    bind_material(stage, body, "M_PlasticMatte", (0.96, 0.96, 0.94))
     band_path = f"/World/Layout/aisle_sign_band_{idx}"
     band = UsdGeom.Cube.Define(stage, band_path)
     band.GetSizeAttr().Set(2.0)
     cxf = UsdGeom.XformCommonAPI(band.GetPrim())
     cxf.SetScale(Gf.Vec3f(0.22, 0.025, 0.04))
     cxf.SetTranslate(Gf.Vec3d(x, y, z + 0.18))
-    band.CreateDisplayColorAttr([Gf.Vec3f(*band_color)])
+    bind_material(stage, band, "M_PlasticMatte", band_color)
     return idx + 2
 
 
@@ -291,7 +292,7 @@ def _place_mop_and_bucket(stage, idx, x, y):
     cyl.GetAxisAttr().Set("Z")
     bxf = UsdGeom.XformCommonAPI(cyl.GetPrim())
     bxf.SetTranslate(Gf.Vec3d(x, y, 0.225))
-    cyl.CreateDisplayColorAttr([Gf.Vec3f(0.92, 0.78, 0.10)])
+    bind_material(stage, cyl, "M_PlasticGloss", (0.92, 0.78, 0.10))
     broom_path = f"/World/Layout/broom_handle_{idx}"
     broom = UsdGeom.Cube.Define(stage, broom_path)
     broom.GetSizeAttr().Set(2.0)
@@ -299,7 +300,7 @@ def _place_mop_and_bucket(stage, idx, x, y):
     hxf.SetScale(Gf.Vec3f(0.015, 0.015, 0.65))
     hxf.SetTranslate(Gf.Vec3d(x + 0.18, y + 0.05, 0.75))
     hxf.SetRotate(Gf.Vec3f(0, 14, 0), UsdGeom.XformCommonAPI.RotationOrderXYZ)
-    broom.CreateDisplayColorAttr([Gf.Vec3f(0.55, 0.38, 0.20)])
+    bind_material(stage, broom, "M_Wood", (0.55, 0.38, 0.20))
     return idx + 2
 
 
@@ -329,7 +330,7 @@ def _place_tire_scuff(stage, idx, x, y, length, rot_z=0):
         sxf.SetScale(Gf.Vec3f(seg_len / 2.0, 0.10, 0.006))
         sxf.SetTranslate(Gf.Vec3d(wx, wy, 0.018))
         sxf.SetRotate(Gf.Vec3f(0, 0, rot_z), UsdGeom.XformCommonAPI.RotationOrderXYZ)
-        cube.CreateDisplayColorAttr([Gf.Vec3f(*color)])
+        bind_material(stage, cube, "M_PaintedConcrete", color)
     return idx + 1
 
 
@@ -351,7 +352,7 @@ def _place_oil_stain(stage, idx, x, y, radius=0.55):
         oxf.SetTranslate(Gf.Vec3d(bx, by, 0.020))
         oxf.SetRotate(Gf.Vec3f(0, 0, random.uniform(0, 90)),
                       UsdGeom.XformCommonAPI.RotationOrderXYZ)
-        cube.CreateDisplayColorAttr([Gf.Vec3f(*base_color)])
+        bind_material(stage, cube, "M_OilFilm", base_color)
     return idx + 1
 
 
@@ -374,7 +375,7 @@ def _place_dock_door(stage, idx, x, y, width=2.6, height=3.2, rot_z=0):
         pxf.SetScale(Gf.Vec3f(width / 2.0, 0.04, panel_h / 2.0 - 0.01))
         pxf.SetTranslate(Gf.Vec3d(x, y, z))
         pxf.SetRotate(Gf.Vec3f(0, 0, rot_z), UsdGeom.XformCommonAPI.RotationOrderXYZ)
-        cube.CreateDisplayColorAttr([Gf.Vec3f(*panel_color)])
+        bind_material(stage, cube, "M_AgedSteel", panel_color)
     # Frame: two side jambs + a header bar
     for sgn_i, sgn in enumerate((-1, 1)):
         local_x = sgn * (width / 2.0 + 0.06)
@@ -387,7 +388,7 @@ def _place_dock_door(stage, idx, x, y, width=2.6, height=3.2, rot_z=0):
         jxf.SetScale(Gf.Vec3f(0.06, 0.06, height / 2.0))
         jxf.SetTranslate(Gf.Vec3d(wx, wy, height / 2.0))
         jxf.SetRotate(Gf.Vec3f(0, 0, rot_z), UsdGeom.XformCommonAPI.RotationOrderXYZ)
-        cube.CreateDisplayColorAttr([Gf.Vec3f(*frame_color)])
+        bind_material(stage, cube, "M_AgedSteel", frame_color)
     head_path = f"/World/Layout/dock_header_{idx}"
     head = UsdGeom.Cube.Define(stage, head_path)
     head.GetSizeAttr().Set(2.0)
@@ -395,7 +396,7 @@ def _place_dock_door(stage, idx, x, y, width=2.6, height=3.2, rot_z=0):
     hxf.SetScale(Gf.Vec3f(width / 2.0 + 0.08, 0.06, 0.10))
     hxf.SetTranslate(Gf.Vec3d(x, y, height + 0.05))
     hxf.SetRotate(Gf.Vec3f(0, 0, rot_z), UsdGeom.XformCommonAPI.RotationOrderXYZ)
-    head.CreateDisplayColorAttr([Gf.Vec3f(*frame_color)])
+    bind_material(stage, head, "M_AgedSteel", frame_color)
     return idx + 1
 
 
@@ -413,7 +414,7 @@ def _place_hazard_hatch(stage, idx, x, y, width, depth, rot_z=0, stripes=8):
     bxf.SetScale(Gf.Vec3f(width / 2.0, depth / 2.0, 0.012))
     bxf.SetTranslate(Gf.Vec3d(x, y, 0.010))
     bxf.SetRotate(Gf.Vec3f(0, 0, rot_z), UsdGeom.XformCommonAPI.RotationOrderXYZ)
-    bp.CreateDisplayColorAttr([Gf.Vec3f(*yellow)])
+    bind_material(stage, bp, "M_YellowSafetyPaint", yellow)
     # Black diagonal stripes on top
     stripe_w = width / stripes
     for s in range(stripes):
@@ -430,7 +431,7 @@ def _place_hazard_hatch(stage, idx, x, y, width, depth, rot_z=0, stripes=8):
         sxf.SetTranslate(Gf.Vec3d(wx, wy, 0.014))
         # Diagonal: rotate stripe ~45° relative to the patch.
         sxf.SetRotate(Gf.Vec3f(0, 0, rot_z + 45), UsdGeom.XformCommonAPI.RotationOrderXYZ)
-        sp.CreateDisplayColorAttr([Gf.Vec3f(*black)])
+        bind_material(stage, sp, "M_PaintedConcrete", black)
     return idx + 1 + (stripes // 2)
 
 
@@ -445,13 +446,13 @@ def _place_sprinkler_head(stage, idx, x, y, z=None):
     body.GetAxisAttr().Set("Z")
     bxf = UsdGeom.XformCommonAPI(body.GetPrim())
     bxf.SetTranslate(Gf.Vec3d(x, y, z))
-    body.CreateDisplayColorAttr([Gf.Vec3f(0.65, 0.65, 0.62)])
+    bind_material(stage, body, "M_AgedSteel", (0.65, 0.65, 0.62))
     bulb_path = f"/World/Layout/sprinkler_bulb_{idx}"
     bulb = UsdGeom.Sphere.Define(stage, bulb_path)
     bulb.GetRadiusAttr().Set(0.035)
     sxf = UsdGeom.XformCommonAPI(bulb.GetPrim())
     sxf.SetTranslate(Gf.Vec3d(x, y, z - 0.09))
-    bulb.CreateDisplayColorAttr([Gf.Vec3f(0.85, 0.10, 0.10)])
+    bind_material(stage, bulb, "M_PlasticGloss", (0.85, 0.10, 0.10))
     return idx + 2
 
 
@@ -467,7 +468,7 @@ def _place_ceiling_pipe_run(stage, idx, x_start, x_end, y, z=4.7, color=(0.55, 0
     cyl.GetAxisAttr().Set("X")
     cxf = UsdGeom.XformCommonAPI(cyl.GetPrim())
     cxf.SetTranslate(Gf.Vec3d((x_start + x_end) / 2.0, y, z))
-    cyl.CreateDisplayColorAttr([Gf.Vec3f(*color)])
+    bind_material(stage, cyl, "M_AgedSteel", color)
     return idx + 1
 
 
@@ -480,7 +481,7 @@ def _place_hi_vis_bollard(stage, idx, x, y, height=0.95):
     base.GetAxisAttr().Set("Z")
     bxf = UsdGeom.XformCommonAPI(base.GetPrim())
     bxf.SetTranslate(Gf.Vec3d(x, y, height / 2.0))
-    base.CreateDisplayColorAttr([Gf.Vec3f(0.95, 0.78, 0.05)])
+    bind_material(stage, base, "M_YellowSafetyPaint", (0.95, 0.78, 0.05))
     # Two black bands at 1/3 and 2/3 height
     n_band = 2
     for b in range(n_band):
@@ -491,7 +492,7 @@ def _place_hi_vis_bollard(stage, idx, x, y, height=0.95):
         band.GetAxisAttr().Set("Z")
         bndxf = UsdGeom.XformCommonAPI(band.GetPrim())
         bndxf.SetTranslate(Gf.Vec3d(x, y, height * (b + 1) / 3.0))
-        band.CreateDisplayColorAttr([Gf.Vec3f(0.06, 0.06, 0.06)])
+        bind_material(stage, band, "M_PlasticMatte", (0.06, 0.06, 0.06))
     return idx + 1 + n_band
 
 
@@ -514,7 +515,7 @@ def _place_empty_pallet_stack(stage, idx, x, y, asset_library, count=6, rot_z=0)
             xf = UsdGeom.XformCommonAPI(cube.GetPrim())
             xf.SetScale(Gf.Vec3f(0.60, 0.50, 0.07))
             xf.SetTranslate(Gf.Vec3d(x, y, 0.07 + 0.14 * k))
-            cube.CreateDisplayColorAttr([Gf.Vec3f(0.55, 0.40, 0.22)])
+            bind_material(stage, cube, "M_Wood", (0.55, 0.40, 0.22))
             idx += 1
             placed += 1
     return idx, placed
@@ -544,7 +545,7 @@ def _place_parking_stall(stage, idx, x, y, width=2.2, depth=3.4, rot_z=0):
         xf.SetScale(Gf.Vec3f(lw / 2.0, ld / 2.0, 0.012))
         xf.SetTranslate(Gf.Vec3d(wx, wy, 0.013))
         xf.SetRotate(Gf.Vec3f(0, 0, rot_z), UsdGeom.XformCommonAPI.RotationOrderXYZ)
-        cube.CreateDisplayColorAttr([Gf.Vec3f(*color)])
+        bind_material(stage, cube, "M_PaintedConcrete", color)
         placed += 1
     return idx + placed
 
@@ -557,7 +558,7 @@ def _place_first_aid_kit(stage, idx, x, y, z=1.55):
     xf = UsdGeom.XformCommonAPI(cube.GetPrim())
     xf.SetScale(Gf.Vec3f(0.18, 0.06, 0.14))
     xf.SetTranslate(Gf.Vec3d(x, y, z))
-    cube.CreateDisplayColorAttr([Gf.Vec3f(0.95, 0.95, 0.92)])
+    bind_material(stage, cube, "M_PlasticMatte", (0.95, 0.95, 0.92))
     # Red cross — vertical bar + horizontal bar, slightly proud of the box face.
     for bi, (sx, sy, sz, color) in enumerate((
         (0.04, 0.005, 0.10, (0.85, 0.10, 0.10)),
@@ -569,7 +570,7 @@ def _place_first_aid_kit(stage, idx, x, y, z=1.55):
         bxf = UsdGeom.XformCommonAPI(bar.GetPrim())
         bxf.SetScale(Gf.Vec3f(sx, sy, sz))
         bxf.SetTranslate(Gf.Vec3d(x, y - 0.065, z))
-        bar.CreateDisplayColorAttr([Gf.Vec3f(*color)])
+        bind_material(stage, bar, "M_PlasticGloss", color)
     return idx + 3
 
 
@@ -582,7 +583,7 @@ def _place_wall_clock(stage, idx, x, y, z=2.4):
     cyl.GetAxisAttr().Set("Y")
     cxf = UsdGeom.XformCommonAPI(cyl.GetPrim())
     cxf.SetTranslate(Gf.Vec3d(x, y, z))
-    cyl.CreateDisplayColorAttr([Gf.Vec3f(0.95, 0.95, 0.92)])
+    bind_material(stage, cyl, "M_PlasticMatte", (0.95, 0.95, 0.92))
     # Minute & hour hands as thin cubes
     for hi, (sx, sz, sy_off, color) in enumerate(((0.005, 0.14, -0.04, (0.10, 0.10, 0.10)),
                                                    (0.005, 0.10, -0.04, (0.10, 0.10, 0.10)))):
@@ -592,7 +593,7 @@ def _place_wall_clock(stage, idx, x, y, z=2.4):
         hxf = UsdGeom.XformCommonAPI(hand.GetPrim())
         hxf.SetScale(Gf.Vec3f(sx, 0.005, sz))
         hxf.SetTranslate(Gf.Vec3d(x, y + sy_off, z + sz / 2.0))
-        hand.CreateDisplayColorAttr([Gf.Vec3f(*color)])
+        bind_material(stage, hand, "M_PlasticMatte", color)
     return idx + 3
 
 
@@ -604,7 +605,7 @@ def _place_dock_leveler(stage, idx, x, y, width=2.4, depth=1.0):
     xf = UsdGeom.XformCommonAPI(cube.GetPrim())
     xf.SetScale(Gf.Vec3f(width / 2.0, depth / 2.0, 0.025))
     xf.SetTranslate(Gf.Vec3d(x, y, 0.025))
-    cube.CreateDisplayColorAttr([Gf.Vec3f(0.42, 0.42, 0.45)])
+    bind_material(stage, cube, "M_AgedSteel", (0.42, 0.42, 0.45))
     return idx + 1
 
 
@@ -626,7 +627,7 @@ def _place_painted_aisle_code(stage, idx, x, y, text, rot_z=0,
     xf.SetTranslate(Gf.Vec3d(x, y, 0.012))
     xf.SetRotate(Gf.Vec3f(0, 0, rot_z),
                  UsdGeom.XformCommonAPI.RotationOrderXYZ)
-    cube.CreateDisplayColorAttr([Gf.Vec3f(*tile_color)])
+    bind_material(stage, cube, "M_PaintedConcrete", tile_color)
     return _draw_floor_glyph(stage, idx + 1, text, x, y, cell_size=cell,
                               color=(0.06, 0.06, 0.06), z=0.018, rot_z=rot_z)
 
@@ -640,7 +641,7 @@ def _place_aisle_mirror(stage, idx, x, y, height=2.4):
     pole.GetAxisAttr().Set("Z")
     pxf = UsdGeom.XformCommonAPI(pole.GetPrim())
     pxf.SetTranslate(Gf.Vec3d(x, y, height / 2.0))
-    pole.CreateDisplayColorAttr([Gf.Vec3f(0.10, 0.10, 0.10)])
+    bind_material(stage, pole, "M_AgedSteel", (0.10, 0.10, 0.10))
     disc_path = f"/World/Layout/mirror_disc_{idx}"
     disc = UsdGeom.Cylinder.Define(stage, disc_path)
     disc.GetRadiusAttr().Set(0.40)
@@ -648,7 +649,7 @@ def _place_aisle_mirror(stage, idx, x, y, height=2.4):
     disc.GetAxisAttr().Set("Y")
     dxf = UsdGeom.XformCommonAPI(disc.GetPrim())
     dxf.SetTranslate(Gf.Vec3d(x, y, height - 0.15))
-    disc.CreateDisplayColorAttr([Gf.Vec3f(0.78, 0.82, 0.85)])
+    bind_material(stage, disc, "M_Glass", (0.78, 0.82, 0.85))
     bezel_path = f"/World/Layout/mirror_bezel_{idx}"
     bezel = UsdGeom.Cylinder.Define(stage, bezel_path)
     bezel.GetRadiusAttr().Set(0.42)
@@ -656,7 +657,7 @@ def _place_aisle_mirror(stage, idx, x, y, height=2.4):
     bezel.GetAxisAttr().Set("Y")
     bxf = UsdGeom.XformCommonAPI(bezel.GetPrim())
     bxf.SetTranslate(Gf.Vec3d(x, y - 0.005, height - 0.15))
-    bezel.CreateDisplayColorAttr([Gf.Vec3f(0.10, 0.10, 0.10)])
+    bind_material(stage, bezel, "M_AgedSteel", (0.10, 0.10, 0.10))
     return idx + 3
 
 
@@ -680,7 +681,7 @@ def _place_zone_sign(stage, idx, x, y, z, text, band_color, rot_z=0):
     bxf.SetTranslate(Gf.Vec3d(x, y, z))
     bxf.SetRotate(Gf.Vec3f(0, 0, rot_z),
                   UsdGeom.XformCommonAPI.RotationOrderXYZ)
-    body.CreateDisplayColorAttr([Gf.Vec3f(0.96, 0.96, 0.94)])
+    bind_material(stage, body, "M_PlasticMatte", (0.96, 0.96, 0.94))
     band_path = f"/World/Layout/zonesign_band_{idx}"
     band = UsdGeom.Cube.Define(stage, band_path)
     band.GetSizeAttr().Set(2.0)
@@ -689,7 +690,7 @@ def _place_zone_sign(stage, idx, x, y, z, text, band_color, rot_z=0):
     bndxf.SetTranslate(Gf.Vec3d(x, y, z + panel_h / 2.0 - 0.10))
     bndxf.SetRotate(Gf.Vec3f(0, 0, rot_z),
                     UsdGeom.XformCommonAPI.RotationOrderXYZ)
-    band.CreateDisplayColorAttr([Gf.Vec3f(*band_color)])
+    bind_material(stage, band, "M_PlasticMatte", band_color)
     for sgn_i, sgn in enumerate((-1, 1)):
         cable_path = f"/World/Layout/zonesign_cable_{idx}_{sgn_i}"
         cable = UsdGeom.Cylinder.Define(stage, cable_path)
@@ -699,7 +700,7 @@ def _place_zone_sign(stage, idx, x, y, z, text, band_color, rot_z=0):
         cxf = UsdGeom.XformCommonAPI(cable.GetPrim())
         cxf.SetTranslate(Gf.Vec3d(x + sgn * panel_w * 0.4,
                                    y, z + panel_h / 2.0 + 0.5))
-        cable.CreateDisplayColorAttr([Gf.Vec3f(0.10, 0.10, 0.10)])
+        bind_material(stage, cable, "M_Rubber", (0.10, 0.10, 0.10))
     chars = list(text.upper())
     glyph_y = y + 0.05
     glyph_x_start = x - glyph_w / 2.0 + cell / 2.0
@@ -720,7 +721,7 @@ def _place_zone_sign(stage, idx, x, y, z, text, band_color, rot_z=0):
                 gxf.SetScale(Gf.Vec3f(cell / 2.0 * 0.85, 0.02,
                                        cell / 2.0 * 0.85))
                 gxf.SetTranslate(Gf.Vec3d(gx, glyph_y, gz))
-                cube.CreateDisplayColorAttr([Gf.Vec3f(0.06, 0.06, 0.06)])
+                bind_material(stage, cube, "M_Rubber", (0.06, 0.06, 0.06))
                 placed += 1
     return idx + 4 + placed
 
@@ -745,7 +746,7 @@ def _place_conveyor_run(stage, idx, x_start, y_start, x_end, y_end,
     dxf.SetTranslate(Gf.Vec3d(cx, cy, height))
     dxf.SetRotate(Gf.Vec3f(0, 0, rot_z),
                   UsdGeom.XformCommonAPI.RotationOrderXYZ)
-    deck.CreateDisplayColorAttr([Gf.Vec3f(0.30, 0.30, 0.32)])
+    bind_material(stage, deck, "M_AgedSteel", (0.30, 0.30, 0.32))
     ang = math.radians(rot_z)
     cos_a, sin_a = math.cos(ang), math.sin(ang)
     for sgn_i, sgn in enumerate((-1, 1)):
@@ -760,7 +761,7 @@ def _place_conveyor_run(stage, idx, x_start, y_start, x_end, y_end,
         rxf.SetTranslate(Gf.Vec3d(rx, ry, height + 0.08))
         rxf.SetRotate(Gf.Vec3f(0, 0, rot_z),
                       UsdGeom.XformCommonAPI.RotationOrderXYZ)
-        rail.CreateDisplayColorAttr([Gf.Vec3f(0.22, 0.22, 0.24)])
+        bind_material(stage, rail, "M_AgedSteel", (0.22, 0.22, 0.24))
     n_rollers = max(4, int(length / 0.18))
     for k in range(n_rollers):
         t = (k + 0.5) / n_rollers
@@ -776,7 +777,7 @@ def _place_conveyor_run(stage, idx, x_start, y_start, x_end, y_end,
         rxf.SetTranslate(Gf.Vec3d(rx, ry, height + 0.05))
         rxf.SetRotate(Gf.Vec3f(0, 0, rot_z),
                       UsdGeom.XformCommonAPI.RotationOrderXYZ)
-        roller.CreateDisplayColorAttr([Gf.Vec3f(0.55, 0.55, 0.58)])
+        bind_material(stage, roller, "M_AgedSteel", (0.55, 0.55, 0.58))
     n_legs = max(2, int(length / 1.5))
     for L in range(n_legs):
         t = L / max(1, n_legs - 1) if n_legs > 1 else 0.5
@@ -793,7 +794,7 @@ def _place_conveyor_run(stage, idx, x_start, y_start, x_end, y_end,
             lxf = UsdGeom.XformCommonAPI(leg.GetPrim())
             lxf.SetScale(Gf.Vec3f(0.04, 0.04, height / 2.0))
             lxf.SetTranslate(Gf.Vec3d(wx, wy, height / 2.0))
-            leg.CreateDisplayColorAttr([Gf.Vec3f(0.20, 0.20, 0.22)])
+            bind_material(stage, leg, "M_AgedSteel", (0.20, 0.20, 0.22))
     return idx + 1
 
 
@@ -822,7 +823,7 @@ def _place_office_enclosure(stage, idx, cx, cy, width=3.6, depth=2.6,
         xf.SetTranslate(Gf.Vec3d(wx, wy, 0.6))
         xf.SetRotate(Gf.Vec3f(0, 0, rot_z),
                      UsdGeom.XformCommonAPI.RotationOrderXYZ)
-        cube.CreateDisplayColorAttr([Gf.Vec3f(*wall_color)])
+        bind_material(stage, cube, "M_PaintedWall", wall_color)
         if not cube.GetPrim().HasAPI(UsdPhysics.CollisionAPI):
             UsdPhysics.CollisionAPI.Apply(cube.GetPrim())
         glass_path = f"/World/Layout/office_glass_{idx}_{wi}"
@@ -834,7 +835,7 @@ def _place_office_enclosure(stage, idx, cx, cy, width=3.6, depth=2.6,
         gxf.SetTranslate(Gf.Vec3d(wx, wy, 1.2 + (height - 1.2) / 2.0))
         gxf.SetRotate(Gf.Vec3f(0, 0, rot_z),
                       UsdGeom.XformCommonAPI.RotationOrderXYZ)
-        glass.CreateDisplayColorAttr([Gf.Vec3f(*glass_color)])
+        bind_material(stage, glass, "M_Glass", glass_color)
     floor_path = f"/World/Layout/office_floor_{idx}"
     floor = UsdGeom.Cube.Define(stage, floor_path)
     floor.GetSizeAttr().Set(2.0)
@@ -843,7 +844,7 @@ def _place_office_enclosure(stage, idx, cx, cy, width=3.6, depth=2.6,
     fxf.SetTranslate(Gf.Vec3d(cx, cy, 0.014))
     fxf.SetRotate(Gf.Vec3f(0, 0, rot_z),
                   UsdGeom.XformCommonAPI.RotationOrderXYZ)
-    floor.CreateDisplayColorAttr([Gf.Vec3f(0.55, 0.45, 0.35)])
+    bind_material(stage, floor, "M_Wood", (0.55, 0.45, 0.35))
 
     def _local_to_world(lx, ly):
         return cx + lx * cos_a - ly * sin_a, cy + lx * sin_a + ly * cos_a
@@ -857,7 +858,7 @@ def _place_office_enclosure(stage, idx, cx, cy, width=3.6, depth=2.6,
     dexf.SetTranslate(Gf.Vec3d(desk_x, desk_y, 0.74))
     dexf.SetRotate(Gf.Vec3f(0, 0, rot_z),
                    UsdGeom.XformCommonAPI.RotationOrderXYZ)
-    desk.CreateDisplayColorAttr([Gf.Vec3f(0.35, 0.28, 0.20)])
+    bind_material(stage, desk, "M_Wood", (0.35, 0.28, 0.20))
 
     mon_x, mon_y = _local_to_world(0.0, -depth / 2.0 + 0.4)
     mon_path = f"/World/Layout/office_monitor_{idx}"
@@ -868,7 +869,7 @@ def _place_office_enclosure(stage, idx, cx, cy, width=3.6, depth=2.6,
     moxf.SetTranslate(Gf.Vec3d(mon_x, mon_y, 1.05))
     moxf.SetRotate(Gf.Vec3f(0, 0, rot_z),
                    UsdGeom.XformCommonAPI.RotationOrderXYZ)
-    mon.CreateDisplayColorAttr([Gf.Vec3f(0.08, 0.08, 0.10)])
+    bind_material(stage, mon, "M_PlasticGloss", (0.08, 0.08, 0.10))
 
     ch_x, ch_y = _local_to_world(0.0, -depth / 2.0 + 1.2)
     chair_path = f"/World/Layout/office_chair_{idx}"
@@ -878,7 +879,7 @@ def _place_office_enclosure(stage, idx, cx, cy, width=3.6, depth=2.6,
     chair.GetAxisAttr().Set("Z")
     chxf = UsdGeom.XformCommonAPI(chair.GetPrim())
     chxf.SetTranslate(Gf.Vec3d(ch_x, ch_y, 0.25))
-    chair.CreateDisplayColorAttr([Gf.Vec3f(0.15, 0.15, 0.18)])
+    bind_material(stage, chair, "M_PlasticMatte", (0.15, 0.15, 0.18))
 
     mug_x, mug_y = _local_to_world(0.4, -depth / 2.0 + 0.4)
     mug_path = f"/World/Layout/office_mug_{idx}"
@@ -888,7 +889,7 @@ def _place_office_enclosure(stage, idx, cx, cy, width=3.6, depth=2.6,
     mug.GetAxisAttr().Set("Z")
     muxf = UsdGeom.XformCommonAPI(mug.GetPrim())
     muxf.SetTranslate(Gf.Vec3d(mug_x, mug_y, 0.84))
-    mug.CreateDisplayColorAttr([Gf.Vec3f(0.92, 0.92, 0.88)])
+    bind_material(stage, mug, "M_PlasticGloss", (0.92, 0.92, 0.88))
     return idx + 12
 
 
@@ -915,7 +916,7 @@ def _place_pallet_jack(stage, idx, x, y, rot_z=0, color=(0.85, 0.20, 0.20)):
         xf.SetTranslate(Gf.Vec3d(wx, wy, 0.07))
         xf.SetRotate(Gf.Vec3f(0, 0, rot_z),
                      UsdGeom.XformCommonAPI.RotationOrderXYZ)
-        cube.CreateDisplayColorAttr([Gf.Vec3f(*color)])
+        bind_material(stage, cube, "M_PlasticGloss", color)
     px, py = _to_world(0.05, 0)
     pivot_path = f"/World/Layout/jack_pivot_{idx}"
     pivot = UsdGeom.Cube.Define(stage, pivot_path)
@@ -925,7 +926,7 @@ def _place_pallet_jack(stage, idx, x, y, rot_z=0, color=(0.85, 0.20, 0.20)):
     pxf.SetTranslate(Gf.Vec3d(px, py, 0.18))
     pxf.SetRotate(Gf.Vec3f(0, 0, rot_z),
                   UsdGeom.XformCommonAPI.RotationOrderXYZ)
-    pivot.CreateDisplayColorAttr([Gf.Vec3f(*color)])
+    bind_material(stage, pivot, "M_PlasticGloss", color)
     handle_len = 1.0
     tilt = 25
     hx, hy = _to_world(-0.30, 0)
@@ -938,7 +939,7 @@ def _place_pallet_jack(stage, idx, x, y, rot_z=0, color=(0.85, 0.20, 0.20)):
     hxf.SetTranslate(Gf.Vec3d(hx, hy, 0.55))
     hxf.SetRotate(Gf.Vec3f(0, tilt, rot_z),
                   UsdGeom.XformCommonAPI.RotationOrderXYZ)
-    handle.CreateDisplayColorAttr([Gf.Vec3f(0.20, 0.20, 0.22)])
+    bind_material(stage, handle, "M_AgedSteel", (0.20, 0.20, 0.22))
     grip_local_x = -0.30 - handle_len * math.sin(math.radians(tilt))
     grip_z = 0.55 + handle_len / 2.0 * math.cos(math.radians(tilt))
     gx, gy = _to_world(grip_local_x, 0)
@@ -951,7 +952,7 @@ def _place_pallet_jack(stage, idx, x, y, rot_z=0, color=(0.85, 0.20, 0.20)):
     grxf.SetTranslate(Gf.Vec3d(gx, gy, grip_z))
     grxf.SetRotate(Gf.Vec3f(0, 0, rot_z),
                    UsdGeom.XformCommonAPI.RotationOrderXYZ)
-    grip.CreateDisplayColorAttr([Gf.Vec3f(0.10, 0.10, 0.10)])
+    bind_material(stage, grip, "M_Rubber", (0.10, 0.10, 0.10))
     for fi, (lx, ly) in enumerate(((fork_len - 0.05, fork_gap / 2.0),
                                     (fork_len - 0.05, -fork_gap / 2.0),
                                     (0.05, fork_gap / 2.0 + 0.05),
@@ -966,7 +967,7 @@ def _place_pallet_jack(stage, idx, x, y, rot_z=0, color=(0.85, 0.20, 0.20)):
         wxf.SetTranslate(Gf.Vec3d(wx, wy, 0.05))
         wxf.SetRotate(Gf.Vec3f(0, 0, rot_z),
                       UsdGeom.XformCommonAPI.RotationOrderXYZ)
-        w.CreateDisplayColorAttr([Gf.Vec3f(0.10, 0.10, 0.10)])
+        bind_material(stage, w, "M_Rubber", (0.10, 0.10, 0.10))
     return idx + 9
 
 
@@ -988,21 +989,21 @@ def _place_wall_windows(stage, idx, x_const, y_lo, y_hi, n_windows=4,
         fxf = UsdGeom.XformCommonAPI(f.GetPrim())
         fxf.SetScale(Gf.Vec3f(0.04, w / 2.0 + 0.05, h / 2.0 + 0.05))
         fxf.SetTranslate(Gf.Vec3d(x_const, wy, z_center))
-        f.CreateDisplayColorAttr([Gf.Vec3f(0.20, 0.22, 0.24)])
+        bind_material(stage, f, "M_AgedSteel", (0.20, 0.22, 0.24))
         g_path = f"/World/Layout/window_glass_{idx}_{k}"
         g = UsdGeom.Cube.Define(stage, g_path)
         g.GetSizeAttr().Set(2.0)
         gxf = UsdGeom.XformCommonAPI(g.GetPrim())
         gxf.SetScale(Gf.Vec3f(0.03, w / 2.0, h / 2.0))
         gxf.SetTranslate(Gf.Vec3d(x_const + 0.005, wy, z_center))
-        g.CreateDisplayColorAttr([Gf.Vec3f(*color)])
+        bind_material(stage, g, "M_Glass", color)
         m_path = f"/World/Layout/window_mull_{idx}_{k}"
         m = UsdGeom.Cube.Define(stage, m_path)
         m.GetSizeAttr().Set(2.0)
         mxf = UsdGeom.XformCommonAPI(m.GetPrim())
         mxf.SetScale(Gf.Vec3f(0.035, 0.025, h / 2.0))
         mxf.SetTranslate(Gf.Vec3d(x_const + 0.008, wy, z_center))
-        m.CreateDisplayColorAttr([Gf.Vec3f(0.20, 0.22, 0.24)])
+        bind_material(stage, m, "M_AgedSteel", (0.20, 0.22, 0.24))
     return idx + 3 * n_windows
 
 
@@ -1023,7 +1024,7 @@ def _place_mezzanine(stage, idx, x_const, y_lo, y_hi,
     dxf = UsdGeom.XformCommonAPI(deck.GetPrim())
     dxf.SetScale(Gf.Vec3f(depth / 2.0, span_y / 2.0, 0.04))
     dxf.SetTranslate(Gf.Vec3d(deck_x, deck_y, height))
-    deck.CreateDisplayColorAttr([Gf.Vec3f(0.40, 0.42, 0.45)])
+    bind_material(stage, deck, "M_AgedSteel", (0.40, 0.42, 0.45))
     if not deck.GetPrim().HasAPI(UsdPhysics.CollisionAPI):
         UsdPhysics.CollisionAPI.Apply(deck.GetPrim())
     n_legs = max(2, int(span_y / 3.0) + 1)
@@ -1038,7 +1039,7 @@ def _place_mezzanine(stage, idx, x_const, y_lo, y_hi,
         leg.GetAxisAttr().Set("Z")
         lxf = UsdGeom.XformCommonAPI(leg.GetPrim())
         lxf.SetTranslate(Gf.Vec3d(leg_outer_x, ly, height / 2.0))
-        leg.CreateDisplayColorAttr([Gf.Vec3f(0.30, 0.32, 0.35)])
+        bind_material(stage, leg, "M_AgedSteel", (0.30, 0.32, 0.35))
         if not leg.GetPrim().HasAPI(UsdPhysics.CollisionAPI):
             UsdPhysics.CollisionAPI.Apply(leg.GetPrim())
     rail_x = leg_outer_x
@@ -1049,14 +1050,14 @@ def _place_mezzanine(stage, idx, x_const, y_lo, y_hi,
         rxf = UsdGeom.XformCommonAPI(r.GetPrim())
         rxf.SetScale(Gf.Vec3f(0.025, span_y / 2.0, 0.025))
         rxf.SetTranslate(Gf.Vec3d(rail_x, deck_y, height + rz))
-        r.CreateDisplayColorAttr([Gf.Vec3f(0.95, 0.78, 0.10)])
+        bind_material(stage, r, "M_YellowSafetyPaint", (0.95, 0.78, 0.10))
     toe_path = f"/World/Layout/mezz_toe_{idx}"
     toe = UsdGeom.Cube.Define(stage, toe_path)
     toe.GetSizeAttr().Set(2.0)
     txf = UsdGeom.XformCommonAPI(toe.GetPrim())
     txf.SetScale(Gf.Vec3f(0.02, span_y / 2.0, 0.10))
     txf.SetTranslate(Gf.Vec3d(rail_x, deck_y, height + 0.10))
-    toe.CreateDisplayColorAttr([Gf.Vec3f(0.30, 0.30, 0.32)])
+    bind_material(stage, toe, "M_AgedSteel", (0.30, 0.30, 0.32))
     stair_run = 1.8
     stair_y = y_lo - stair_run / 2.0
     stair_x = leg_outer_x
@@ -1069,7 +1070,7 @@ def _place_mezzanine(stage, idx, x_const, y_lo, y_hi,
     sxf.SetRotate(Gf.Vec3f(math.degrees(math.atan2(height, stair_run)),
                             0, 0),
                   UsdGeom.XformCommonAPI.RotationOrderXYZ)
-    stair.CreateDisplayColorAttr([Gf.Vec3f(0.40, 0.42, 0.45)])
+    bind_material(stage, stair, "M_AgedSteel", (0.40, 0.42, 0.45))
     return idx + 5 + n_legs
 
 
@@ -1093,7 +1094,7 @@ def _place_open_dock_door(stage, idx, x, y, width=2.6, height=3.2, rot_z=0):
         jxf.SetTranslate(Gf.Vec3d(wx, wy, height / 2.0))
         jxf.SetRotate(Gf.Vec3f(0, 0, rot_z),
                       UsdGeom.XformCommonAPI.RotationOrderXYZ)
-        cube.CreateDisplayColorAttr([Gf.Vec3f(*frame_color)])
+        bind_material(stage, cube, "M_AgedSteel", frame_color)
     head_path = f"/World/Layout/odock_header_{idx}"
     head = UsdGeom.Cube.Define(stage, head_path)
     head.GetSizeAttr().Set(2.0)
@@ -1102,7 +1103,7 @@ def _place_open_dock_door(stage, idx, x, y, width=2.6, height=3.2, rot_z=0):
     hxf.SetTranslate(Gf.Vec3d(x, y, height + 0.05))
     hxf.SetRotate(Gf.Vec3f(0, 0, rot_z),
                   UsdGeom.XformCommonAPI.RotationOrderXYZ)
-    head.CreateDisplayColorAttr([Gf.Vec3f(*frame_color)])
+    bind_material(stage, head, "M_AgedSteel", frame_color)
     bundle_path = f"/World/Layout/odock_bundle_{idx}"
     bundle = UsdGeom.Cube.Define(stage, bundle_path)
     bundle.GetSizeAttr().Set(2.0)
@@ -1111,7 +1112,7 @@ def _place_open_dock_door(stage, idx, x, y, width=2.6, height=3.2, rot_z=0):
     bxf.SetTranslate(Gf.Vec3d(x, y + 0.15, height - 0.10))
     bxf.SetRotate(Gf.Vec3f(0, 0, rot_z),
                   UsdGeom.XformCommonAPI.RotationOrderXYZ)
-    bundle.CreateDisplayColorAttr([Gf.Vec3f(0.62, 0.62, 0.58)])
+    bind_material(stage, bundle, "M_AgedSteel", (0.62, 0.62, 0.58))
     thr_path = f"/World/Layout/odock_thresh_{idx}"
     thr = UsdGeom.Cube.Define(stage, thr_path)
     thr.GetSizeAttr().Set(2.0)
@@ -1120,7 +1121,7 @@ def _place_open_dock_door(stage, idx, x, y, width=2.6, height=3.2, rot_z=0):
     txf.SetTranslate(Gf.Vec3d(x, y, 0.025))
     txf.SetRotate(Gf.Vec3f(0, 0, rot_z),
                   UsdGeom.XformCommonAPI.RotationOrderXYZ)
-    thr.CreateDisplayColorAttr([Gf.Vec3f(*threshold_color)])
+    bind_material(stage, thr, "M_PaintedConcrete", threshold_color)
     return idx + 5
 
 
@@ -1134,7 +1135,7 @@ def _place_truck_back(stage, idx, x, y, width=2.6, depth=4.5, height=3.0,
     bxf = UsdGeom.XformCommonAPI(body.GetPrim())
     bxf.SetScale(Gf.Vec3f(width / 2.0, depth / 2.0, height / 2.0))
     bxf.SetTranslate(Gf.Vec3d(x, y, height / 2.0))
-    body.CreateDisplayColorAttr([Gf.Vec3f(*color)])
+    bind_material(stage, body, "M_AgedSteel", color)
     for sgn_i, sgn in enumerate((-1, 1)):
         s_path = f"/World/Layout/truck_seam_{idx}_{sgn_i}"
         s = UsdGeom.Cube.Define(stage, s_path)
@@ -1144,7 +1145,7 @@ def _place_truck_back(stage, idx, x, y, width=2.6, depth=4.5, height=3.0,
         sxf.SetTranslate(Gf.Vec3d(x + sgn * width * 0.40,
                                    y + depth / 2.0 - 0.04,
                                    height / 2.0))
-        s.CreateDisplayColorAttr([Gf.Vec3f(0.15, 0.18, 0.25)])
+        bind_material(stage, s, "M_AgedSteel", (0.15, 0.18, 0.25))
     for sgn_i, sgn in enumerate((-1, 1)):
         l_path = f"/World/Layout/truck_taillight_{idx}_{sgn_i}"
         L = UsdGeom.Cube.Define(stage, l_path)
@@ -1153,7 +1154,7 @@ def _place_truck_back(stage, idx, x, y, width=2.6, depth=4.5, height=3.0,
         lxf.SetScale(Gf.Vec3f(0.16, 0.04, 0.10))
         lxf.SetTranslate(Gf.Vec3d(x + sgn * width * 0.42,
                                    y + depth / 2.0 - 0.05, 0.55))
-        L.CreateDisplayColorAttr([Gf.Vec3f(0.85, 0.10, 0.10)])
+        bind_material(stage, L, "M_Emissive", (0.85, 0.10, 0.10))
     return idx + 5
 
 
@@ -1169,7 +1170,7 @@ def _place_dock_leveler_ramped(stage, idx, x, y, width=2.4, depth=1.4,
     xf.SetTranslate(Gf.Vec3d(x, y, 0.10))
     xf.SetRotate(Gf.Vec3f(-tilt_deg, 0, 0),
                  UsdGeom.XformCommonAPI.RotationOrderXYZ)
-    cube.CreateDisplayColorAttr([Gf.Vec3f(0.45, 0.45, 0.48)])
+    bind_material(stage, cube, "M_AgedSteel", (0.45, 0.45, 0.48))
     return idx + 1
 
 
@@ -1185,7 +1186,7 @@ def _place_wrapping_station(stage, idx, x, y, rot_z=0):
     tt.GetAxisAttr().Set("Z")
     txf = UsdGeom.XformCommonAPI(tt.GetPrim())
     txf.SetTranslate(Gf.Vec3d(x, y, 0.05))
-    tt.CreateDisplayColorAttr([Gf.Vec3f(0.30, 0.32, 0.35)])
+    bind_material(stage, tt, "M_AgedSteel", (0.30, 0.32, 0.35))
     base_local_x = 1.10
     base_x = x + base_local_x * cos_a
     base_y = y + base_local_x * sin_a
@@ -1197,7 +1198,7 @@ def _place_wrapping_station(stage, idx, x, y, rot_z=0):
     bxf.SetTranslate(Gf.Vec3d(base_x, base_y, 0.10))
     bxf.SetRotate(Gf.Vec3f(0, 0, rot_z),
                   UsdGeom.XformCommonAPI.RotationOrderXYZ)
-    base.CreateDisplayColorAttr([Gf.Vec3f(0.25, 0.27, 0.30)])
+    bind_material(stage, base, "M_AgedSteel", (0.25, 0.27, 0.30))
     mast_path = f"/World/Layout/wrap_mast_{idx}"
     mast = UsdGeom.Cube.Define(stage, mast_path)
     mast.GetSizeAttr().Set(2.0)
@@ -1206,7 +1207,7 @@ def _place_wrapping_station(stage, idx, x, y, rot_z=0):
     mxf.SetTranslate(Gf.Vec3d(base_x, base_y, 1.00))
     mxf.SetRotate(Gf.Vec3f(0, 0, rot_z),
                   UsdGeom.XformCommonAPI.RotationOrderXYZ)
-    mast.CreateDisplayColorAttr([Gf.Vec3f(0.95, 0.78, 0.10)])
+    bind_material(stage, mast, "M_YellowSafetyPaint", (0.95, 0.78, 0.10))
     roll_local_x = base_local_x - 0.20
     roll_x = x + roll_local_x * cos_a
     roll_y = y + roll_local_x * sin_a
@@ -1217,7 +1218,7 @@ def _place_wrapping_station(stage, idx, x, y, rot_z=0):
     roll.GetAxisAttr().Set("Z")
     rxf = UsdGeom.XformCommonAPI(roll.GetPrim())
     rxf.SetTranslate(Gf.Vec3d(roll_x, roll_y, 0.80))
-    roll.CreateDisplayColorAttr([Gf.Vec3f(0.78, 0.85, 0.92)])
+    bind_material(stage, roll, "M_StretchFilm", (0.78, 0.85, 0.92))
     return idx + 4
 
 
@@ -1234,7 +1235,7 @@ def _place_wrapped_pallet(stage, idx, x, y, asset_library, rot_z=0):
     blxf.SetTranslate(Gf.Vec3d(x, y, 0.65))
     blxf.SetRotate(Gf.Vec3f(0, 0, rot_z),
                    UsdGeom.XformCommonAPI.RotationOrderXYZ)
-    block.CreateDisplayColorAttr([Gf.Vec3f(0.78, 0.86, 0.94)])
+    bind_material(stage, block, "M_StretchFilm", (0.78, 0.86, 0.94))
     ang = math.radians(rot_z)
     cos_a, sin_a = math.cos(ang), math.sin(ang)
     seams_placed = 0
@@ -1256,7 +1257,7 @@ def _place_wrapped_pallet(stage, idx, x, y, asset_library, rot_z=0):
             sxf.SetTranslate(Gf.Vec3d(wx, wy, bz))
             sxf.SetRotate(Gf.Vec3f(0, 0, rot_z),
                           UsdGeom.XformCommonAPI.RotationOrderXYZ)
-            seam.CreateDisplayColorAttr([Gf.Vec3f(0.60, 0.72, 0.82)])
+            bind_material(stage, seam, "M_StretchFilm", (0.60, 0.72, 0.82))
             seams_placed += 1
     return idx + 1 + seams_placed
 
@@ -1282,7 +1283,7 @@ def _place_hand_truck(stage, idx, x, y, rot_z=0, color=(0.18, 0.18, 0.20)):
     pxf.SetTranslate(Gf.Vec3d(bx, by, 0.60))
     pxf.SetRotate(Gf.Vec3f(0, 0, rot_z),
                   UsdGeom.XformCommonAPI.RotationOrderXYZ)
-    plate.CreateDisplayColorAttr([Gf.Vec3f(*color)])
+    bind_material(stage, plate, "M_PlasticMatte", color)
 
     # L-foot — flat tongue extending forward at floor level.
     fx_local, fy_local = 0.20, 0.0
@@ -1295,7 +1296,7 @@ def _place_hand_truck(stage, idx, x, y, rot_z=0, color=(0.18, 0.18, 0.20)):
     fxf.SetTranslate(Gf.Vec3d(fwx, fwy, 0.025))
     fxf.SetRotate(Gf.Vec3f(0, 0, rot_z),
                   UsdGeom.XformCommonAPI.RotationOrderXYZ)
-    foot.CreateDisplayColorAttr([Gf.Vec3f(*color)])
+    bind_material(stage, foot, "M_PlasticMatte", color)
 
     # Handle bar — single horizontal cylinder across the top of the plate.
     hx, hy = _to_world(0, 0)
@@ -1308,7 +1309,7 @@ def _place_hand_truck(stage, idx, x, y, rot_z=0, color=(0.18, 0.18, 0.20)):
     hxf.SetTranslate(Gf.Vec3d(hx, hy, 1.18))
     hxf.SetRotate(Gf.Vec3f(0, 0, rot_z),
                   UsdGeom.XformCommonAPI.RotationOrderXYZ)
-    handle.CreateDisplayColorAttr([Gf.Vec3f(0.10, 0.10, 0.10)])
+    bind_material(stage, handle, "M_AgedSteel", (0.10, 0.10, 0.10))
 
     # Two wheels at the base of the plate, on a transverse axle.
     for wi, sgn in enumerate((-1, 1)):
@@ -1323,6 +1324,6 @@ def _place_hand_truck(stage, idx, x, y, rot_z=0, color=(0.18, 0.18, 0.20)):
         wxf.SetTranslate(Gf.Vec3d(wwx, wwy, 0.10))
         wxf.SetRotate(Gf.Vec3f(0, 0, rot_z),
                       UsdGeom.XformCommonAPI.RotationOrderXYZ)
-        w.CreateDisplayColorAttr([Gf.Vec3f(0.08, 0.08, 0.08)])
+        bind_material(stage, w, "M_Rubber", (0.08, 0.08, 0.08))
 
     return idx + 1

@@ -56,6 +56,7 @@ from .props import (
     _place_wrapped_pallet,
     _place_hand_truck,
 )
+from .materials import bind_material
 from pxr import UsdGeom, Gf
 
 
@@ -1112,7 +1113,7 @@ def _spawn_atmosphere_clutter(rack_positions, params, asset_library, stage, idx)
             qxf = UsdGeom.XformCommonAPI(quad.GetPrim())
             qxf.SetScale(Gf.Vec3f(0.012, poster_w / 2.0, poster_h / 2.0))
             qxf.SetTranslate(Gf.Vec3d(wall_x, py, poster_z))
-            quad.CreateDisplayColorAttr([Gf.Vec3f(*color)])
+            bind_material(stage, quad, "M_PlasticMatte", color)
             # Thin white inner label band for variety.
             label_path = f"/World/Layout/wall_poster_band_{idx}_b"
             band = UsdGeom.Cube.Define(stage, label_path)
@@ -1121,7 +1122,7 @@ def _spawn_atmosphere_clutter(rack_positions, params, asset_library, stage, idx)
             bxf.SetScale(Gf.Vec3f(0.013, poster_w / 2.0 - 0.05, 0.05))
             bxf.SetTranslate(Gf.Vec3d(wall_x + normal_x * 0.001, py,
                                        poster_z - poster_h / 2.0 + 0.10))
-            band.CreateDisplayColorAttr([Gf.Vec3f(0.95, 0.95, 0.95)])
+            bind_material(stage, band, "M_PaintedWall", (0.95, 0.95, 0.95))
             idx += 1
             count += 1
 
@@ -1139,7 +1140,7 @@ def _spawn_atmosphere_clutter(rack_positions, params, asset_library, stage, idx)
                                    0.10))
         rxf.SetRotate(Gf.Vec3f(0, 0, random.uniform(0, 90)),
                       UsdGeom.XformCommonAPI.RotationOrderXYZ)
-        roll.CreateDisplayColorAttr([Gf.Vec3f(0.92, 0.94, 0.96)])
+        bind_material(stage, roll, "M_StretchFilm", (0.92, 0.94, 0.96))
         idx += 1
         count += 1
 

@@ -23,6 +23,7 @@ from .geometry import (
     WALL_CLEARANCE,
     RACK_CEILING_FILL,
 )
+from .materials import bind_material
 
 
 _GLYPH_3x5 = {
@@ -52,7 +53,7 @@ def _paint_floor_stripe(stage, idx, x, y, length_x, length_y, color, z=0.012):
     # Cube default is 2x2x2 → scale halves give the desired full extents.
     xf.SetScale(Gf.Vec3f(length_x / 2.0, length_y / 2.0, 0.012))
     xf.SetTranslate(Gf.Vec3d(x, y, z))
-    cube.CreateDisplayColorAttr([Gf.Vec3f(*color)])
+    bind_material(stage, cube, "M_PaintedConcrete", color)
     return idx + 1
 
 
@@ -240,6 +241,6 @@ def _draw_floor_glyph(stage, idx, text, x_center, y_center, cell_size=0.18,
                 xf.SetTranslate(Gf.Vec3d(wx, wy, z))
                 xf.SetRotate(Gf.Vec3f(0, 0, rot_z),
                              UsdGeom.XformCommonAPI.RotationOrderXYZ)
-                cube.CreateDisplayColorAttr([Gf.Vec3f(*color)])
+                bind_material(stage, cube, "M_PaintedConcrete", color)
                 placed += 1
     return idx + placed
