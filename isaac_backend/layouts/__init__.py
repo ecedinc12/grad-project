@@ -13,28 +13,35 @@ from .geometry import (
     _affine_remap,
     _resolve_params,
 )
-from .spawners import (
+from .rack import (
     _spawn_racks,
     _populate_rack_shelves,
+    _spawn_column_guards,
+    _spawn_rack_end_details,
+)
+from .dock import (
     _spawn_pallets,
-    _spawn_clutter,
     _spawn_dock_area,
     _spawn_bulk_stock,
+    _spawn_dock_doors,
+)
+from .marking import (
     _spawn_floor_markings,
-    _spawn_column_guards,
+    _spawn_main_aisle_treatment,
+    _spawn_marshalling_band,
+)
+from .realism import (
+    _spawn_clutter,
     _spawn_charging_station,
-    _spawn_rack_end_details,
     _spawn_wall_details,
     _spawn_realism_extras,
     _spawn_aisle_floor_wear,
-    _spawn_main_aisle_treatment,
-    _spawn_marshalling_band,
     _spawn_human_imperfection,
     _spawn_mid_aisle_forklift,
-    _spawn_dock_doors,
     _spawn_floor_filling,
     _spawn_polish_pass,
     _spawn_realism_layer,
+    _spawn_realism_layer_2,
 )
 
 
@@ -132,6 +139,7 @@ def generate_layout(layout_name, layout_params, asset_library, stage):
     idx, num_floor_fill = _spawn_floor_filling(params, rack_positions, asset_library, stage, idx)
     idx, num_polish = _spawn_polish_pass(params, rack_positions, asset_library, stage, idx)
     idx, num_realism_layer = _spawn_realism_layer(rack_positions, params, asset_library, stage, idx)
+    idx, num_realism_layer_2 = _spawn_realism_layer_2(rack_positions, params, asset_library, stage, idx)
 
     print(f"[INFO] Spawned {num_racks} racks, {num_shelf_items} shelf items, "
           f"{num_pallets} pallets, {num_clutter} clutter props, {num_dock_items} dock items, "
@@ -143,7 +151,8 @@ def generate_layout(layout_name, layout_params, asset_library, stage):
           f"{num_human} human-imperfection items, {num_mid_fork} mid-aisle forklift, "
           f"{num_doors} dock doors, {num_polish} polish-pass items, "
           f"{num_floor_fill} floor-fill staging items, "
-          f"{num_realism_layer} realism-layer items.")
+          f"{num_realism_layer} realism-layer items, "
+          f"{num_realism_layer_2} realism-layer-2 items.")
 
     return params["bounds_min"], params["bounds_max"]
 
