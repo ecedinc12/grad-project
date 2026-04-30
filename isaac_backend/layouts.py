@@ -2390,7 +2390,9 @@ def _spawn_charging_station(params, asset_library, stage, idx):
 
 def _spawn_dock_doors(params, stage, idx):
     """Roll-up sectional doors along the front (-Y) wall — one per typical
-    bay-width along the wall, evenly spaced."""
+    bay-width along the wall, evenly spaced. If `_open_dock_door_idx` is set
+    in params, that slot is skipped so realism_layer_2 can render an open
+    door + truck silhouette in its place."""
     bmin = params["bounds_min"]
     bmax = params["bounds_max"]
     wall_y = bmin[1] + 0.06  # just inside the wall
@@ -2400,8 +2402,11 @@ def _spawn_dock_doors(params, stage, idx):
     n_doors = max(1, int((span_x - 2.0) / spacing))
     total_w = (n_doors - 1) * spacing
     x_start = (bmin[0] + bmax[0]) / 2.0 - total_w / 2.0
+    skip_idx = params.get("_open_dock_door_idx")
     count = 0
     for d in range(n_doors):
+        if skip_idx is not None and d == skip_idx:
+            continue
         x = x_start + d * spacing
         idx = _place_dock_door(stage, idx, x, wall_y, width=door_w, height=3.2, rot_z=0)
         count += 1
@@ -3252,6 +3257,487 @@ def _spawn_realism_layer(rack_positions, params, asset_library, stage, idx):
     return idx, count
 
 
+def _place_pallet_jack(stage, idx, x, y, rot_z=0, color=(0.85, 0.20, 0.20)):
+    """Manual pallet jack — two parallel fork tines (along local +X), pivot
+    block at the base of the handle, angled tubular handle with a transverse
+    grip, and four small wheels."""
+    ang = math.radians(rot_z)
+    cos_a, sin_a = math.cos(ang), math.sin(ang)
+
+    def _to_world(lx, ly):
+        return x + lx * cos_a - ly * sin_a, y + lx * sin_a + ly * cos_a
+
+    fork_len = 1.10
+    fork_w = 0.10
+    fork_gap = 0.30
+    for sgn_i, sgn in enumerate((-1, 1)):
+        wx, wy = _to_world(fork_len / 2.0, sgn * fork_gap / 2.0)
+        path = f"/World/Layout/jack_fork_{idx}_{sgn_i}"
+        cube = UsdGeom.Cube.Define(stage, path)
+        cube.GetSizeAttr().Set(2.0)
+        xf = UsdGeom.XformCommonAPI(cube.GetPrim())
+        xf.SetScale(Gf.Vec3f(fork_len / 2.0, fork_w / 2.0, 0.04))
+        xf.SetTranslate(Gf.Vec3d(wx, wy, 0.07))
+        xf.SetRotate(Gf.Vec3f(0, 0, rot_z),
+                     UsdGeom.XformCommonAPI.RotationOrderXYZ)
+        cube.CreateDisplayColorAttr([Gf.Vec3f(*color)])
+    px, py = _to_world(0.05, 0)
+    pivot_path = f"/World/Layout/jack_pivot_{idx}"
+    pivot = UsdGeom.Cube.Define(stage, pivot_path)
+    pivot.GetSizeAttr().Set(2.0)
+    pxf = UsdGeom.XformCommonAPI(pivot.GetPrim())
+    pxf.SetScale(Gf.Vec3f(0.10, 0.30, 0.18))
+    pxf.SetTranslate(Gf.Vec3d(px, py, 0.18))
+    pxf.SetRotate(Gf.Vec3f(0, 0, rot_z),
+                  UsdGeom.XformCommonAPI.RotationOrderXYZ)
+    pivot.CreateDisplayColorAttr([Gf.Vec3f(*color)])
+    handle_len = 1.0
+    tilt = 25
+    hx, hy = _to_world(-0.30, 0)
+    handle_path = f"/World/Layout/jack_handle_{idx}"
+    handle = UsdGeom.Cylinder.Define(stage, handle_path)
+    handle.GetRadiusAttr().Set(0.025)
+    handle.GetHeightAttr().Set(handle_len)
+    handle.GetAxisAttr().Set("Z")
+    hxf = UsdGeom.XformCommonAPI(handle.GetPrim())
+    hxf.SetTranslate(Gf.Vec3d(hx, hy, 0.55))
+    hxf.SetRotate(Gf.Vec3f(0, tilt, rot_z),
+                  UsdGeom.XformCommonAPI.RotationOrderXYZ)
+    handle.CreateDisplayColorAttr([Gf.Vec3f(0.20, 0.20, 0.22)])
+    grip_local_x = -0.30 - handle_len * math.sin(math.radians(tilt))
+    grip_z = 0.55 + handle_len / 2.0 * math.cos(math.radians(tilt))
+    gx, gy = _to_world(grip_local_x, 0)
+    grip_path = f"/World/Layout/jack_grip_{idx}"
+    grip = UsdGeom.Cylinder.Define(stage, grip_path)
+    grip.GetRadiusAttr().Set(0.04)
+    grip.GetHeightAttr().Set(0.20)
+    grip.GetAxisAttr().Set("Y")
+    grxf = UsdGeom.XformCommonAPI(grip.GetPrim())
+    grxf.SetTranslate(Gf.Vec3d(gx, gy, grip_z))
+    grxf.SetRotate(Gf.Vec3f(0, 0, rot_z),
+                   UsdGeom.XformCommonAPI.RotationOrderXYZ)
+    grip.CreateDisplayColorAttr([Gf.Vec3f(0.10, 0.10, 0.10)])
+    for fi, (lx, ly) in enumerate(((fork_len - 0.05, fork_gap / 2.0),
+                                    (fork_len - 0.05, -fork_gap / 2.0),
+                                    (0.05, fork_gap / 2.0 + 0.05),
+                                    (0.05, -fork_gap / 2.0 - 0.05))):
+        wx, wy = _to_world(lx, ly)
+        wheel_path = f"/World/Layout/jack_wheel_{idx}_{fi}"
+        w = UsdGeom.Cylinder.Define(stage, wheel_path)
+        w.GetRadiusAttr().Set(0.05)
+        w.GetHeightAttr().Set(0.04)
+        w.GetAxisAttr().Set("Y")
+        wxf = UsdGeom.XformCommonAPI(w.GetPrim())
+        wxf.SetTranslate(Gf.Vec3d(wx, wy, 0.05))
+        wxf.SetRotate(Gf.Vec3f(0, 0, rot_z),
+                      UsdGeom.XformCommonAPI.RotationOrderXYZ)
+        w.CreateDisplayColorAttr([Gf.Vec3f(0.10, 0.10, 0.10)])
+    return idx + 9
+
+
+def _place_wall_windows(stage, idx, x_const, y_lo, y_hi, n_windows=4,
+                         z_center=2.4, w=1.4, h=1.0,
+                         color=(0.55, 0.70, 0.85)):
+    """Distribute n_windows light-blue glazed panels along a wall (constant X)
+    between y_lo and y_hi at vertical center z_center. Each window: dark frame
+    + glass + a thin vertical mullion proud of the glass."""
+    if y_hi - y_lo < 1.5 or n_windows < 1:
+        return idx
+    span = y_hi - y_lo
+    for k in range(n_windows):
+        t = (k + 0.5) / n_windows
+        wy = y_lo + t * span
+        f_path = f"/World/Layout/window_frame_{idx}_{k}"
+        f = UsdGeom.Cube.Define(stage, f_path)
+        f.GetSizeAttr().Set(2.0)
+        fxf = UsdGeom.XformCommonAPI(f.GetPrim())
+        fxf.SetScale(Gf.Vec3f(0.04, w / 2.0 + 0.05, h / 2.0 + 0.05))
+        fxf.SetTranslate(Gf.Vec3d(x_const, wy, z_center))
+        f.CreateDisplayColorAttr([Gf.Vec3f(0.20, 0.22, 0.24)])
+        g_path = f"/World/Layout/window_glass_{idx}_{k}"
+        g = UsdGeom.Cube.Define(stage, g_path)
+        g.GetSizeAttr().Set(2.0)
+        gxf = UsdGeom.XformCommonAPI(g.GetPrim())
+        gxf.SetScale(Gf.Vec3f(0.03, w / 2.0, h / 2.0))
+        gxf.SetTranslate(Gf.Vec3d(x_const + 0.005, wy, z_center))
+        g.CreateDisplayColorAttr([Gf.Vec3f(*color)])
+        m_path = f"/World/Layout/window_mull_{idx}_{k}"
+        m = UsdGeom.Cube.Define(stage, m_path)
+        m.GetSizeAttr().Set(2.0)
+        mxf = UsdGeom.XformCommonAPI(m.GetPrim())
+        mxf.SetScale(Gf.Vec3f(0.035, 0.025, h / 2.0))
+        mxf.SetTranslate(Gf.Vec3d(x_const + 0.008, wy, z_center))
+        m.CreateDisplayColorAttr([Gf.Vec3f(0.20, 0.22, 0.24)])
+    return idx + 3 * n_windows
+
+
+def _place_mezzanine(stage, idx, x_const, y_lo, y_hi,
+                      depth=2.5, height=3.4, side=-1):
+    """Mezzanine deck along a wall at constant X spanning y_lo..y_hi.
+    side=-1 → deck extends in -X (wall on +X side); side=+1 → deck in +X.
+    Deck + column legs every ~3m + top rail + mid rail + toe board on the
+    open edge + a stair stub at the y_lo end. Deck and legs carry CollisionAPI."""
+    span_y = y_hi - y_lo
+    if span_y < 3.0:
+        return idx
+    deck_x = x_const + side * (depth / 2.0)
+    deck_y = (y_lo + y_hi) / 2.0
+    deck_path = f"/World/Layout/mezz_deck_{idx}"
+    deck = UsdGeom.Cube.Define(stage, deck_path)
+    deck.GetSizeAttr().Set(2.0)
+    dxf = UsdGeom.XformCommonAPI(deck.GetPrim())
+    dxf.SetScale(Gf.Vec3f(depth / 2.0, span_y / 2.0, 0.04))
+    dxf.SetTranslate(Gf.Vec3d(deck_x, deck_y, height))
+    deck.CreateDisplayColorAttr([Gf.Vec3f(0.40, 0.42, 0.45)])
+    if not deck.GetPrim().HasAPI(UsdPhysics.CollisionAPI):
+        UsdPhysics.CollisionAPI.Apply(deck.GetPrim())
+    n_legs = max(2, int(span_y / 3.0) + 1)
+    leg_outer_x = x_const + side * (depth - 0.15)
+    for L in range(n_legs):
+        t = L / max(1, n_legs - 1)
+        ly = y_lo + t * span_y
+        leg_path = f"/World/Layout/mezz_leg_{idx}_{L}"
+        leg = UsdGeom.Cylinder.Define(stage, leg_path)
+        leg.GetRadiusAttr().Set(0.08)
+        leg.GetHeightAttr().Set(height)
+        leg.GetAxisAttr().Set("Z")
+        lxf = UsdGeom.XformCommonAPI(leg.GetPrim())
+        lxf.SetTranslate(Gf.Vec3d(leg_outer_x, ly, height / 2.0))
+        leg.CreateDisplayColorAttr([Gf.Vec3f(0.30, 0.32, 0.35)])
+        if not leg.GetPrim().HasAPI(UsdPhysics.CollisionAPI):
+            UsdPhysics.CollisionAPI.Apply(leg.GetPrim())
+    rail_x = leg_outer_x
+    for ri, rz in enumerate((1.05, 0.55)):
+        r_path = f"/World/Layout/mezz_rail_{idx}_{ri}"
+        r = UsdGeom.Cube.Define(stage, r_path)
+        r.GetSizeAttr().Set(2.0)
+        rxf = UsdGeom.XformCommonAPI(r.GetPrim())
+        rxf.SetScale(Gf.Vec3f(0.025, span_y / 2.0, 0.025))
+        rxf.SetTranslate(Gf.Vec3d(rail_x, deck_y, height + rz))
+        r.CreateDisplayColorAttr([Gf.Vec3f(0.95, 0.78, 0.10)])
+    toe_path = f"/World/Layout/mezz_toe_{idx}"
+    toe = UsdGeom.Cube.Define(stage, toe_path)
+    toe.GetSizeAttr().Set(2.0)
+    txf = UsdGeom.XformCommonAPI(toe.GetPrim())
+    txf.SetScale(Gf.Vec3f(0.02, span_y / 2.0, 0.10))
+    txf.SetTranslate(Gf.Vec3d(rail_x, deck_y, height + 0.10))
+    toe.CreateDisplayColorAttr([Gf.Vec3f(0.30, 0.30, 0.32)])
+    stair_run = 1.8
+    stair_y = y_lo - stair_run / 2.0
+    stair_x = leg_outer_x
+    stair_path = f"/World/Layout/mezz_stair_{idx}"
+    stair = UsdGeom.Cube.Define(stage, stair_path)
+    stair.GetSizeAttr().Set(2.0)
+    sxf = UsdGeom.XformCommonAPI(stair.GetPrim())
+    sxf.SetScale(Gf.Vec3f(0.50, stair_run / 2.0, 0.05))
+    sxf.SetTranslate(Gf.Vec3d(stair_x, stair_y, height / 2.0))
+    sxf.SetRotate(Gf.Vec3f(math.degrees(math.atan2(height, stair_run)),
+                            0, 0),
+                  UsdGeom.XformCommonAPI.RotationOrderXYZ)
+    stair.CreateDisplayColorAttr([Gf.Vec3f(0.40, 0.42, 0.45)])
+    return idx + 5 + n_legs
+
+
+def _place_open_dock_door(stage, idx, x, y, width=2.6, height=3.2, rot_z=0):
+    """Open dock door — two side jambs + header + a panel-bundle 'rolled-up'
+    rectangle below the header + a dark threshold strip along the floor where
+    the door used to seal. Reads as 'truck is currently being loaded here.'"""
+    frame_color = (0.25, 0.25, 0.27)
+    threshold_color = (0.10, 0.10, 0.12)
+    ang = math.radians(rot_z)
+    cos_a, sin_a = math.cos(ang), math.sin(ang)
+    for sgn_i, sgn in enumerate((-1, 1)):
+        local_x = sgn * (width / 2.0 + 0.06)
+        wx = x + local_x * cos_a
+        wy = y + local_x * sin_a
+        path = f"/World/Layout/odock_jamb_{idx}_{sgn_i}"
+        cube = UsdGeom.Cube.Define(stage, path)
+        cube.GetSizeAttr().Set(2.0)
+        jxf = UsdGeom.XformCommonAPI(cube.GetPrim())
+        jxf.SetScale(Gf.Vec3f(0.06, 0.06, height / 2.0))
+        jxf.SetTranslate(Gf.Vec3d(wx, wy, height / 2.0))
+        jxf.SetRotate(Gf.Vec3f(0, 0, rot_z),
+                      UsdGeom.XformCommonAPI.RotationOrderXYZ)
+        cube.CreateDisplayColorAttr([Gf.Vec3f(*frame_color)])
+    head_path = f"/World/Layout/odock_header_{idx}"
+    head = UsdGeom.Cube.Define(stage, head_path)
+    head.GetSizeAttr().Set(2.0)
+    hxf = UsdGeom.XformCommonAPI(head.GetPrim())
+    hxf.SetScale(Gf.Vec3f(width / 2.0 + 0.08, 0.06, 0.10))
+    hxf.SetTranslate(Gf.Vec3d(x, y, height + 0.05))
+    hxf.SetRotate(Gf.Vec3f(0, 0, rot_z),
+                  UsdGeom.XformCommonAPI.RotationOrderXYZ)
+    head.CreateDisplayColorAttr([Gf.Vec3f(*frame_color)])
+    bundle_path = f"/World/Layout/odock_bundle_{idx}"
+    bundle = UsdGeom.Cube.Define(stage, bundle_path)
+    bundle.GetSizeAttr().Set(2.0)
+    bxf = UsdGeom.XformCommonAPI(bundle.GetPrim())
+    bxf.SetScale(Gf.Vec3f(width / 2.0 - 0.05, 0.20, 0.20))
+    bxf.SetTranslate(Gf.Vec3d(x, y + 0.15, height - 0.10))
+    bxf.SetRotate(Gf.Vec3f(0, 0, rot_z),
+                  UsdGeom.XformCommonAPI.RotationOrderXYZ)
+    bundle.CreateDisplayColorAttr([Gf.Vec3f(0.62, 0.62, 0.58)])
+    thr_path = f"/World/Layout/odock_thresh_{idx}"
+    thr = UsdGeom.Cube.Define(stage, thr_path)
+    thr.GetSizeAttr().Set(2.0)
+    txf = UsdGeom.XformCommonAPI(thr.GetPrim())
+    txf.SetScale(Gf.Vec3f(width / 2.0, 0.15, 0.025))
+    txf.SetTranslate(Gf.Vec3d(x, y, 0.025))
+    txf.SetRotate(Gf.Vec3f(0, 0, rot_z),
+                  UsdGeom.XformCommonAPI.RotationOrderXYZ)
+    thr.CreateDisplayColorAttr([Gf.Vec3f(*threshold_color)])
+    return idx + 5
+
+
+def _place_truck_back(stage, idx, x, y, width=2.6, depth=4.5, height=3.0,
+                       color=(0.25, 0.30, 0.45)):
+    """Crude box-truck silhouette parked at the dock — large dark cuboid +
+    two darker vertical seams on the back face + two red tail-light stubs."""
+    body_path = f"/World/Layout/truck_body_{idx}"
+    body = UsdGeom.Cube.Define(stage, body_path)
+    body.GetSizeAttr().Set(2.0)
+    bxf = UsdGeom.XformCommonAPI(body.GetPrim())
+    bxf.SetScale(Gf.Vec3f(width / 2.0, depth / 2.0, height / 2.0))
+    bxf.SetTranslate(Gf.Vec3d(x, y, height / 2.0))
+    body.CreateDisplayColorAttr([Gf.Vec3f(*color)])
+    for sgn_i, sgn in enumerate((-1, 1)):
+        s_path = f"/World/Layout/truck_seam_{idx}_{sgn_i}"
+        s = UsdGeom.Cube.Define(stage, s_path)
+        s.GetSizeAttr().Set(2.0)
+        sxf = UsdGeom.XformCommonAPI(s.GetPrim())
+        sxf.SetScale(Gf.Vec3f(0.025, 0.04, height / 2.0 - 0.10))
+        sxf.SetTranslate(Gf.Vec3d(x + sgn * width * 0.40,
+                                   y + depth / 2.0 - 0.04,
+                                   height / 2.0))
+        s.CreateDisplayColorAttr([Gf.Vec3f(0.15, 0.18, 0.25)])
+    for sgn_i, sgn in enumerate((-1, 1)):
+        l_path = f"/World/Layout/truck_taillight_{idx}_{sgn_i}"
+        L = UsdGeom.Cube.Define(stage, l_path)
+        L.GetSizeAttr().Set(2.0)
+        lxf = UsdGeom.XformCommonAPI(L.GetPrim())
+        lxf.SetScale(Gf.Vec3f(0.16, 0.04, 0.10))
+        lxf.SetTranslate(Gf.Vec3d(x + sgn * width * 0.42,
+                                   y + depth / 2.0 - 0.05, 0.55))
+        L.CreateDisplayColorAttr([Gf.Vec3f(0.85, 0.10, 0.10)])
+    return idx + 5
+
+
+def _place_dock_leveler_ramped(stage, idx, x, y, width=2.4, depth=1.4,
+                                tilt_deg=8):
+    """Angled steel leveler that bridges the warehouse threshold to a truck
+    bed — tilts down toward -Y (where the truck is parked)."""
+    path = f"/World/Layout/leveler_ramped_{idx}"
+    cube = UsdGeom.Cube.Define(stage, path)
+    cube.GetSizeAttr().Set(2.0)
+    xf = UsdGeom.XformCommonAPI(cube.GetPrim())
+    xf.SetScale(Gf.Vec3f(width / 2.0, depth / 2.0, 0.025))
+    xf.SetTranslate(Gf.Vec3d(x, y, 0.10))
+    xf.SetRotate(Gf.Vec3f(-tilt_deg, 0, 0),
+                 UsdGeom.XformCommonAPI.RotationOrderXYZ)
+    cube.CreateDisplayColorAttr([Gf.Vec3f(0.45, 0.45, 0.48)])
+    return idx + 1
+
+
+def _place_wrapping_station(stage, idx, x, y, rot_z=0):
+    """Stretch-wrap machine: gray turntable disc, side-mounted base block,
+    yellow vertical mast, light-blue film roll on a carriage halfway up."""
+    ang = math.radians(rot_z)
+    cos_a, sin_a = math.cos(ang), math.sin(ang)
+    tt_path = f"/World/Layout/wrap_turntable_{idx}"
+    tt = UsdGeom.Cylinder.Define(stage, tt_path)
+    tt.GetRadiusAttr().Set(0.70)
+    tt.GetHeightAttr().Set(0.10)
+    tt.GetAxisAttr().Set("Z")
+    txf = UsdGeom.XformCommonAPI(tt.GetPrim())
+    txf.SetTranslate(Gf.Vec3d(x, y, 0.05))
+    tt.CreateDisplayColorAttr([Gf.Vec3f(0.30, 0.32, 0.35)])
+    base_local_x = 1.10
+    base_x = x + base_local_x * cos_a
+    base_y = y + base_local_x * sin_a
+    base_path = f"/World/Layout/wrap_base_{idx}"
+    base = UsdGeom.Cube.Define(stage, base_path)
+    base.GetSizeAttr().Set(2.0)
+    bxf = UsdGeom.XformCommonAPI(base.GetPrim())
+    bxf.SetScale(Gf.Vec3f(0.18, 0.30, 0.10))
+    bxf.SetTranslate(Gf.Vec3d(base_x, base_y, 0.10))
+    bxf.SetRotate(Gf.Vec3f(0, 0, rot_z),
+                  UsdGeom.XformCommonAPI.RotationOrderXYZ)
+    base.CreateDisplayColorAttr([Gf.Vec3f(0.25, 0.27, 0.30)])
+    mast_path = f"/World/Layout/wrap_mast_{idx}"
+    mast = UsdGeom.Cube.Define(stage, mast_path)
+    mast.GetSizeAttr().Set(2.0)
+    mxf = UsdGeom.XformCommonAPI(mast.GetPrim())
+    mxf.SetScale(Gf.Vec3f(0.06, 0.06, 1.00))
+    mxf.SetTranslate(Gf.Vec3d(base_x, base_y, 1.00))
+    mxf.SetRotate(Gf.Vec3f(0, 0, rot_z),
+                  UsdGeom.XformCommonAPI.RotationOrderXYZ)
+    mast.CreateDisplayColorAttr([Gf.Vec3f(0.95, 0.78, 0.10)])
+    roll_local_x = base_local_x - 0.20
+    roll_x = x + roll_local_x * cos_a
+    roll_y = y + roll_local_x * sin_a
+    roll_path = f"/World/Layout/wrap_roll_{idx}"
+    roll = UsdGeom.Cylinder.Define(stage, roll_path)
+    roll.GetRadiusAttr().Set(0.10)
+    roll.GetHeightAttr().Set(0.50)
+    roll.GetAxisAttr().Set("Z")
+    rxf = UsdGeom.XformCommonAPI(roll.GetPrim())
+    rxf.SetTranslate(Gf.Vec3d(roll_x, roll_y, 0.80))
+    roll.CreateDisplayColorAttr([Gf.Vec3f(0.78, 0.85, 0.92)])
+    return idx + 4
+
+
+def _place_wrapped_pallet(stage, idx, x, y, asset_library, rot_z=0):
+    """Pallet (real asset if available) + light-blue translucent-look cargo
+    block with two horizontal seam bands wrapping it as stretch-film."""
+    if "pallet" in asset_library:
+        idx = _place("pallet", x, y, 0, rot_z, asset_library, stage, idx)
+    block_path = f"/World/Layout/wrapped_cargo_{idx}"
+    block = UsdGeom.Cube.Define(stage, block_path)
+    block.GetSizeAttr().Set(2.0)
+    blxf = UsdGeom.XformCommonAPI(block.GetPrim())
+    blxf.SetScale(Gf.Vec3f(0.50, 0.40, 0.50))
+    blxf.SetTranslate(Gf.Vec3d(x, y, 0.65))
+    blxf.SetRotate(Gf.Vec3f(0, 0, rot_z),
+                   UsdGeom.XformCommonAPI.RotationOrderXYZ)
+    block.CreateDisplayColorAttr([Gf.Vec3f(0.78, 0.86, 0.94)])
+    ang = math.radians(rot_z)
+    cos_a, sin_a = math.cos(ang), math.sin(ang)
+    seams_placed = 0
+    for bi, frac in enumerate((0.30, 0.70)):
+        bz = 0.15 + frac * 1.0
+        for face_i, (fx, fy) in enumerate(((1, 0), (-1, 0), (0, 1), (0, -1))):
+            local_x = fx * 0.51
+            local_y = fy * 0.41
+            wx = x + local_x * cos_a - local_y * sin_a
+            wy = y + local_x * sin_a + local_y * cos_a
+            seam_path = f"/World/Layout/wrap_seam_{idx}_{bi}_{face_i}"
+            seam = UsdGeom.Cube.Define(stage, seam_path)
+            seam.GetSizeAttr().Set(2.0)
+            sxf = UsdGeom.XformCommonAPI(seam.GetPrim())
+            if abs(fx) > 0.5:
+                sxf.SetScale(Gf.Vec3f(0.005, 0.40, 0.04))
+            else:
+                sxf.SetScale(Gf.Vec3f(0.50, 0.005, 0.04))
+            sxf.SetTranslate(Gf.Vec3d(wx, wy, bz))
+            sxf.SetRotate(Gf.Vec3f(0, 0, rot_z),
+                          UsdGeom.XformCommonAPI.RotationOrderXYZ)
+            seam.CreateDisplayColorAttr([Gf.Vec3f(0.60, 0.72, 0.82)])
+            seams_placed += 1
+    return idx + 1 + seams_placed
+
+
+def _spawn_realism_layer_2(rack_positions, params, asset_library, stage, idx):
+    """Second realism batch: mezzanine catwalk along one wall, an open dock
+    door + truck silhouette + ramped leveler, a stretch-wrap station + 1-2
+    wrapped pallets in the marshalling band, light-blue glazed wall windows
+    along both long walls (skipping the mezzanine span on its wall), and 3
+    manual pallet jacks (rack-end / mid-aisle / marshalling)."""
+    bmin = params["bounds_min"]
+    bmax = params["bounds_max"]
+    span_y = bmax[1] - bmin[1]
+    span_x = bmax[0] - bmin[0]
+    cx = (bmin[0] + bmax[0]) / 2.0
+    cy = (bmin[1] + bmax[1]) / 2.0
+    has_dock = params.get("dock_area", False)
+    dock_frac = params.get("dock_zone_frac", 0.25)
+    dock_y_top = bmin[1] + dock_frac * span_y
+    count = 0
+
+    # 1) Mezzanine along the +X wall, back-third.
+    mezz_y_lo = max(dock_y_top + 1.5, cy - 1.0)
+    mezz_y_hi = bmax[1] - 1.5
+    mezz_active = mezz_y_hi - mezz_y_lo >= 4.0
+    if mezz_active:
+        idx = _place_mezzanine(stage, idx, bmax[0] - 0.30,
+                                mezz_y_lo, mezz_y_hi,
+                                depth=2.2, height=3.4, side=-1)
+        count += 1
+
+    # 2) Open dock door + truck silhouette + ramped leveler.
+    if has_dock:
+        door_w = 2.6
+        spacing = door_w + 1.4
+        n_doors = max(1, int((span_x - 2.0) / spacing))
+        total_w = (n_doors - 1) * spacing
+        x_start = cx - total_w / 2.0
+        open_idx = params.get("_open_dock_door_idx", n_doors // 2)
+        open_idx = max(0, min(n_doors - 1, open_idx))
+        open_x = x_start + open_idx * spacing
+        wall_y = bmin[1] + 0.06
+        idx = _place_open_dock_door(stage, idx, open_x, wall_y,
+                                     width=door_w, height=3.2)
+        idx = _place_dock_leveler_ramped(stage, idx,
+                                          open_x, wall_y - 0.65,
+                                          width=door_w - 0.2,
+                                          depth=1.4, tilt_deg=10)
+        idx = _place_truck_back(stage, idx, open_x, wall_y - 3.0,
+                                 width=door_w, depth=4.5, height=3.0)
+        count += 3
+
+    # 3) Wrapping station + 1-2 wrapped pallets in the marshalling band.
+    wrap_y = dock_y_top + 0.7
+    wrap_x = cx - 4.0
+    if "pallet" in asset_library and dock_y_top + 1.5 < cy:
+        idx = _place_wrapping_station(stage, idx, wrap_x, wrap_y, rot_z=0)
+        idx = _place_wrapped_pallet(stage, idx, wrap_x, wrap_y,
+                                     asset_library, rot_z=0)
+        idx = _place_wrapped_pallet(stage, idx, wrap_x + 1.6, wrap_y - 0.10,
+                                     asset_library,
+                                     rot_z=random.uniform(-10, 10))
+        count += 3
+
+    # 4) Wall windows.
+    win_y_lo = bmin[1] + 1.2
+    win_y_hi = bmax[1] - 1.2
+    if mezz_active:
+        idx = _place_wall_windows(stage, idx, bmax[0] - 0.05,
+                                   win_y_lo, mezz_y_lo - 0.6,
+                                   n_windows=3, z_center=2.2)
+    else:
+        idx = _place_wall_windows(stage, idx, bmax[0] - 0.05,
+                                   win_y_lo, win_y_hi,
+                                   n_windows=5, z_center=2.4)
+    # -X wall: avoid the office (back-left corner used by realism_layer 1).
+    idx = _place_wall_windows(stage, idx, bmin[0] + 0.05,
+                               win_y_lo, bmax[1] - 4.0,
+                               n_windows=4, z_center=2.4)
+    count += 2
+
+    # 5) Pallet jacks: rack-end + mid-aisle + marshalling.
+    rows = {}
+    for (rx, ry, rrot) in rack_positions:
+        if rrot == 90:
+            key = round(ry * 2) / 2.0
+            rows.setdefault(key, []).append(rx)
+    if rows:
+        row_key = random.choice(list(rows.keys()))
+        xs = rows[row_key]
+        idx = _place_pallet_jack(stage, idx,
+                                  max(xs) + 1.55, row_key + 0.30,
+                                  rot_z=random.uniform(-25, 25),
+                                  color=(0.85, 0.20, 0.20))
+        count += 1
+        sorted_keys = sorted(rows.keys())
+        if len(sorted_keys) >= 2:
+            mid_y = (sorted_keys[0] + sorted_keys[1]) / 2.0
+            xs0 = rows[sorted_keys[0]] + rows[sorted_keys[1]]
+            mid_x = sum(xs0) / len(xs0) + random.uniform(-1.0, 1.0)
+            idx = _place_pallet_jack(stage, idx, mid_x, mid_y,
+                                      rot_z=random.uniform(0, 180),
+                                      color=(0.20, 0.45, 0.65))
+            count += 1
+    if has_dock:
+        idx = _place_pallet_jack(stage, idx, cx + 3.0,
+                                  dock_y_top + 0.9,
+                                  rot_z=random.uniform(0, 360),
+                                  color=(0.85, 0.65, 0.10))
+        count += 1
+
+    print(f"[INFO] Spawned realism-layer 2: {count} grouped items "
+          f"(mezzanine / open dock / wrap station / windows / pallet jacks)")
+    return idx, count
+
+
 def generate_layout(layout_name, layout_params, asset_library, stage):
     params = _resolve_params(layout_name, layout_params, LAYOUTS)
 
@@ -3341,11 +3827,22 @@ def generate_layout(layout_name, layout_params, asset_library, stage):
     idx, num_mid_fork = _spawn_mid_aisle_forklift(rack_positions, params, asset_library, stage, idx)
     num_doors = 0
     if params.get("dock_area", False):
+        # Pick which front-wall door slot is rendered as open (skipped by
+        # _spawn_dock_doors and re-rendered as an open frame + truck +
+        # ramped leveler by _spawn_realism_layer_2). Both functions read
+        # this value from params so they stay in agreement.
+        if "_open_dock_door_idx" not in params:
+            door_w = 2.6
+            spacing_d = door_w + 1.4
+            span_x_d = params["bounds_max"][0] - params["bounds_min"][0]
+            n_doors_est = max(1, int((span_x_d - 2.0) / spacing_d))
+            params["_open_dock_door_idx"] = random.randrange(n_doors_est)
         idx, num_doors = _spawn_dock_doors(params, stage, idx)
 
     idx, num_floor_fill = _spawn_floor_filling(params, rack_positions, asset_library, stage, idx)
     idx, num_polish = _spawn_polish_pass(params, rack_positions, asset_library, stage, idx)
     idx, num_realism_layer = _spawn_realism_layer(rack_positions, params, asset_library, stage, idx)
+    idx, num_realism_layer2 = _spawn_realism_layer_2(rack_positions, params, asset_library, stage, idx)
 
     print(f"[INFO] Spawned {num_racks} racks, {num_shelf_items} shelf items, "
           f"{num_pallets} pallets, {num_clutter} clutter props, {num_dock_items} dock items, "
@@ -3357,6 +3854,7 @@ def generate_layout(layout_name, layout_params, asset_library, stage):
           f"{num_human} human-imperfection items, {num_mid_fork} mid-aisle forklift, "
           f"{num_doors} dock doors, {num_polish} polish-pass items, "
           f"{num_floor_fill} floor-fill staging items, "
-          f"{num_realism_layer} realism-layer items.")
+          f"{num_realism_layer} realism-layer items, "
+          f"{num_realism_layer2} realism-layer-2 items.")
 
     return params["bounds_min"], params["bounds_max"]

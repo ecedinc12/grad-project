@@ -11,10 +11,17 @@ import math
 class VehicleAnimator:
     """Animates non-biped vehicles like forklifts over the simulation frames."""
 
-    # Max yaw change per frame — limits turn speed to ~60 deg/s at 30 fps.
-    MAX_ROT_PER_FRAME = 2.0
+    # Max yaw change per frame — limits turn speed to ~45 deg/s at 30 fps.
+    # Real forklifts (especially loaded) turn slower than this; 60 deg/s
+    # looked twitchy on heavy yaw blends near pickup waypoints.
+    MAX_ROT_PER_FRAME = 1.5
     # Realistic forklift cruising speed (m/s). ~2.5 m/s ≈ 9 km/h.
     MAX_SPEED_MPS = 2.5
+    # Creep speed used in the final approach to a docked (pick/place) waypoint.
+    # Real operators slow to a near-stop before fork insertion / deposit.
+    CREEP_SPEED_MPS = 0.5
+    # Distance ahead of a docked waypoint over which speed tapers to creep.
+    APPROACH_DIST_M = 1.5
 
     def __init__(self, vehicle_behaviors, stage, fps=30,
                  layout_bounds_min=None, layout_bounds_max=None):
@@ -65,16 +72,24 @@ class VehicleAnimator:
             if rotate_op is None:
                 rotate_op = xformable.AddRotateXYZOp()
 
-            total_dist = sum(
+            seg_lens = [
                 math.sqrt((waypoints[i+1]["x"] - waypoints[i]["x"])**2 +
                           (waypoints[i+1]["y"] - waypoints[i]["y"])**2)
                 for i in range(len(waypoints) - 1)
-            )
+            ]
+            cum_dist = [0.0]
+            for L in seg_lens:
+                cum_dist.append(cum_dist[-1] + L)
+            total_dist = cum_dist[-1]
+            seg_speeds = self._compute_seg_speeds(waypoints, seg_lens)
             self.vehicles.append({
                 "id": v_id,
                 "waypoints": waypoints,
-                "cum_norm": self._compute_cum_norm(waypoints),
+                "seg_lens": seg_lens,
+                "cum_dist": cum_dist,
+                "seg_speeds": seg_speeds,
                 "total_dist": total_dist,
+                "traveled": 0.0,
                 "translate_op": translate_op,
                 "rotate_op": rotate_op,
                 "current_rot": None,
@@ -97,18 +112,22 @@ class VehicleAnimator:
                 waypoints.append(waypoints[-1].copy())
         return waypoints
 
-    def _compute_cum_norm(self, waypoints):
-        """Precompute cumulative normalized distances for speed-consistent interpolation."""
-        cum_dists = [0.0]
-        for i in range(1, len(waypoints)):
-            p1, p2 = waypoints[i - 1], waypoints[i]
-            d = math.sqrt((p2["x"] - p1["x"])**2 + (p2["y"] - p1["y"])**2)
-            cum_dists.append(cum_dists[-1] + d)
-        total = cum_dists[-1]
-        if total > 0:
-            return [d / total for d in cum_dists]
-        n = len(waypoints) - 1
-        return [i / n if n > 0 else 0.0 for i in range(len(waypoints))]
+    def _compute_seg_speeds(self, waypoints, seg_lens):
+        """Per-segment speed cap. Segments leading into a docked waypoint
+        (one carrying an explicit rotation — i.e. a pickup/dropoff target)
+        creep at CREEP_SPEED_MPS for the final APPROACH_DIST_M, mimicking how
+        real operators slow to a near-stop before fork insertion."""
+        speeds = [self.MAX_SPEED_MPS] * len(seg_lens)
+        for i in range(len(seg_lens)):
+            if waypoints[i + 1].get("rot") is None:
+                continue
+            remaining = self.APPROACH_DIST_M
+            j = i
+            while j >= 0 and remaining > 0:
+                speeds[j] = min(speeds[j], self.CREEP_SPEED_MPS)
+                remaining -= seg_lens[j]
+                j -= 1
+        return speeds
 
     def _expand_via_layout(self, waypoints, v_id):
         """Route around static layout obstacles using a 2D occupancy grid."""
@@ -159,8 +178,10 @@ class VehicleAnimator:
             dx, dy = p2["x"] - p1["x"], p2["y"] - p1["y"]
             seg_len = math.sqrt(dx * dx + dy * dy)
             # Try a few agent radii — too generous a radius can fail to find a path
-            # through aisles narrower than 1m of clearance.
-            for r in (0.5, 0.3, 0.15):
+            # through aisles narrower than 1m of clearance. Start near the actual
+            # forklift half-width (~0.55 m body, +forks) and back off only if the
+            # navmesh refuses, since smaller radii routinely clip pallets.
+            for r in (0.85, 0.6, 0.4):
                 pts = _query(p1, p2, r)
                 if pts and len(pts) > 2:
                     return [{"x": pt[0], "y": pt[1], "z": p2["z"], "rot": None}
@@ -202,31 +223,39 @@ class VehicleAnimator:
 
         from pxr import Gf, UsdGeom
 
+        dt = 1.0 / self.fps
         for v in self.vehicles:
             wps = v["waypoints"]
             if not wps:
                 continue
 
-            # Speed-capped progress: distance traveled is bounded by MAX_SPEED_MPS.
-            # Once the path is consumed, the vehicle idles at its final waypoint
-            # instead of warping or finishing too quickly.
+            # Variable-speed integration: each segment carries its own speed cap
+            # (cruise on long hauls, creep on the final approach to a docked
+            # waypoint). Advance traveled distance by speed*dt of whichever
+            # segment we're currently inside, so deceleration into pickups is
+            # smooth instead of a uniform sweep that runs over pallets.
             total_dist = v.get("total_dist", 0.0)
-            if total_dist > 1e-6:
-                traveled = min(total_dist, (current_frame / self.fps) * self.MAX_SPEED_MPS)
-                progress = traveled / total_dist
-            else:
-                progress = 1.0
-            cum = v["cum_norm"]
+            cum = v["cum_dist"]
+            seg_speeds = v["seg_speeds"]
 
-            # Distance-proportional segment lookup: each segment's share of frames
-            # is proportional to its length, giving consistent travel speed.
+            traveled = v["traveled"]
             segment_idx = len(wps) - 2
             t = 1.0
+            if total_dist > 1e-6 and traveled < total_dist:
+                # Locate current segment for speed lookup, then advance.
+                for i in range(len(cum) - 1):
+                    if traveled <= cum[i + 1]:
+                        segment_idx = i
+                        break
+                traveled = min(total_dist, traveled + seg_speeds[segment_idx] * dt)
+                v["traveled"] = traveled
+
+            # Resolve segment + interpolation t for the (possibly advanced) traveled.
             for i in range(len(cum) - 1):
-                if progress <= cum[i + 1]:
+                if traveled <= cum[i + 1]:
                     segment_idx = i
                     span = cum[i + 1] - cum[i]
-                    t = (progress - cum[i]) / span if span > 1e-6 else 0.0
+                    t = (traveled - cum[i]) / span if span > 1e-6 else 0.0
                     break
 
             p1, p2 = wps[segment_idx], wps[segment_idx + 1]

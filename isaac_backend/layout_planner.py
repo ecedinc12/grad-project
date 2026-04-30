@@ -13,9 +13,13 @@ import math
 
 class LayoutPlanner:
     def __init__(self, stage, bounds_min, bounds_max,
-                 agent_radius=0.6, cell_size=0.25,
+                 agent_radius=0.9, cell_size=0.25,
                  layout_root="/World/Layout",
                  floor_height_threshold=0.1):
+        # agent_radius=0.9: forklift body is ~1.1 m wide × 2.4 m long with
+        # ~1.2 m forks out front. Half-width of the swept rectangle plus a
+        # small clearance margin lands around 0.9 m — smaller values let the
+        # planner cut corners through pallets and rack uprights.
         self.stage = stage
         self.cell = cell_size
         self.agent_radius = agent_radius
