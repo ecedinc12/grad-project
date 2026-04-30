@@ -43,9 +43,9 @@ SHELF_PITCH_FRACTION = 0.22
 
 RACK_FILL_PROBS = {
     "empty": 0.0,
-    "sparse": 0.30,
-    "medium": 0.60,
-    "full": 0.90,
+    "sparse": 0.45,
+    "medium": 0.78,
+    "full": 0.95,
 }
 
 SEMANTIC_MAP = {

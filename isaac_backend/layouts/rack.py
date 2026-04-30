@@ -399,10 +399,10 @@ def _populate_rack_shelves(rack_positions, params, asset_library, stage, idx):
     #   normal      → fill_prob baseline
     #   overstocked → near-full + occasional double layer
     PERSONALITIES = [
-        ("empty",       0.12),
-        ("sparse",      0.18),
-        ("normal",      0.52),
-        ("overstocked", 0.18),
+        ("empty",       0.04),
+        ("sparse",      0.12),
+        ("normal",      0.62),
+        ("overstocked", 0.22),
     ]
     def _pick_personality():
         roll = random.random()
@@ -458,7 +458,7 @@ def _populate_rack_shelves(rack_positions, params, asset_library, stage, idx):
             # No cargo at all — bay reads as awaiting put-away.
             continue
         elif personality == "sparse":
-            rack_fill_prob = max(0.10, min(0.45, fill_prob * 0.4))
+            rack_fill_prob = max(0.25, min(0.55, fill_prob * 0.6))
             allow_double = False
         elif personality == "overstocked":
             rack_bias = random.gauss(0.10, 0.10)
@@ -479,6 +479,7 @@ def _populate_rack_shelves(rack_positions, params, asset_library, stage, idx):
 
         ang = math.radians(rrot)
         cos_a, sin_a = math.cos(ang), math.sin(ang)
+        rack_cargo_placed = 0
         for shelf_z in rack_shelf_heights:
             # Some shelves on a rack are completely empty even within a
             # non-empty rack — partial put-away pattern.
@@ -487,6 +488,7 @@ def _populate_rack_shelves(rack_positions, params, asset_library, stage, idx):
             for slot in range(SHELF_POSITIONS_PER_LEVEL):
                 if random.random() > rack_fill_prob:
                     continue
+                rack_cargo_placed += 1
                 if primary_prop is None:
                     prop = random.choice(SHELF_PROPS)
                 else:
@@ -521,6 +523,23 @@ def _populate_rack_shelves(rack_positions, params, asset_library, stage, idx):
                                  rot + random.uniform(-10, 10),
                                  asset_library, stage, idx)
                     cargo_count += 1
+
+        # No-empty-rack guarantee: any non-"empty" personality rack with
+        # zero cargo gets at least one item on a random shelf so detector
+        # sees rack+cargo co-occurrence rather than bare frames.
+        if rack_cargo_placed == 0 and rack_shelf_heights:
+            shelf_z = random.choice(rack_shelf_heights)
+            slot_frac = random.uniform(0.2, 0.8)
+            local_along = (slot_frac - 0.5) * 2.2
+            world_dx = local_along * cos_a
+            world_dy = local_along * sin_a
+            x = rx + world_dx
+            y = ry + world_dy
+            prop = random.choice(SHELF_PROPS)
+            idx = _place(prop, x, y, shelf_z + 0.02,
+                         rrot + random.uniform(-15, 15),
+                         asset_library, stage, idx)
+            cargo_count += 1
 
     print(f"[INFO] Populated rack shelves: {deck_count} decks, {cargo_count} cargo items "
           f"(global_fill={fill_level_global}, prob={fill_prob_global:.0%}, "

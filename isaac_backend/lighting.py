@@ -63,36 +63,38 @@ def setup_camera_and_lighting(config):
     rep.create.light(light_type="Dome", intensity=params["intensity"], color=params["color"])
 
     if condition == "daylight":
-        # Sun: angled, not straight down. Gives shelves directional shadows.
+        # Sun: angled, not straight down. Boosted so shelves cast readable
+        # shadows on the floor — earlier ceiling-bank dominance washed them out.
         rep.create.light(
             light_type="Distant",
-            intensity=3500,
+            intensity=5500,
             color=(1.0, 0.95, 0.85),
             rotation=(-55, 25, 0),
         )
-        _ceiling_bank(intensity_base=6500, color_base=(1.0, 0.98, 0.92))
+        # Cut ceiling bank to ~half so directional contrast survives.
+        _ceiling_bank(intensity_base=3500, color_base=(1.0, 0.98, 0.92))
 
     if condition == "overcast":
         rep.create.light(
             light_type="Distant",
-            intensity=220,
+            intensity=350,
             color=(0.95, 0.95, 0.95),
             rotation=(-70, 0, 0),
         )
-        # Overcast = interior banks dominate. Slightly cooler.
-        _ceiling_bank(intensity_base=5500, color_base=(0.98, 0.99, 1.0))
+        # Overcast = interior banks dominate but trimmed for shadow read.
+        _ceiling_bank(intensity_base=3200, color_base=(0.98, 0.99, 1.0))
 
     if condition == "dusk":
         rep.create.light(
             light_type="Distant",
-            intensity=900,
+            intensity=1400,
             color=(1.0, 0.55, 0.20),
             rotation=(-15, 30, 0),
         )
-        _ceiling_bank(intensity_base=7500, color_base=(1.0, 0.85, 0.60))
+        _ceiling_bank(intensity_base=4500, color_base=(1.0, 0.85, 0.60))
 
     if condition == "night":
-        _ceiling_bank(intensity_base=9000, color_base=(1.0, 0.97, 0.88))
+        _ceiling_bank(intensity_base=6500, color_base=(1.0, 0.97, 0.88))
 
     focal_length = config.get("focal_length") or 14.0
     camera = rep.create.camera(position=(0, 0, 3), look_at=(0, 0, 1), focal_length=focal_length)

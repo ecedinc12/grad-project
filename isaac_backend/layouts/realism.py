@@ -55,6 +55,8 @@ from .props import (
     _place_wrapping_station,
     _place_wrapped_pallet,
     _place_hand_truck,
+    _place_wall_panel_seam,
+    _place_wall_paint_patch,
 )
 from .materials import bind_material
 from pxr import UsdGeom, Gf
@@ -226,15 +228,33 @@ def _spawn_floor_filling(params, rack_positions, asset_library, stage, idx):
         nonlocal idx, count
         if "pallet" not in asset_library:
             return
-        rot = random.uniform(-12, 12) if rot is None else rot
+        # Wider rotation envelope — real staging is rarely square. Mix in
+        # the occasional 90° pivot so the grid doesn't read as one heading.
+        if rot is None:
+            rot = random.uniform(-35, 35)
+            if random.random() < 0.18:
+                rot += 90
         idx = _place("pallet", x, y, 0, rot, asset_library, stage, idx)
         count += 1
+        # 18% bare pallet — nothing on top, just the deck.
+        if random.random() < 0.18:
+            return
         roll = random.random()
-        if roll < 0.6:
-            idx, n = _stack_boxes(x, y, (1.0, 0.7, 0.4),
-                                  (0.08, 0.10, 0.12), asset_library, stage, idx)
+        if roll < 0.55:
+            # Vary stack height: low, medium, or tall pile.
+            tall = random.random()
+            if tall < 0.30:
+                box_size = (0.95, 0.65, 0.30)
+                box_off = (0.08, 0.10, 0.10)
+            elif tall < 0.75:
+                box_size = (1.0, 0.7, 0.45)
+                box_off = (0.08, 0.10, 0.12)
+            else:
+                box_size = (1.05, 0.75, 0.65)
+                box_off = (0.10, 0.12, 0.14)
+            idx, n = _stack_boxes(x, y, box_size, box_off, asset_library, stage, idx)
             count += n
-        elif roll < 0.85:
+        elif roll < 0.80:
             for layer_z in (0.18, 0.55):
                 if random.random() > 0.65:
                     break
@@ -272,9 +292,12 @@ def _spawn_floor_filling(params, rack_positions, asset_library, stage, idx):
         x0 = bmin[0] + 1.5
         for r in range(n_rows):
             for c in range(n_cols):
-                px = x0 + c * col_pitch + random.uniform(-0.18, 0.18)
-                py = front_y_min + r * row_pitch + random.uniform(-0.15, 0.15)
-                if random.random() < 0.85:
+                # Heavier per-slot jitter so the grid reads as accumulated
+                # placements, not a CAD-snap layout.
+                px = x0 + c * col_pitch + random.uniform(-0.45, 0.45)
+                py = front_y_min + r * row_pitch + random.uniform(-0.40, 0.40)
+                # 30% gap rate (vs 15%) breaks the field into clusters.
+                if random.random() < 0.70:
                     _drop_loaded_pallet(px, py)
 
         # A drum cluster at the front-right (only when no dock owns the band).
@@ -1001,6 +1024,73 @@ def _spawn_realism_layer_2(rack_positions, params, asset_library, stage, idx):
 
     print(f"[INFO] Spawned realism-layer 2: {count} grouped items "
           f"(mezzanine / open dock / wrap station / windows / pallet jacks)")
+    return idx, count
+
+
+def _spawn_wall_panel_seams(params, stage, idx):
+    """Vertical seam strips every ~1.2m along all four walls + a few off-hue
+    paint patches per long wall. Breaks the solid-color wall read so back
+    walls don't look like a single flat plane."""
+    bmin = params["bounds_min"]
+    bmax = params["bounds_max"]
+    ceiling_z = params.get("ceiling_z", DEFAULT_CEILING_Z)
+    seam_h = min(4.5, ceiling_z - 0.4)
+    pitch = 1.20
+    eps = 0.04
+    count = 0
+
+    # Long walls (run along Y, normal ±X) — seams stride in Y.
+    span_y = bmax[1] - bmin[1]
+    n_y = max(2, int(span_y / pitch))
+    for j in range(1, n_y):
+        wy = bmin[1] + j * (span_y / n_y)
+        for wall_x in (bmin[0] + eps, bmax[0] - eps):
+            idx = _place_wall_panel_seam(stage, idx, wall_x, wy,
+                                         axis="y", height=seam_h)
+            count += 1
+
+    # Short walls (run along X, normal ±Y) — seams stride in X.
+    span_x = bmax[0] - bmin[0]
+    n_x = max(2, int(span_x / pitch))
+    for i in range(1, n_x):
+        wx = bmin[0] + i * (span_x / n_x)
+        for wall_y in (bmin[1] + eps, bmax[1] - eps):
+            idx = _place_wall_panel_seam(stage, idx, wx, wall_y,
+                                         axis="x", height=seam_h)
+            count += 1
+
+    # Off-hue paint patches — 2-3 per long wall, base orange ±0.05 hue jitter.
+    base_orange = (0.78, 0.42, 0.12)
+    for wall_x, ax in ((bmin[0] + eps + 0.005, "y"),
+                       (bmax[0] - eps - 0.005, "y")):
+        for _ in range(random.randint(2, 3)):
+            py = random.uniform(bmin[1] + 1.0, bmax[1] - 1.0)
+            color = (
+                max(0.0, min(1.0, base_orange[0] + random.uniform(-0.08, 0.06))),
+                max(0.0, min(1.0, base_orange[1] + random.uniform(-0.08, 0.06))),
+                max(0.0, min(1.0, base_orange[2] + random.uniform(-0.04, 0.06))),
+            )
+            idx = _place_wall_paint_patch(stage, idx, wall_x, py, axis=ax,
+                                          color=color,
+                                          width=random.uniform(1.2, 2.4),
+                                          height=random.uniform(1.4, 2.4))
+            count += 1
+    for wall_y, ax in ((bmin[1] + eps + 0.005, "x"),
+                       (bmax[1] - eps - 0.005, "x")):
+        for _ in range(random.randint(1, 2)):
+            px = random.uniform(bmin[0] + 1.0, bmax[0] - 1.0)
+            color = (
+                max(0.0, min(1.0, base_orange[0] + random.uniform(-0.08, 0.06))),
+                max(0.0, min(1.0, base_orange[1] + random.uniform(-0.08, 0.06))),
+                max(0.0, min(1.0, base_orange[2] + random.uniform(-0.04, 0.06))),
+            )
+            idx = _place_wall_paint_patch(stage, idx, px, wall_y, axis=ax,
+                                          color=color,
+                                          width=random.uniform(1.2, 2.4),
+                                          height=random.uniform(1.4, 2.4))
+            count += 1
+
+    print(f"[INFO] Spawned {count} wall panel seams + paint patches")
     return idx, count
 
 

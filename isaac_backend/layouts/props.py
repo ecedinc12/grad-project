@@ -306,9 +306,11 @@ def _place_mop_and_bucket(stage, idx, x, y):
 
 def _place_tire_scuff(stage, idx, x, y, length, rot_z=0):
     """Broken stripe down an aisle centerline — forklift tire residue. Drawn
-    as a chain of short rust-brown segments so it reads as worn rubber,
+    as a chain of short dark-brown segments so it reads as worn rubber,
     not a solid line of paint."""
-    color = (0.22, 0.16, 0.12)
+    # Darker than before — earlier (0.22, 0.16, 0.12) was washed out by
+    # ceiling-bank flood and read as faint smudges from camera distance.
+    color = (0.10, 0.07, 0.05)
     ang = math.radians(rot_z)
     cos_a, sin_a = math.cos(ang), math.sin(ang)
     seg_len = 0.70
@@ -327,32 +329,72 @@ def _place_tire_scuff(stage, idx, x, y, length, rot_z=0):
         cube = UsdGeom.Cube.Define(stage, path)
         cube.GetSizeAttr().Set(2.0)
         sxf = UsdGeom.XformCommonAPI(cube.GetPrim())
-        sxf.SetScale(Gf.Vec3f(seg_len / 2.0, 0.10, 0.006))
-        sxf.SetTranslate(Gf.Vec3d(wx, wy, 0.018))
+        # Wider strip (0.14 vs 0.10) reads better at typical camera height.
+        sxf.SetScale(Gf.Vec3f(seg_len / 2.0, 0.14, 0.006))
+        sxf.SetTranslate(Gf.Vec3d(wx, wy, 0.022))
         sxf.SetRotate(Gf.Vec3f(0, 0, rot_z), UsdGeom.XformCommonAPI.RotationOrderXYZ)
         bind_material(stage, cube, "M_PaintedConcrete", color)
     return idx + 1
 
 
 def _place_oil_stain(stage, idx, x, y, radius=0.55):
-    """Irregular puddle — cluster of small flat dark blobs."""
-    base_color = (0.12, 0.10, 0.08)
-    for b in range(random.randint(5, 8)):
+    """Irregular puddle — cluster of flat near-black blobs with a dark sheen."""
+    # Near-black so the stain reads as oil at distance instead of a faint
+    # grey patch. Previous (0.12, 0.10, 0.08) blended into concrete.
+    base_color = (0.04, 0.03, 0.02)
+    for b in range(random.randint(7, 11)):
         ang = random.uniform(0, 2 * math.pi)
         r = random.uniform(0.0, radius)
         bx = x + r * math.cos(ang)
         by = y + r * math.sin(ang)
-        sx = random.uniform(0.14, 0.28)
-        sy = random.uniform(0.14, 0.28)
+        sx = random.uniform(0.18, 0.36)
+        sy = random.uniform(0.18, 0.36)
         path = f"/World/Layout/oil_blob_{idx}_{b}"
         cube = UsdGeom.Cube.Define(stage, path)
         cube.GetSizeAttr().Set(2.0)
         oxf = UsdGeom.XformCommonAPI(cube.GetPrim())
         oxf.SetScale(Gf.Vec3f(sx, sy, 0.005))
-        oxf.SetTranslate(Gf.Vec3d(bx, by, 0.020))
+        oxf.SetTranslate(Gf.Vec3d(bx, by, 0.024))
         oxf.SetRotate(Gf.Vec3f(0, 0, random.uniform(0, 90)),
                       UsdGeom.XformCommonAPI.RotationOrderXYZ)
         bind_material(stage, cube, "M_OilFilm", base_color)
+    return idx + 1
+
+
+def _place_wall_panel_seam(stage, idx, x, y, axis="x", height=4.5,
+                           color=(0.18, 0.16, 0.14)):
+    """Thin vertical dark strip flush with a wall — reads as a panel seam
+    between prefabricated wall sections. axis='x' for walls running along
+    X (perpendicular to Y), axis='y' for walls running along Y."""
+    path = f"/World/Layout/wall_seam_{idx}"
+    cube = UsdGeom.Cube.Define(stage, path)
+    cube.GetSizeAttr().Set(2.0)
+    sxf = UsdGeom.XformCommonAPI(cube.GetPrim())
+    if axis == "x":
+        # Wall running along X — seam is thin in X, tall in Z, depth in Y.
+        sxf.SetScale(Gf.Vec3f(0.025, 0.005, height / 2.0))
+    else:
+        # Wall running along Y — seam is thin in Y.
+        sxf.SetScale(Gf.Vec3f(0.005, 0.025, height / 2.0))
+    sxf.SetTranslate(Gf.Vec3d(x, y, height / 2.0 + 0.02))
+    bind_material(stage, cube, "M_PaintedWall", color)
+    return idx + 1
+
+
+def _place_wall_paint_patch(stage, idx, x, y, axis="x", color=(0.62, 0.32, 0.10),
+                            width=1.6, height=2.0):
+    """Faded paint rectangle flush with a wall — breaks up solid-color
+    wall by overlaying a slightly off-hue patch where panels were repainted."""
+    path = f"/World/Layout/wall_patch_{idx}"
+    cube = UsdGeom.Cube.Define(stage, path)
+    cube.GetSizeAttr().Set(2.0)
+    pxf = UsdGeom.XformCommonAPI(cube.GetPrim())
+    if axis == "x":
+        pxf.SetScale(Gf.Vec3f(width / 2.0, 0.004, height / 2.0))
+    else:
+        pxf.SetScale(Gf.Vec3f(0.004, width / 2.0, height / 2.0))
+    pxf.SetTranslate(Gf.Vec3d(x, y, height / 2.0 + 0.4))
+    bind_material(stage, cube, "M_PaintedWall", color)
     return idx + 1
 
 
