@@ -10,7 +10,7 @@ Attributes written:
 """
 
 import omni.usd
-from pxr import Sdf, Semantics
+from pxr import Semantics
 
 VALID_SEMANTICS = {
     "person", "vehicle", "rack", "pallet", "box", "box_small", "box_large",
@@ -41,57 +41,48 @@ def apply_usd_semantics(prim, class_name):
         sem_api.CreateSemanticTypeAttr().Set("class")
         sem_api.CreateSemanticDataAttr().Set(class_name)
 
-def clear_unwanted_warehouse_semantics(stage):
-    """Strip ALL semantics from prims that are not in our valid set.
+_LABEL_ATTRS = (
+    ("semantics:labels:class", True),                       # new schema, VtArray
+    ("semantic:Semantics:params:semanticData", False),      # old schema, "Semantics" instance
+    ("semantic:class:params:semanticData", False),          # old schema, "class" instance
+)
 
-    Traverses the entire stage to clear labels like 'wall', 'floor',
-    'ceiling', 'other', etc. that would create unwanted categories
-    in CocoWriter. Only preserves labels in VALID_SEMANTICS. Also
-    normalizes valid labels to lowercase so they match COCO category keys.
+
+def _get_label(prim):
+    """Return raw label string from whichever schema is authored, else None."""
+    for attr_name, is_array in _LABEL_ATTRS:
+        attr = prim.GetAttribute(attr_name)
+        if not (attr and attr.HasAuthoredValue()):
+            continue
+        val = attr.Get()
+        if is_array:
+            if not val or len(val) == 0:
+                continue
+            return str(val[0])
+        return str(val)
+    return None
+
+
+def clear_unwanted_warehouse_semantics(stage):
+    """Strip ALL semantics from prims not in VALID_SEMANTICS.
+
+    Traverses entire stage. Clears labels like 'wall', 'floor', 'ceiling'
+    that would create unwanted COCO categories. Normalizes kept labels
+    to lowercase so they match category keys.
     """
     cleared = 0
     normalized = 0
     for prim in stage.Traverse():
-        # Check new schema (semantics:labels:class VtArray)
-        attr = prim.GetAttribute("semantics:labels:class")
-        if attr and attr.HasAuthoredValue():
-            labels = attr.Get()
-            if labels and len(labels) > 0:
-                raw_label = str(labels[0])
-                label = raw_label.lower()
-                if label not in VALID_SEMANTICS:
-                    _clear_semantic(prim)
-                    cleared += 1
-                elif raw_label != label:
-                    _clear_semantic(prim)
-                    apply_usd_semantics(prim, label)
-                    normalized += 1
-                continue
-
-        # Check old schema with "Semantics" instance name
-        semantic_data_attr = prim.GetAttribute("semantic:Semantics:params:semanticData")
-        if semantic_data_attr and semantic_data_attr.HasAuthoredValue():
-            raw_label = str(semantic_data_attr.Get())
-            label = raw_label.lower()
-            if label not in VALID_SEMANTICS:
-                _clear_semantic(prim)
-                cleared += 1
-            elif raw_label != label:
-                _clear_semantic(prim)
-                apply_usd_semantics(prim, label)
-                normalized += 1
+        raw_label = _get_label(prim)
+        if raw_label is None:
             continue
-
-        # Check old schema with "class" instance name (written by apply_usd_semantics)
-        class_data_attr = prim.GetAttribute("semantic:class:params:semanticData")
-        if class_data_attr and class_data_attr.HasAuthoredValue():
-            raw_label = str(class_data_attr.Get())
-            label = raw_label.lower()
-            if label not in VALID_SEMANTICS:
-                _clear_semantic(prim)
-                cleared += 1
-            elif raw_label != label:
-                apply_usd_semantics(prim, label)
-                normalized += 1
+        label = raw_label.lower()
+        if label not in VALID_SEMANTICS:
+            _clear_semantic(prim)
+            cleared += 1
+        elif raw_label != label:
+            _clear_semantic(prim)
+            apply_usd_semantics(prim, label)
+            normalized += 1
 
     print(f"[INFO] Cleared unwanted semantics from {cleared} prims, normalized {normalized} prims (kept: {VALID_SEMANTICS}).")

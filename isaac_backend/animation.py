@@ -33,14 +33,7 @@ from isaac_backend.command_injection import (
     reinject_random_commands,
 )
 from isaac_backend.vehicle_animation import VehicleAnimator
-
-import sys
-import time
-
-
-def _progress(msg):
-    print(f"[PROGRESS] [{time.strftime('%H:%M:%S')}] {msg}")
-    sys.stdout.flush()
+from isaac_backend._logging import _progress
 
 
 __all__ = [

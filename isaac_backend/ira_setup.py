@@ -24,9 +24,7 @@ _HAS_KIT_COMMANDS = False
 Sdf = None
 
 
-def _progress(msg):
-    print(f"[PROGRESS] [{time.strftime('%H:%M:%S')}] {msg}")
-    sys.stdout.flush()
+from isaac_backend._logging import _progress  # noqa: E402
 
 
 def _refresh_ira_state():

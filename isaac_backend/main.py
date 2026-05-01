@@ -13,7 +13,7 @@ import glob
 import time
 import random
 import argparse
-import subprocess
+from pathlib import Path
 
 
 def _patch_fast_importer():
@@ -591,8 +591,8 @@ def main():
         time.sleep(0.1)
         simulation_app.update()
 
-    result = subprocess.run(["find", "/tmp/dataset", "-type", "f"], capture_output=True, text=True)
-    _progress(f"Files written to /tmp/dataset: {len(result.stdout.strip().splitlines()) if result.stdout.strip() else 0}")
+    file_count = sum(1 for p in Path("/tmp/dataset").rglob("*") if p.is_file())
+    _progress(f"Files written to /tmp/dataset: {file_count}")
 
     _teardown(rep, writer, world, simulation_app)
 

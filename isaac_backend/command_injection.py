@@ -5,20 +5,14 @@ Building command lists from behavior config and injecting them via AgentManager
 after timeline play. Also handles periodic re-injection of randomized commands.
 """
 
-import sys
-import time
 import random
 
 import isaac_backend.ira_setup as _ira
+from isaac_backend._logging import _progress
 from isaac_backend.navmesh_utils import get_navmesh, get_worker_pos, try_snap_target
 
 WAREHOUSE_X_RANGE = (-5.5, 5.5)
 WAREHOUSE_Y_RANGE = (-5.5, 5.5)
-
-
-def _progress(msg):
-    print(f"[PROGRESS] [{time.strftime('%H:%M:%S')}] {msg}")
-    sys.stdout.flush()
 
 
 def _build_command_list(worker_behaviors, worker_name, visible_bounds=None,

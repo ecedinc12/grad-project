@@ -118,16 +118,20 @@ llm_pipeline/
   generator.py    — Instructor + Gemini: text → SceneConfig JSON
 
 isaac_backend/
-  main.py         — Entry point: SimulationApp bootstrap, scene assembly, Replicator loop
-  config_loader.py — Loads SceneConfig JSON + asset library
-  warehouse.py    — Warehouse layout spawning
-  layouts.py      — Procedural layout generator (8 presets + rack shelf population + dock areas)
-  spawner.py      — Geofenced entity spawner
-  camera.py       — Camera positioning and orbit distributions
-  lighting.py     — Camera and lighting setup
-  semantics.py    — USD semantic label application (maps variant assets to canonical COCO classes)
-  workers.py      — Worker (character) spawning
-  animation.py    — IRA behavior manager: attaches built-in character_behavior.py + injects commands via AgentManager
+  main.py             — Entry point: SimulationApp bootstrap, scene assembly, Replicator loop
+  config_loader.py    — Loads SceneConfig JSON + asset library
+  warehouse.py        — Thin dispatch into layouts/ package
+  layouts/            — Procedural layout package (presets, geometry, racks, docks, props, markings, materials, realism)
+  spawner.py          — Geofenced entity spawner
+  camera.py           — Camera positioning and orbit distributions
+  lighting.py         — Lighting setup
+  semantics.py        — USD semantic label application (maps variant assets to canonical COCO classes)
+  workers.py          — Worker (character) spawning
+  ira_setup.py        — IRA extension load, biped baking, behavior attachment, anim graph linking
+  command_injection.py — IRA AgentManager command injection (GoTo / Idle / LookAround)
+  vehicle_animation.py — Forklift / vehicle motion paths
+  navmesh_utils.py    — Navmesh queries + target snapping
+  layout_planner.py   — Layout selection helpers
 
 assets/
   library.json    — Asset registry: worker, forklift, pallet, rack, zone, box, box_small, box_large, barrel, drum, cone, crate
@@ -151,10 +155,10 @@ assets/
 - DLSS must be set to Quality mode (`/rtx/post/dlss/execMode = 2`) to avoid rendering artifacts at low resolutions.
 - `rep.orchestrator.set_capture_on_play(False)` is required — manual `step()` controls capture.
 - Pass `--/exts/isaacsim.core.throttling/enable_async=false` to prevent frame skipping during Replicator runs.
-- Worker animation uses IRA's built-in character_behavior.py (Omni.Anim.People). Commands injected via AgentManager.
-- IRA behavior attachment: Phase 1 (before play) = attach built-in script via CharacterUtil. Phase 2 (after play) = inject GoTo/Idle/LookAround via AgentManager.inject_command().
+- Worker animation uses IRA's built-in character_behavior.py (Omni.Anim.People). Commands injected via AgentManager (`isaac_backend/command_injection.py`).
+- IRA behavior attachment: Phase 1 (before play) = attach built-in script via CharacterUtil (`ira_setup.py`). Phase 2 (after play) = inject GoTo/Idle/LookAround via AgentManager.inject_command() (`command_injection.py`).
 - Import `World` from `isaacsim.core.api`, NOT `omni.isaac.core`.
-- Layout assets map to COCO categories via `SEMANTIC_MAP` in `layouts.py`: box_small/box_large/crate → "box", drum → "barrel". All other assets map 1:1.
+- Layout assets map to COCO categories via `SEMANTIC_MAP` in `isaac_backend/layouts/`: box_small/box_large/crate → "box", drum → "barrel". All other assets map 1:1.
 - Rack shelf population: `_populate_rack_shelves()` places 2 items per shelf level (at z=0.15, 0.85, 1.55) with fill probability controlled by `rack_fill` param (empty=0%, sparse=30%, medium=60%, full=90%).
 - Pallets are spawned loaded: 50% chance of box/crate stack, 25% chance barrel/drum, 25% bare pallet.
 - Dock areas: when `dock_area=true` in layout params, a cluster of loaded pallets + extra props spawns near the warehouse entrance (negative-Y wall).
@@ -164,4 +168,3 @@ assets/
 
 - Syntax check: `python3 -m py_compile <file>` for any Python file
 - Schema check: Run `python3 llm_pipeline/generator.py --prompt "test" --output /dev/null` (will fail without API key but validates imports)
-- Always check `TODO.md` for the current development step. Do not skip ahead.

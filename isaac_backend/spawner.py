@@ -14,7 +14,7 @@ Creates invisible USD volumes with hazard_zone semantics for zone detection.
 
 import random
 import omni.replicator.core as rep
-from pxr import UsdGeom, Gf, Sdf, UsdShade
+from pxr import UsdGeom, Gf
 import omni.usd
 
 

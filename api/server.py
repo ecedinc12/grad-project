@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import glob
 import os
+import random
 import time
 from pathlib import Path
 from typing import Optional
@@ -72,7 +73,6 @@ def _verify_key(request: Request) -> None:
 # Helpers
 # ---------------------------------------------------------------------------
 def _rgb_frames(limit: int = 12) -> list[str]:
-    import random
     paths = sorted(glob.glob(str(DATASET_DIR / "rgb_*.png")))
     if len(paths) <= limit:
         return paths
