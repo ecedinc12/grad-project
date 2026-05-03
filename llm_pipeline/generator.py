@@ -1,11 +1,15 @@
 import os
 import sys
 import json
+import time
 import argparse
 import instructor
 from openai import OpenAI
 from pydantic import ValidationError
-from schemas import SceneConfig, Entity, PPEState, WorkerBehavior, BehaviorCommand, ClutterZone, LayoutParams
+
+# schemas.py is in the same directory; adjust path for both direct and module invocation
+sys.path.insert(0, os.path.dirname(__file__))
+from schemas import SceneConfig
 
 LAYOUTS_PATH = os.path.join(os.path.dirname(__file__), "..", "assets", "layouts.json")
 _LAYOUTS_DESCRIPTION = ""
@@ -29,26 +33,16 @@ except Exception:
         "- storage_yard: 4 rack clusters with wide lanes, outdoor-style yard."
     )
 
-def generate_scene_config(prompt: str, output_path: str):
-    # Retrieve the API key from environment variable
-    # Use Gemini's OpenAI compatible endpoint
-    api_key = os.environ.get("GEMINI_API_KEY")
-    if not api_key:
-        print("Error: GEMINI_API_KEY environment variable is not set.", file=sys.stderr)
-        print("Please export your key: export GEMINI_API_KEY='your_api_key_here'", file=sys.stderr)
-        sys.exit(1)
+NIM_BASE_URL = "https://integrate.api.nvidia.com/v1"
 
-    base_url = os.environ.get("GEMINI_BASE_URL", "https://generativelanguage.googleapis.com/v1beta/openai/")
+# Fallback chain: tried in order on 429/503/timeout
+FALLBACK_MODELS = [
+    "mistralai/mistral-nemotron",
+    "stepfun-ai/step-3.5-flash",
+    "meta/llama-4-maverick-17b-128e-instruct",
+]
 
-    # Patch the OpenAI client with Instructor using JSON mode for Gemini compatibility
-    client = instructor.from_openai(
-        OpenAI(api_key=api_key, base_url=base_url),
-        mode=instructor.Mode.JSON
-    )
-    
-    model = os.environ.get("LLM_MODEL", "gemini-2.5-flash") # Or "gemini-2.5-flash-lite" if that is the exact model name
-    
-    system_prompt = """
+_SYSTEM_PROMPT = """
     You are an expert industrial safety simulation configurator for a photorealistic synthetic data generation pipeline.
     Your job is to produce detailed, realistic scene configs from user prompts — not minimal ones.
     The output directly drives a 3D warehouse simulation; more detail = more realistic training data.
@@ -152,38 +146,91 @@ def generate_scene_config(prompt: str, output_path: str):
     - PROXIMITY HAZARD: If the scenario involves "forklift near worker", "near miss", or "close pass", route the forklift through a waypoint within 1.5m of a worker's GoTo position to create a realistic near-miss frame. Worker and forklift should both be present in that location within the same simulation window.
     """
 
-    print(f"Generating configuration for prompt: '{prompt}'...")
-    
-    try:
-        config: SceneConfig = client.chat.completions.create(
-            model=model,
-            response_model=SceneConfig,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": prompt},
-            ],
-            temperature=0.4
-        )
-        
-        # Ensure directory exists
-        os.makedirs(os.path.dirname(output_path), exist_ok=True)
-        
-        # Save validated output
-        with open(output_path, "w") as f:
-            f.write(config.model_dump_json(indent=4))
-        print(f"Successfully saved SceneConfig to {output_path}")
-        
-    except ValidationError as e:
-        print(f"Schema validation error: {e}", file=sys.stderr)
-        sys.exit(1)
-    except Exception as e:
-        print(f"Error during generation: {e}", file=sys.stderr)
-        sys.exit(1)
+
+class NIMUnavailableError(RuntimeError):
+    """Raised when all NIM models in the fallback chain are exhausted."""
+
+
+def _is_retriable(exc: Exception) -> bool:
+    """True for 429/503 rate-limit / overload errors and network timeouts."""
+    msg = str(exc).lower()
+    if "timeout" in msg or "timed out" in msg:
+        return True
+    status = getattr(getattr(exc, "response", None), "status_code", None)
+    return status in (429, 503)
+
+
+def generate_scene_config(prompt: str, nim_api_key: str, output_path: str) -> None:
+    """Generate a SceneConfig JSON from a text prompt using NVIDIA NIM.
+
+    Tries FALLBACK_MODELS in order. Each model gets up to 2 attempts on retriable
+    errors (429/503/timeout) with exponential backoff. Raises NIMUnavailableError
+    if all models are exhausted.
+    """
+    client = instructor.from_openai(
+        OpenAI(base_url=NIM_BASE_URL, api_key=nim_api_key),
+        mode=instructor.Mode.JSON,
+    )
+
+    messages = [
+        {"role": "system", "content": _SYSTEM_PROMPT},
+        {"role": "user", "content": prompt},
+    ]
+
+    last_error: Exception | None = None
+
+    for model in FALLBACK_MODELS:
+        for attempt in range(2):
+            try:
+                print(f"[LLM] Trying {model} (attempt {attempt + 1}/2)...")
+                config: SceneConfig = client.chat.completions.create(
+                    model=model,
+                    response_model=SceneConfig,
+                    messages=messages,
+                    temperature=0.4,
+                    max_tokens=4096,
+                )
+                # Success — write output and return
+                os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
+                with open(output_path, "w") as f:
+                    f.write(config.model_dump_json(indent=4))
+                print(f"[LLM] SceneConfig saved to {output_path} (model: {model})")
+                return
+
+            except Exception as exc:
+                last_error = exc
+                if _is_retriable(exc):
+                    wait = 2 ** attempt
+                    print(f"[LLM] {model} unavailable (attempt {attempt + 1}): {exc}. Retrying in {wait}s...")
+                    time.sleep(wait)
+                else:
+                    print(f"[LLM] {model} failed (non-retriable): {exc}")
+                    break  # skip remaining attempts for this model
+
+        print(f"[LLM] {model} exhausted, trying next model...")
+
+    raise NIMUnavailableError(
+        f"All NIM models failed. Last error: {last_error}"
+    )
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate SceneConfig JSON from text prompt.")
     parser.add_argument("--prompt", type=str, required=True, help="User prompt describing the scene.")
     parser.add_argument("--output", type=str, default="configs/current_scene.json", help="Output path for the JSON config.")
-    
+    parser.add_argument("--nim-api-key", type=str, default=None, help="NVIDIA NIM API key (overrides NIM_API_KEY env var).")
     args = parser.parse_args()
-    generate_scene_config(args.prompt, args.output)
+
+    key = args.nim_api_key or os.environ.get("NIM_API_KEY", "")
+    if not key:
+        print("Error: NIM API key required. Pass --nim-api-key or set NIM_API_KEY env var.", file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        generate_scene_config(args.prompt, key, args.output)
+    except NIMUnavailableError as e:
+        print(f"[ERROR] {e}", file=sys.stderr)
+        sys.exit(1)
+    except ValidationError as e:
+        print(f"[ERROR] Schema validation failed: {e}", file=sys.stderr)
+        sys.exit(1)

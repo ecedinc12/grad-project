@@ -31,7 +31,7 @@ else
 fi
 
 echo "[1/9] Running LLM Config Generator..."
-python3 "$PROJECT_ROOT/llm_pipeline/generator.py" --prompt "$PROMPT" --output "$PROJECT_ROOT/configs/current_scene.json"
+python3 "$PROJECT_ROOT/llm_pipeline/generator.py" --prompt "$PROMPT" --output "$PROJECT_ROOT/configs/current_scene.json" --nim-api-key "${NIM_API_KEY:-}"
 if [ $? -ne 0 ]; then echo "[ERROR] Step 1 failed"; FAILED=1; fi
 
 echo "[2/9] Cleaning up old dataset..."
