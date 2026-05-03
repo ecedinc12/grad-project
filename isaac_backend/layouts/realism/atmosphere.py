@@ -346,3 +346,5 @@ def _spawn_atmosphere_clutter(rack_positions, params, asset_library, stage, idx)
 
     print(f"[INFO] Spawned atmosphere clutter: {count} items "
           f"(fallen boxes / cones / cardboard / hand trucks / leaning pallets / posters)")
+
+    return idx, count
