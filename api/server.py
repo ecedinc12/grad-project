@@ -142,10 +142,16 @@ async def _run_job(job_id: str, prompt: str, nim_api_key: str) -> None:
 
         async for raw in proc.stdout:  # type: ignore[union-attr]
             line = raw.decode("utf-8", errors="replace").rstrip()
+            if not line:
+                continue
             progress = _parse_progress(line)
             if progress is not None:
                 _jobs[job_id]["progress"] = progress
-            _jobs[job_id]["message"] = line[:200]  # truncate runaway lines
+            _jobs[job_id]["message"] = line[:200]
+            _jobs[job_id]["logs"].append(line[:200])
+            # Cap log buffer to avoid memory growth
+            if len(_jobs[job_id]["logs"]) > 500:
+                _jobs[job_id]["logs"] = _jobs[job_id]["logs"][-500:]
 
         await proc.wait()
 
@@ -195,6 +201,7 @@ async def run(req: RunRequest, request: Request, background_tasks: BackgroundTas
         "progress": 0,
         "message": "Job queued",
         "resultUrl": None,
+        "logs": [],
     }
 
     background_tasks.add_task(_run_job, job_id, req.prompt.strip(), nim_api_key)
