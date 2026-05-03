@@ -151,6 +151,16 @@ class NIMUnavailableError(RuntimeError):
     """Raised when all NIM models in the fallback chain are exhausted."""
 
 
+def _is_auth_failure(exc: Exception) -> bool:
+    """True for 401 errors — same key used for all models, no point retrying."""
+    status = getattr(getattr(exc, "response", None), "status_code", None)
+    if status == 401:
+        return True
+    # instructor wraps errors as XML strings; scan the text too
+    msg = str(exc)
+    return "401" in msg and ("unauthorized" in msg.lower() or "authentication failed" in msg.lower())
+
+
 def _is_retriable(exc: Exception) -> bool:
     """True for 429/503 rate-limit / overload errors and network timeouts."""
     msg = str(exc).lower()
@@ -199,9 +209,14 @@ def generate_scene_config(prompt: str, nim_api_key: str, output_path: str) -> No
 
             except Exception as exc:
                 last_error = exc
+                if _is_auth_failure(exc):
+                    raise NIMUnavailableError(
+                        "NIM API key is invalid or expired (401 Unauthorized). "
+                        "Please verify your NIM API key in Settings."
+                    )
                 if _is_retriable(exc):
                     wait = 2 ** attempt
-                    print(f"[LLM] {model} unavailable (attempt {attempt + 1}): {exc}. Retrying in {wait}s...")
+                    print(f"[LLM] {model} unavailable (attempt {attempt + 1}): retrying in {wait}s...")
                     time.sleep(wait)
                 else:
                     print(f"[LLM] {model} failed (non-retriable): {exc}")
