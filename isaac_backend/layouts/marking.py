@@ -276,21 +276,30 @@ def _spawn_pedestrian_crossing_paint(params, stage, idx):
                                   wx_hi - wx_lo, 0.10, yellow)
         count += 1
 
-    # Zebra crosswalk: white bands across the vehicle lane, centered on
-    # crossing zone X-extent, spanning the full vehicle band Y.
+    # Zebra crosswalk: wide white bands across the vehicle lane, centered on
+    # crossing zone X-extent, spanning the full vehicle band Y. Paint at a
+    # higher z than aisle stripes so it always reads on top.
     cw_x_lo, _ = crossing["bounds_min"]
     cw_x_hi, _ = crossing["bounds_max"]
     cw_w = cw_x_hi - cw_x_lo
-    band_w = 0.30
-    gap = 0.25
+    band_w = 0.45
+    gap = 0.40
     pitch = band_w + gap
-    n_bands = max(3, int(cw_w / pitch))
+    n_bands = max(4, int(cw_w / pitch))
     band_y_len = vy_hi - vy_lo
     band_y_mid = (vy_lo + vy_hi) / 2.0
+    actual_pitch = cw_w / n_bands
     for i in range(n_bands):
-        x = cw_x_lo + (i + 0.5) * (cw_w / n_bands)
+        x = cw_x_lo + (i + 0.5) * actual_pitch
         idx = _paint_floor_stripe(stage, idx, x, band_y_mid,
-                                  band_w, band_y_len, white, z=0.013)
+                                  band_w, band_y_len, white, z=0.020)
+        count += 1
+
+    # "STOP" / "LOOK" approach line: a solid white bar 0.6m wide on the
+    # vehicle-side just before the crosswalk on each approach.
+    for x_bar in (cw_x_lo - 0.6, cw_x_hi + 0.6):
+        idx = _paint_floor_stripe(stage, idx, x_bar, band_y_mid,
+                                  0.20, band_y_len, white, z=0.018)
         count += 1
 
     print(f"[INFO] Spawned pedestrian-crossing paint: {count} stripes "

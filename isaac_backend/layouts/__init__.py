@@ -135,7 +135,12 @@ def generate_layout(layout_name, layout_params, asset_library, stage):
     idx, num_main_aisle = _spawn_main_aisle_treatment(rack_positions, params, asset_library, stage, idx)
     idx, num_marshal = _spawn_marshalling_band(params, asset_library, stage, idx)
     idx, num_human = _spawn_human_imperfection(rack_positions, params, asset_library, stage, idx)
-    idx, num_mid_fork = _spawn_mid_aisle_forklift(rack_positions, params, asset_library, stage, idx)
+    # pedestrian_crossing layout owns its single forklift via the prompt-defined
+    # vehicle entity — skip the realism mid-aisle forklift so the scene reads
+    # "1 forklift approaching crossing" instead of two competing forklifts.
+    num_mid_fork = 0
+    if layout_name != "pedestrian_crossing":
+        idx, num_mid_fork = _spawn_mid_aisle_forklift(rack_positions, params, asset_library, stage, idx)
     num_doors = 0
     if params.get("dock_area", False):
         idx, num_doors = _spawn_dock_doors(params, stage, idx)
