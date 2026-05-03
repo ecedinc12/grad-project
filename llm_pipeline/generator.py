@@ -87,7 +87,8 @@ def generate_scene_config(prompt: str, output_path: str):
 
     ENTITY & PPE RULES:
     - ONLY include entities the user explicitly mentions. Do NOT add background props, vehicles, or workers that were not requested.
-    - If the user mentions workers generically (e.g. "workers"), spawn 2–3 workers with varied PPE states to create realistic training diversity. Each worker should have a distinct PPE compliance state (e.g. one fully compliant, one missing hardhat, one missing vest).
+    - EXPLICIT COUNTS ARE ABSOLUTE. If the user states a number ("3 workers", "1 forklift", "2 pallets"), emit EXACTLY that many entries — never round, never reduce, never expand. Generic mentions ("workers", "a few workers") may default to 2–3 with varied PPE.
+    - Each worker should have a distinct PPE compliance state (e.g. one fully compliant, one missing hardhat, one missing vest).
     - Default PPEState: Workers default to hardhat=True and vest=True UNLESS the user explicitly states they are missing.
     - Entities types: 'worker', 'vehicle', 'zone'.
     - The asset_id field MUST be exactly one of: 'worker', 'forklift', 'pallet', 'rack', 'box', 'barrel', 'cone'. Never invent an asset_id. If an entity does not match, omit it.
@@ -132,6 +133,8 @@ def generate_scene_config(prompt: str, output_path: str):
       * Worker "walking to" / "entering" / "approaching" a hazard zone → the FINAL GoTo destination MUST be a point inside that zone's bounds_min/bounds_max. Place earlier waypoints just outside the zone so the approach is visible.
       * "patrol" → 4+ GoTo waypoints forming a loop around the warehouse perimeter
       * "inspection" → alternating short GoTo hops (1–2 m apart) and LookAround pauses
+      * "waiting" / "stopped" / "standing" → 1 GoTo to the waiting spot, then alternating Idle (3–5s) and LookAround (2–3s) commands. Do NOT issue further GoTo commands — workers should stay put.
+      * "waiting at crosswalk / crossing" → cluster the GoTo destinations within 1.5 m of each other on the pedestrian-side edge of the crosswalk (not inside the vehicle lane).
 
     VEHICLE BEHAVIOR RULES:
     - ALWAYS generate a VehicleBehavior for every vehicle entity — vehicles must always move, static forklifts look unrealistic.

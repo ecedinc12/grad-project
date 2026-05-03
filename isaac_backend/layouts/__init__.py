@@ -30,6 +30,7 @@ from .marking import (
     _spawn_floor_markings,
     _spawn_main_aisle_treatment,
     _spawn_marshalling_band,
+    _spawn_pedestrian_crossing_paint,
 )
 from .realism import (
     _spawn_clutter,
@@ -145,6 +146,10 @@ def generate_layout(layout_name, layout_params, asset_library, stage):
     idx, num_realism_layer_2 = _spawn_realism_layer_2(rack_positions, params, asset_library, stage, idx)
     idx, num_atmosphere = _spawn_atmosphere_clutter(rack_positions, params, asset_library, stage, idx)
 
+    num_crosswalk = 0
+    if layout_name == "pedestrian_crossing":
+        idx, num_crosswalk = _spawn_pedestrian_crossing_paint(params, stage, idx)
+
     print(f"[INFO] Spawned {num_racks} racks, {num_shelf_items} shelf items, "
           f"{num_pallets} pallets, {num_clutter} clutter props, {num_dock_items} dock items, "
           f"{num_bulk} bulk-stock items, "
@@ -157,7 +162,8 @@ def generate_layout(layout_name, layout_params, asset_library, stage):
           f"{num_floor_fill} floor-fill staging items, "
           f"{num_realism_layer} realism-layer items, "
           f"{num_realism_layer_2} realism-layer-2 items, "
-          f"{num_atmosphere} atmosphere-clutter items.")
+          f"{num_atmosphere} atmosphere-clutter items, "
+          f"{num_crosswalk} crosswalk-paint stripes.")
 
     return params["bounds_min"], params["bounds_max"]
 

@@ -237,3 +237,62 @@ def _spawn_marshalling_band(params, asset_library, stage, idx):
 
     print(f"[INFO] Spawned marshalling band with {count} items")
     return idx, count
+
+
+def _spawn_pedestrian_crossing_paint(params, stage, idx):
+    """Paint vehicle-lane edges, walkway boundary, and a zebra crosswalk
+    centered on the pedestrian_crossing zone. Only meaningful when the
+    layout defines walkway / vehicle_lane / pedestrian_crossing clutter
+    zones — silently no-ops otherwise."""
+    zones = {z.get("area"): z for z in params.get("clutter_zones", []) or []}
+    crossing = zones.get("pedestrian_crossing")
+    vehicle = zones.get("vehicle_lane")
+    walkway = zones.get("walkway")
+    if not crossing or not vehicle:
+        return idx, 0
+
+    yellow = (0.95, 0.80, 0.10)
+    white = (0.95, 0.95, 0.95)
+    count = 0
+
+    vx_lo, vy_lo = vehicle["bounds_min"]
+    vx_hi, vy_hi = vehicle["bounds_max"]
+    cx = (vx_lo + vx_hi) / 2.0
+    vehicle_len = vx_hi - vx_lo
+
+    # Yellow vehicle-lane edge stripes (top + bottom of vehicle_lane band).
+    for y_edge in (vy_lo, vy_hi):
+        idx = _paint_floor_stripe(stage, idx, cx, y_edge,
+                                  vehicle_len, 0.12, yellow)
+        count += 1
+
+    # Walkway boundary stripe — yellow line on the vehicle-side edge of
+    # the walkway so pedestrian zone reads distinct from drive zone.
+    if walkway:
+        wy_lo, _ = walkway["bounds_min"]
+        wx_lo, _ = walkway["bounds_min"]
+        wx_hi, _ = walkway["bounds_max"]
+        idx = _paint_floor_stripe(stage, idx, (wx_lo + wx_hi) / 2.0, wy_lo,
+                                  wx_hi - wx_lo, 0.10, yellow)
+        count += 1
+
+    # Zebra crosswalk: white bands across the vehicle lane, centered on
+    # crossing zone X-extent, spanning the full vehicle band Y.
+    cw_x_lo, _ = crossing["bounds_min"]
+    cw_x_hi, _ = crossing["bounds_max"]
+    cw_w = cw_x_hi - cw_x_lo
+    band_w = 0.30
+    gap = 0.25
+    pitch = band_w + gap
+    n_bands = max(3, int(cw_w / pitch))
+    band_y_len = vy_hi - vy_lo
+    band_y_mid = (vy_lo + vy_hi) / 2.0
+    for i in range(n_bands):
+        x = cw_x_lo + (i + 0.5) * (cw_w / n_bands)
+        idx = _paint_floor_stripe(stage, idx, x, band_y_mid,
+                                  band_w, band_y_len, white, z=0.013)
+        count += 1
+
+    print(f"[INFO] Spawned pedestrian-crossing paint: {count} stripes "
+          f"(crosswalk + lane edges)")
+    return idx, count
