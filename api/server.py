@@ -20,6 +20,7 @@ import asyncio
 import glob
 import os
 import random
+import re
 import sys
 import time
 import uuid
@@ -107,11 +108,37 @@ def _newest_archive() -> Optional[Path]:
 
 def _parse_progress(line: str) -> Optional[int]:
     """'[3/9] ...' → 33"""
-    import re
     m = re.search(r"\[(\d+)/(\d+)\]", line)
     if m:
         return round(int(m.group(1)) / int(m.group(2)) * 100)
     return None
+
+
+# Only lines matching this pattern are shown in the UI log panel.
+# Isaac Sim produces hundreds of [Ns] [ext: ...] startup and deprecation lines
+# that are irrelevant to the user; this allowlist keeps only meaningful output.
+_SIGNAL_RE = re.compile(
+    r"\[\d+/\d+\]"                   # pipeline step markers [1/9]
+    r"|\[LLM\]"                       # LLM generator output
+    r"|\[PROGRESS\]"                  # Isaac Sim progress hooks
+    r"|\[ERROR\]"                     # pipeline errors
+    r"|\[FATAL\]"                     # fatal errors
+    r"|\[OK\]"                        # success markers
+    r"|\[WARN(?:ING)?\]"             # warnings
+    r"|\[INFO\]"                      # informational lines
+    r"|^={4}"                         # ==== separator lines from run_pipeline.sh
+    r"|Simulation App"                # "Simulation App Starting / Startup Complete"
+    r"|app ready"                     # Isaac Sim ready marker
+    r"|Starting Generation Pipeline"
+    r"|Prompt:"
+    r"|IRA core imports"
+    r"|Warning: ffmpeg"               # video generation skipped warning
+    r"|rm: cannot"                    # shell errors from cleanup step
+)
+
+
+def _is_signal(line: str) -> bool:
+    return bool(line.strip() and _SIGNAL_RE.search(line))
 
 
 def _build_subprocess_env(nim_api_key: str) -> dict:
@@ -142,16 +169,15 @@ async def _run_job(job_id: str, prompt: str, nim_api_key: str) -> None:
 
         async for raw in proc.stdout:  # type: ignore[union-attr]
             line = raw.decode("utf-8", errors="replace").rstrip()
-            if not line:
-                continue
             progress = _parse_progress(line)
             if progress is not None:
                 _jobs[job_id]["progress"] = progress
+            if not _is_signal(line):
+                continue
             _jobs[job_id]["message"] = line[:200]
             _jobs[job_id]["logs"].append(line[:200])
-            # Cap log buffer to avoid memory growth
-            if len(_jobs[job_id]["logs"]) > 500:
-                _jobs[job_id]["logs"] = _jobs[job_id]["logs"][-500:]
+            if len(_jobs[job_id]["logs"]) > 300:
+                _jobs[job_id]["logs"] = _jobs[job_id]["logs"][-300:]
 
         await proc.wait()
 
