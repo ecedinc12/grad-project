@@ -24,7 +24,7 @@ _HAS_KIT_COMMANDS = False
 Sdf = None
 
 
-from isaac_backend._logging import _progress  # noqa: E402
+from isaac_backend.log import _progress  # noqa: E402
 
 
 def _refresh_ira_state():

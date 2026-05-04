@@ -1,3 +1,4 @@
+"""Logging helpers for Isaac Sim pipeline steps (stdout progress markers)."""
 import sys
 import time
 

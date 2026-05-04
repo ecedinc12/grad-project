@@ -1,3 +1,4 @@
+"""NVIDIA NIM LLM pipeline: text prompt → SceneConfig JSON. Fallback chain: mistral-nemotron → step-3.5-flash → llama-4-maverick."""
 import os
 import sys
 import json

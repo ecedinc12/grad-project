@@ -8,7 +8,7 @@ after timeline play. Also handles periodic re-injection of randomized commands.
 import random
 
 import isaac_backend.ira_setup as _ira
-from isaac_backend._logging import _progress
+from isaac_backend.log import _progress
 from isaac_backend.navmesh_utils import get_navmesh, get_worker_pos, try_snap_target
 
 WAREHOUSE_X_RANGE = (-5.5, 5.5)

@@ -33,7 +33,7 @@ from isaac_backend.command_injection import (
     reinject_random_commands,
 )
 from isaac_backend.vehicle_animation import VehicleAnimator
-from isaac_backend._logging import _progress
+from isaac_backend.log import _progress
 
 
 __all__ = [

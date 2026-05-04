@@ -1,128 +1,72 @@
 #!/bin/bash
-# DigitalOcean Droplet kurulum scripti.
-# Ubuntu 22.04 LTS üzerinde tek seferlik çalıştırılır.
+# DigitalOcean Droplet kurulum scripti — tek seferlik çalıştırılır.
+# Statik React frontend (grad-project-front) + nginx + SSL kurulumu yapar.
 # Kullanım: sudo bash scripts/setup_droplet.sh
+#
+# Mimari: Frontend (bu droplet) ←→ Backend API (RunPod, ayrı)
 
 set -e
 
-REPO_DIR="/opt/grad-project"
-SERVICE_FILE="/etc/systemd/system/sdg-ui.service"
+FRONTEND_REPO="https://github.com/ecedinc12/grad-project-front.git"
+DEPLOY_DIR="/var/www/visionforge"
 NGINX_CONF="/etc/nginx/sites-available/sdg-ui"
-PYTHON_BIN="python3.11"
+DOMAIN="visionforge.tech"
 
 echo "========================================"
-echo " SDG UI — Droplet Kurulumu"
+echo " VisionForge — Droplet Kurulumu"
 echo "========================================"
 
 # ------------------------------------------------------------------ #
 # 1. Sistem güncellemesi & paketler                                   #
 # ------------------------------------------------------------------ #
-echo "[1/6] Sistem paketleri güncelleniyor..."
+echo "[1/5] Sistem paketleri güncelleniyor..."
 apt-get update -q
-apt-get install -y -q \
-    python3.11 python3.11-venv python3.11-dev \
-    python3-pip \
-    nginx \
-    git \
-    curl
+apt-get install -y -q nginx git curl nodejs npm certbot python3-certbot-nginx
 
 # ------------------------------------------------------------------ #
-# 2. Repo kopyala / güncelle                                         #
+# 2. Frontend repo'sunu kopyala / güncelle                           #
 # ------------------------------------------------------------------ #
-echo "[2/6] Repo hazırlanıyor: $REPO_DIR"
-if [ -d "$REPO_DIR/.git" ]; then
-    git -C "$REPO_DIR" pull --ff-only
+echo "[2/5] Frontend repo hazırlanıyor: $DEPLOY_DIR"
+if [ -d "$DEPLOY_DIR/.git" ]; then
+    git -C "$DEPLOY_DIR" pull --ff-only
 else
-    # GitHub Education reposunu kopyala; URL'yi kendi repo'nuza göre güncelleyin
-    git clone https://github.com/YOUR_USERNAME/grad-project.git "$REPO_DIR"
+    git clone "$FRONTEND_REPO" "$DEPLOY_DIR"
+fi
+
+# React build
+cd "$DEPLOY_DIR/app"
+npm install --silent
+npm run build
+echo "    React build tamamlandı: $DEPLOY_DIR/app/dist"
+
+# ------------------------------------------------------------------ #
+# 3. .env dosyası                                                     #
+# ------------------------------------------------------------------ #
+echo "[3/5] .env kontrol ediliyor..."
+if [ ! -f "$DEPLOY_DIR/.env" ]; then
+    echo "  DROPLET_API_KEY değerini doldurun: nano $DEPLOY_DIR/.env"
 fi
 
 # ------------------------------------------------------------------ #
-# 3. Python sanal ortamı & bağımlılıklar                             #
+# 4. Nginx — statik React SPA                                        #
 # ------------------------------------------------------------------ #
-echo "[3/6] Python sanal ortamı oluşturuluyor..."
-$PYTHON_BIN -m venv "$REPO_DIR/.venv"
-"$REPO_DIR/.venv/bin/pip" install -q --upgrade pip
-"$REPO_DIR/.venv/bin/pip" install -q \
-    gradio \
-    httpx \
-    python-dotenv
-
-# ------------------------------------------------------------------ #
-# 4. .env dosyası                                                     #
-# ------------------------------------------------------------------ #
-echo "[4/6] .env dosyası kontrol ediliyor..."
-if [ ! -f "$REPO_DIR/.env" ]; then
-    cp "$REPO_DIR/.env.example" "$REPO_DIR/.env"
-    echo ""
-    echo "  ⚠️  $REPO_DIR/.env oluşturuldu."
-    echo "     BACKEND_URL ve DROPLET_API_KEY değerlerini doldurun:"
-    echo "     nano $REPO_DIR/.env"
-    echo ""
-fi
-
-# ------------------------------------------------------------------ #
-# 5. systemd servisi                                                  #
-# ------------------------------------------------------------------ #
-echo "[5/6] systemd servisi kuruluyor..."
-cat > "$SERVICE_FILE" <<'EOF'
-[Unit]
-Description=SDG Digital Twin — Gradio UI
-After=network.target
-
-[Service]
-Type=simple
-User=root
-WorkingDirectory=/opt/grad-project
-EnvironmentFile=/opt/grad-project/.env
-ExecStart=/opt/grad-project/.venv/bin/python3 /opt/grad-project/ui/app.py
-Restart=always
-RestartSec=5
-StandardOutput=journal
-StandardError=journal
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-systemctl daemon-reload
-systemctl enable sdg-ui
-systemctl restart sdg-ui
-echo "    systemd: sdg-ui servisi aktif"
-
-# ------------------------------------------------------------------ #
-# 6. Nginx reverse proxy                                              #
-# ------------------------------------------------------------------ #
-echo "[6/6] Nginx yapılandırılıyor (port 80 → 7860)..."
-cat > "$NGINX_CONF" <<'EOF'
-server {
-    listen 80;
-    server_name _;
-
-    # Gradio WebSocket + SSE için gerekli
-    proxy_read_timeout 3600;
-    proxy_send_timeout 3600;
-    proxy_buffering    off;
-
-    location / {
-        proxy_pass         http://127.0.0.1:7860;
-        proxy_http_version 1.1;
-        proxy_set_header   Upgrade $http_upgrade;
-        proxy_set_header   Connection "upgrade";
-        proxy_set_header   Host $host;
-        proxy_set_header   X-Real-IP $remote_addr;
-        proxy_cache_bypass $http_upgrade;
-    }
-}
-EOF
-
+echo "[4/5] Nginx yapılandırılıyor..."
+cp "$(dirname "$0")/../deploy/nginx.conf" "$NGINX_CONF"
 ln -sf "$NGINX_CONF" /etc/nginx/sites-enabled/sdg-ui
 rm -f /etc/nginx/sites-enabled/default
 nginx -t && systemctl reload nginx
+echo "    Nginx hazır (HTTP, SSL sonra eklenecek)"
+
+# ------------------------------------------------------------------ #
+# 5. SSL — Let's Encrypt                                             #
+# ------------------------------------------------------------------ #
+echo "[5/5] SSL sertifikası alınıyor ($DOMAIN)..."
+certbot --nginx -d "$DOMAIN" -d "www.$DOMAIN" --non-interactive --agree-tos --email ardacam2004@gmail.com || \
+    echo "  SSL kurulumu atlandı — certbot manuel çalıştırın: certbot --nginx -d $DOMAIN"
 
 echo ""
 echo "========================================"
 echo " Kurulum tamamlandı!"
-echo " GUI: http://$(curl -s ifconfig.me)"
-echo " Loglar: journalctl -u sdg-ui -f"
+echo " Site: https://$DOMAIN"
+echo " Güncelleme: cd $DEPLOY_DIR && git pull && cd app && npm run build"
 echo "========================================"
