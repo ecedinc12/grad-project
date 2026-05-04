@@ -10,7 +10,7 @@ the character USD and can be individually hidden via UsdGeom.Imageable.MakeInvis
 import random
 from pxr import Gf, Usd, UsdGeom
 import omni.usd
-from isaac_backend.semantics import apply_usd_semantics, _set_semantic
+from isaac_backend.semantics import apply_usd_semantics
 
 HARDHAT_MESH_KEYWORDS = {"hardhat", "earprotection"}
 VEST_MESH_KEYWORDS = {"safetyvest"}
@@ -87,8 +87,8 @@ def apply_ppe(worker_prim, ppe_state):
         if ppe_category == "hardhat":
             if has_hardhat:
                 UsdGeom.Imageable(child).MakeVisible()
-                _set_semantic(child, "hardhat")
                 labeled.append((str(child.GetPath()), "hardhat"))
+                apply_usd_semantics(child, "hardhat")
             else:
                 UsdGeom.Imageable(child).MakeInvisible()
                 hidden.append((str(child.GetPath()), "hardhat"))
@@ -96,8 +96,8 @@ def apply_ppe(worker_prim, ppe_state):
         elif ppe_category == "vest":
             if has_vest:
                 UsdGeom.Imageable(child).MakeVisible()
-                _set_semantic(child, "vest")
                 labeled.append((str(child.GetPath()), "vest"))
+                apply_usd_semantics(child, "vest")
             else:
                 UsdGeom.Imageable(child).MakeInvisible()
                 hidden.append((str(child.GetPath()), "vest"))
@@ -111,22 +111,6 @@ def apply_ppe(worker_prim, ppe_state):
     return hidden, labeled
 
 
-def collect_worker_ppe_mesh_names(worker_prim):
-    """Collect the prim path names of PPE meshes under a worker prim.
-
-    Used by apply_scene_semantics to know which meshes to skip when
-    applying blanket "person" labels.
-    """
-    ppe_paths = set()
-    for child in Usd.PrimRange(worker_prim):
-        if child.GetTypeName() != "Mesh":
-            continue
-        child_name = str(child.GetPath()).split("/")[-1]
-        if _classify_mesh(child_name) is not None:
-            ppe_paths.add(str(child.GetPath()))
-    return ppe_paths
-
-
 def spawn_workers(workers, worker_behaviors, asset_library, stage, simulation_app=None, visible_bounds=None):
     """Spawn workers as Xform prims with USD references, PPE visibility, and semantics.
 
@@ -136,8 +120,12 @@ def spawn_workers(workers, worker_behaviors, asset_library, stage, simulation_ap
     Returns a set of spawned worker names (e.g. {"worker_01", "worker_02"}).
     """
     def _initial_pos(worker_id):
+        # Accept both "worker_01" and bare "01" in worker_behaviors so configs
+        # work whether or not the "worker_" prefix is present on worker_id values.
+        short_id = worker_id.removeprefix("worker_")
         for wb in worker_behaviors:
-            if wb.get("worker_id") == worker_id:
+            wb_id = wb.get("worker_id", "")
+            if wb_id == worker_id or wb_id == short_id:
                 for cmd in wb.get("commands", []):
                     if cmd.get("command") == "GoTo":
                         x, y = cmd.get("x", 0.0), cmd.get("y", 0.0)
@@ -165,46 +153,34 @@ def spawn_workers(workers, worker_behaviors, asset_library, stage, simulation_ap
 
         prim = stage.DefinePrim(prim_path, "Xform")
         prim.GetReferences().AddReference(usd_path)
+        apply_usd_semantics(prim, "person")
 
         spawn_x, spawn_y = _initial_pos(name)
         xf = UsdGeom.Xformable(prim)
         xf.ClearXformOpOrder()
         xf.AddTranslateOp().Set(Gf.Vec3d(spawn_x, spawn_y, 0.0))
 
-        apply_usd_semantics(prim_path, "person")
-        for child in Usd.PrimRange(prim):
-            _set_semantic(child, "person")
         spawned_names.add(name)
 
         print(f"[INFO] Spawned {name} @ ({spawn_x:.2f}, {spawn_y:.2f}, 0.0) ppe={ppe_state}")
 
-    # Wait for SkelRoots to resolve, then apply PPE visibility
-    if simulation_app is not None and workers:
-        for worker_idx, entity in enumerate(workers, 1):
-            name = f"worker_{worker_idx:02d}"
-            prim_path = f"/World/Characters/{name}"
-            skelroot = _wait_for_skelroot(prim_path, stage, simulation_app)
-            if skelroot is None:
-                print(f"[ERROR] SkelRoot not found for {name} after timeout.")
-                continue
+    # Wait for SkelRoots to resolve, then apply PPE visibility.
+    for worker_idx, entity in enumerate(workers, 1):
+        name = f"worker_{worker_idx:02d}"
+        prim_path = f"/World/Characters/{name}"
 
-            # Re-fetch the worker Xform prim for PPE application
-            worker_prim = stage.GetPrimAtPath(prim_path)
-            ppe_state = entity.get("ppe_state") or {}
-            apply_ppe(worker_prim, ppe_state)
-    else:
-        for worker_idx, entity in enumerate(workers, 1):
-            name = f"worker_{worker_idx:02d}"
-            prim_path = f"/World/Characters/{name}"
+        if simulation_app is not None:
+            skelroot = _wait_for_skelroot(prim_path, stage, simulation_app)
+        else:
             prim = stage.GetPrimAtPath(prim_path)
             skelroot = _find_skelroot(prim) if prim and prim.IsValid() else None
-            if skelroot is None:
-                print(f"[WARN] SkelRoot not found for {name} (no simulation_app for async wait).")
-                continue
 
-            worker_prim = stage.GetPrimAtPath(prim_path)
-            ppe_state = entity.get("ppe_state") or {}
-            apply_ppe(worker_prim, ppe_state)
+        if skelroot is None:
+            print(f"[WARN] SkelRoot not found for {name} — skipping PPE setup.")
+            continue
+
+        worker_prim = stage.GetPrimAtPath(prim_path)
+        apply_ppe(worker_prim, entity.get("ppe_state") or {})
 
     print(f"[INFO] Spawned {len(spawned_names)} workers: {sorted(spawned_names)}")
     return spawned_names

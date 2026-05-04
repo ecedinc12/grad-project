@@ -74,52 +74,52 @@
 - [x] **Task 8.3: Update `main.py`.** Added `inject_worker_commands()` after timeline.play() + warmup.
 - [x] **Task 8.4: Update `AGENTS.md`.** Architecture + gotchas updated.
 - [x] **Task 8.5: Write IRA Reference Guide.** `references/ira_people_animation_guide.md`.
-- [ ] **Task 8.6: Syntax Validation.** Run `python3 -m py_compile` on all modified files.
-- [ ] **Task 8.7: RunPod Test.** Execute pipeline and verify workers move via IRA navmesh.
+- [x] **Task 8.6: Syntax Validation.** Run `python3 -m py_compile` on all modified files.
+- [x] **Task 8.7: RunPod Test.** Execute pipeline and verify workers move via IRA navmesh.
 
 ---
 
-#### Phase 9: GUI → DigitalOcean Droplet + Backend API Bridge
-> **Amaç:** `ui/app.py` artık `subprocess` ile yerel pipeline çalıştırmıyor.
-> GUI, DigitalOcean Droplet'te barındırılır; RunPod backend'e HTTP API üzerinden bağlanır.
-> Backend agent (`isaac_backend/`) + Frontend agent (`ui/`) birlikte bu köprüyü kurar.
+#### Phase 9: Yeni React Frontend Entegrasyonu (VisionForge)
+> Gradio tabanlı eski `ui/app.py` artık aktif değil. Yeni frontend `grad-project-front` reposunda;
+> DigitalOcean Droplet'te nginx ile statik olarak servis ediliyor (`https://www.visionforge.tech`).
+> Bu phase'de `api/server.py` yeni frontend'in beklediği API sözleşmesine uyarlanıyor.
 
-**9a — RunPod: HTTP API Katmanı (Backend Agent)**
-- [x] **Task 9.1: FastAPI sunucusu.** `api/server.py` oluştur. `POST /generate` endpoint'i: `{"prompt": str}` alır, `run_pipeline.sh` çıktısını SSE (Server-Sent Events) ile stream eder.
-- [x] **Task 9.2: Sonuç endpoint'leri.** `GET /frames` — son çalışmadaki RGB kare listesi (base64 veya URL). `GET /video` — `output.mp4` binary stream. `GET /archive` — son `dataset_*.tar.gz` download.
-- [x] **Task 9.3: Durum endpoint'i.** `GET /status` — pipeline çalışıyor mu, son job ID, tamamlanma yüzdesi.
-- [x] **Task 9.4: API anahtarı güvenliği.** `DROPLET_API_KEY` env değişkeniyle basit Bearer token doğrulama (her iki uçta da). `.env.example` dosyası ekle.
-- [x] **Task 9.5: CORS.** DigitalOcean Droplet IP'si için CORS ayarla (`fastapi.middleware.cors`).
-- [x] **Task 9.6: `api/requirements.txt`.** `fastapi`, `uvicorn[standard]`, `python-multipart`, `python-dotenv`.
-- [x] **Task 9.7: RunPod başlatma komutu.** `scripts/start_api.sh` — `uvicorn api.server:app --host 0.0.0.0 --port 8000` şeklinde başlatır, arka planda çalışır.
+- [x] **Task 9.1: `/run` endpoint.** `api/server.py` — mevcut `POST /generate` endpoint'ini kaldır (veya eski adla bırak, yeni `/run` endpoint'i ekle). Body: `{prompt, preset, frames, labels}`. `X-NIM-API-Key` header'ı oku, yoksa `HTTP 400` dön. Arka planda pipeline'ı başlat, anında `{jobId, status: "queued"}` dön (HTTP 202).
+- [x] **Task 9.2: `/status/{jobId}` endpoint.** `api/server.py` — `GET /status/{job_id}`: `{jobId, status, progress, message, resultUrl}` döndür. Status değerleri: `queued | running | completed | failed`. `resultUrl` tamamlandığında `tar.gz` download URL'ini göstermeli.
+- [x] **Task 9.3: Job store.** `api/server.py` — Şimdilik in-memory dict yeterli (`jobs: dict`). İleride Redis'e taşınabilir. Job kaydı: `{status, progress, message, resultUrl}`.
+- [x] **Task 9.4: CORS güncelle.** `api/server.py` — `allow_origins` listesine `"https://www.visionforge.tech"` ve `"http://localhost:5173"` ekle. `allow_headers=["*"]` — `X-NIM-API-Key` custom header'ı için şart. `allow_origins=["*"]` KULLANMA (custom header'lı preflight'ı bloklar).
+- [x] **Task 9.5: `.env.example` güncelle.** `GEMINI_API_KEY` satırını kaldır (NIM key artık header'dan geliyor). `ACCEPT_EULA`, `DROPLET_API_KEY` bırak.
+- [x] **Task 9.6: `FRONTEND_INTEGRATION.md` referans al.** `AGENTS.md`'ye `docs/FRONTEND_INTEGRATION.md`'yi referans olarak ekle.
 
-**9b — DigitalOcean Droplet: GUI Deployment (Frontend Agent)**
-- [x] **Task 9.8: `ui/app.py` güncelle.** `subprocess` kaldır, `httpx` (async SSE) ile `BACKEND_URL` env'den okunan RunPod API'ye bağlan. `USE_MOCK_PIPELINE` mantığı `BACKEND_URL` boşsa mock'a dönsün.
-- [ ] **Task 9.9: Droplet ortam dosyası.** `.env` — `BACKEND_URL=https://<pod-id>-8000.proxy.runpod.net`, `DROPLET_API_KEY=<secret>`. (Runtime: Droplet'te manuel doldurulacak)
-- [x] **Task 9.10: Droplet kurulum scripti.** `scripts/setup_droplet.sh` — `apt` ile Python 3.11, `pip install gradio httpx python-dotenv`, systemd servis dosyası (`ui.service`).
-- [x] **Task 9.11: systemd servis.** `/etc/systemd/system/sdg-ui.service` — `ExecStart=python3 /opt/grad-project/ui/app.py`, `Restart=always`, `EnvironmentFile=/opt/grad-project/.env`.
-- [x] **Task 9.12: Nginx reverse proxy.** Port 80 → 7860 yönlendirme. Droplet public IP üzerinden erişim.
+---
 
-**9c — Ortak: Env & Bağımlılık Hazırlığı (Backend + Frontend)**
-- [ ] **Task 9.13: ffmpeg kurulumu.** RunPod pod'unda `apt-get install -y ffmpeg`. (Runtime: pod'da çalıştırılacak)
-- [ ] **Task 9.14: Gemini API Key.** RunPod `.env`'e `GEMINI_API_KEY=<key>` ekle. (Runtime: pod'da doldurulacak)
-- [ ] **Task 9.15: Isaac Sim EULA.** RunPod `.env`'e `ACCEPT_EULA=Y` ekle. (Runtime: pod'da doldurulacak)
-- [x] **Task 9.16: `.env.example` şablonu.** Proje köküne ekle: `GEMINI_API_KEY=`, `ACCEPT_EULA=Y`, `BACKEND_URL=`, `DROPLET_API_KEY=`, `GRADIO_MOCK=0`.
+#### Phase 10: NIM LLM Migration & Fallback Sistemi
+> `llm_pipeline/generator.py` Gemini tabanlıydı. NVIDIA NIM'e geçildi (OpenAI-uyumlu API,
+> `https://integrate.api.nvidia.com/v1`). API key artık env var değil — her istekle birlikte
+> frontend'den `X-NIM-API-Key` header'ı üzerinden runtime'da geliyor.
+> NIM'e yoğun talep geldiğinde tek modele bağımlılık pipeline'ı durdurur; fallback sistemi şart.
 
-#### Phase 10: Isaac Sim Pipeline Fixes (Sonraki Aşama)
-> Ece'nin listelediği bilinen hatalar ve eksiklikler.
-
-- [ ] **Task 10.1: Kamera sahne kapsamı.** `isaac_backend/camera.py` — prompt'tan gelen tüm entity'lerin bounding box'ını hesapla, kamerayı otomatik olarak sahneyi tam kaplayacak yükseklik/açıya ayarla.
-- [ ] **Task 10.2: Generator eksikliği — worker spawn hatası.** `llm_pipeline/generator.py` — iki worker'ın neden spawn olmadığını araştır (muhtemelen Pydantic schema'da entity listesi kısıtlaması veya LLM'in düşük sayıda entity üretmesi). Hata ayıkla ve düzelt.
-- [ ] **Task 10.3: Annotated video generation.** `scripts/make_annotated_video.py` — eklenmiş ama test edilmemiş. Bounding box overlay'li video oluşturmayı test et, ffmpeg pipeline'ı doğrula.
-- [ ] **Task 10.4: Hareketli forklift.** `isaac_backend/` — forklift için IRA benzeri hareket komutu veya USD animation path. Şu an forklift statik spawna lanıyor.
-- [ ] **Task 10.5: Worker-obje çarpışma.** `isaac_backend/animation.py` — worker'ların fizik nesnelerinin içinden geçmemesi için navmesh obstacle veya collision layer ayarı.
-- [x] **Task 10.6: GUI hata ayıklaması — frame delivery.** `ui/app.py` — `/frames` endpoint bazen tam iç URL (`http://100.65.x.x:PORT/frame/rgb_N.png`) döndürüyor; client bunu `{proxy}/frame/{full_url}` ile birleştirince bozuk URL oluşuyor. Fix: `Path(name).name` ile basename'e normalize et, ardından proxy URL ile yeniden oluştur. `api/server.py`'de de `_rgb_frames` her zaman sadece basename döndürmeli (zaten doğru, eski pod kodu farklıydı).
-
-#### Phase 11: Dosya Yönetimi (Sonraki Aşama)
-> RunPod pod kapandığında `/workspace` dışındaki her şey siliniyor. `dataset_*.tar.gz` dosyaları `/workspace/grad-project` köküne birikmeye devam ediyor.
-
-- [ ] **Task 11.1: tar.gz output path.** `scripts/run_pipeline.sh` — `ARCHIVE_NAME` hedefini `/workspace/datasets/dataset_${TIMESTAMP}.tar.gz` yap. `/workspace/datasets/` klasörü yoksa oluştur.
-- [ ] **Task 11.2: API archive endpoint güncelle.** `api/server.py` — `GET /archive` endpoint'i yeni `/workspace/datasets/` klasörünü tarasın.
-- [ ] **Task 11.3: .gitignore.** `dataset_*.tar.gz` ve `*.png` git takibinden çıkar.
-- [ ] **Task 11.4: configs/ geçici dosyası.** `configs/current_scene.json` — pipeline tarafından üretiliyor, `/tmp/current_scene.json`'a taşı ve `run_pipeline.sh` + `api/server.py`'yi güncelle.
+- [x] **Task 10.1: Generator imzasını güncelle.** `llm_pipeline/generator.py` — `generate_scene_config(prompt: str, nim_api_key: str) -> SceneConfig`. `os.getenv("NIM_API_KEY")` veya `GEMINI_API_KEY` kullanımını kaldır; anahtar parametre olarak gelsin.
+- [x] **Task 10.2: Primary model — Mistral Nemotron.** `generate_scene_config` içinde önce `mistralai/mistral-nemotron` dene. OpenAI SDK ile streaming:
+  ```python
+  from openai import OpenAI
+  client = OpenAI(base_url="https://integrate.api.nvidia.com/v1", api_key=nim_api_key)
+  completion = client.chat.completions.create(
+      model="mistralai/mistral-nemotron",
+      messages=[...], temperature=0.6, top_p=0.7, max_tokens=4096, stream=True
+  )
+  ```
+- [x] **Task 10.3: Fallback 1 — Step 3.5 Flash.** `mistral-nemotron` 429/503/timeout verirse `stepfun-ai/step-3.5-flash` dene. `reasoning_content` alanını da işle (`chunk.choices[0].delta.reasoning_content`). `max_tokens=16384`.
+- [x] **Task 10.4: Fallback 2 — Llama 4 Maverick.** `step-3.5-flash` de başarısız olursa `meta/llama-4-maverick-17b-128e-instruct` dene. `requests` + SSE streaming:
+  ```python
+  import requests
+  headers = {"Authorization": f"Bearer {nim_api_key}", "Accept": "text/event-stream"}
+  payload = {"model": "meta/llama-4-maverick-17b-128e-instruct", "messages": [...], "stream": True}
+  response = requests.post("https://integrate.api.nvidia.com/v1/chat/completions", headers=headers, json=payload)
+  for line in response.iter_lines():
+      if line: process_sse_line(line.decode("utf-8"))
+  ```
+- [x] **Task 10.5: Retry + exponential backoff.** Her model için max 2 deneme, aralarında 2^attempt saniyelik bekleme. Tüm modeller başarısız olursa `NIMUnavailableError` fırlat; `api/server.py` bunu yakalar, job'u `failed` olarak işaretle.
+- [x] **Task 10.6: Instructor entegrasyonu koru.** NIM modelleriyle `instructor` kütüphanesi `SceneConfig` Pydantic validation'ını sürdürmeli. `instructor.patch(client)` OpenAI SDK path'inde çalışır; Maverick `requests` path'i için JSON parse fallback yaz.
+- [x] **Task 10.7: `api/server.py` entegrasyonu.** `/run` endpoint'i, header'dan okunan `nim_api_key`'i `generate_scene_config(..., nim_api_key=nim_api_key)` çağrısına ilet.
+- [x] **Task 10.8: Test.** Geçersiz API key → 400. Geçerli key + Mistral yanıt veriyor → SceneConfig üretildi. Mistral 503 → Fallback chain tamamlanıyor. Üç model de 503 → job `failed`.

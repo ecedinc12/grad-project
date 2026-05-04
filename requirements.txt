@@ -1,19 +1,22 @@
-# LLM Pipeline — standard Python environment
-# Install with: pip install -r requirements.txt
+# VisionForge — Python dependencies
+# pip3 install --break-system-packages -r requirements.txt
 
-# Structured LLM extraction (Gemini via OpenAI-compatible API)
+# ── FastAPI server ───────────────────────────────────────────
+fastapi>=0.110.0
+uvicorn[standard]>=0.29.0
+python-dotenv>=1.0.0
+
+# ── LLM pipeline (NVIDIA NIM) ───────────────────────────────
 instructor>=1.4.0
 openai>=1.30.0
-
-# Pydantic schemas (used by llm_pipeline/generator.py and schemas.py)
 pydantic>=2.0.0
 
-# COCO-to-YOLO post-processing (scripts/coco_to_yolo.py)
+# ── Post-processing ──────────────────────────────────────────
 numpy>=1.24.0
 Pillow>=10.0.0
 
-# RAG system (rag_system/)
-chromadb>=0.4.0
-sentence-transformers>=2.2.0
-beautifulsoup4>=4.12.0
-requests>=2.31.0
+# ── RAG system (optional) ────────────────────────────────────
+# chromadb>=0.4.0
+# sentence-transformers>=2.2.0
+# beautifulsoup4>=4.12.0
+# requests>=2.31.0

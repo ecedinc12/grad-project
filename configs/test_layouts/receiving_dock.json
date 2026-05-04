@@ -1,0 +1,167 @@
+{
+    "entities": [
+        {
+            "type": "worker",
+            "asset_id": "worker",
+            "ppe_state": {
+                "hardhat": true,
+                "vest": true
+            },
+            "anchor_zone": "staging_area"
+        },
+        {
+            "type": "worker",
+            "asset_id": "worker",
+            "ppe_state": {
+                "hardhat": false,
+                "vest": false
+            },
+            "anchor_zone": "truck_apron"
+        },
+        {
+            "type": "vehicle",
+            "asset_id": "forklift",
+            "ppe_state": null,
+            "anchor_zone": "receiving_dock"
+        }
+    ],
+    "hazard_zones": [
+        {
+            "name": "truck_apron",
+            "bounds_min": [-8.0, -12.0],
+            "bounds_max": [8.0, -7.0],
+            "danger_level": "critical"
+        },
+        {
+            "name": "receiving_dock",
+            "bounds_min": [-6.0, -7.0],
+            "bounds_max": [6.0, -4.0],
+            "danger_level": "restricted"
+        },
+        {
+            "name": "staging_area",
+            "bounds_min": [-8.0, -4.0],
+            "bounds_max": [8.0, 2.0],
+            "danger_level": "warning"
+        }
+    ],
+    "camera_angles": ["high_angle", "eye_level"],
+    "camera_mode": "indoor",
+    "camera_position": null,
+    "focal_length": null,
+    "lighting_conditions": "dusk",
+    "worker_behaviors": [
+        {
+            "worker_id": "worker_01",
+            "commands": [
+                {
+                    "command": "GoTo",
+                    "x": -5.0,
+                    "y": -2.0,
+                    "z": 0.0,
+                    "rotation": 270.0,
+                    "duration": null
+                },
+                {
+                    "command": "Idle",
+                    "x": null,
+                    "y": null,
+                    "z": 0.0,
+                    "rotation": null,
+                    "duration": 2.0
+                },
+                {
+                    "command": "GoTo",
+                    "x": 5.0,
+                    "y": -2.0,
+                    "z": 0.0,
+                    "rotation": 90.0,
+                    "duration": null
+                },
+                {
+                    "command": "LookAround",
+                    "x": null,
+                    "y": null,
+                    "z": 0.0,
+                    "rotation": null,
+                    "duration": 2.0
+                },
+                {
+                    "command": "GoTo",
+                    "x": 0.0,
+                    "y": 0.0,
+                    "z": 0.0,
+                    "rotation": 0.0,
+                    "duration": null
+                }
+            ]
+        },
+        {
+            "worker_id": "worker_02",
+            "commands": [
+                {
+                    "command": "GoTo",
+                    "x": -3.0,
+                    "y": -9.0,
+                    "z": 0.0,
+                    "rotation": 0.0,
+                    "duration": null
+                },
+                {
+                    "command": "Idle",
+                    "x": null,
+                    "y": null,
+                    "z": 0.0,
+                    "rotation": null,
+                    "duration": 3.0
+                },
+                {
+                    "command": "GoTo",
+                    "x": 3.0,
+                    "y": -9.0,
+                    "z": 0.0,
+                    "rotation": 180.0,
+                    "duration": null
+                },
+                {
+                    "command": "GoTo",
+                    "x": 3.0,
+                    "y": -10.5,
+                    "z": 0.0,
+                    "rotation": 180.0,
+                    "duration": null
+                }
+            ]
+        }
+    ],
+    "vehicle_behaviors": [
+        {
+            "vehicle_id": "forklift_01",
+            "commands": [
+                {
+                    "command": "GoTo",
+                    "x": 0.0,
+                    "y": -5.5,
+                    "z": 0.0,
+                    "rotation": 180.0
+                },
+                {
+                    "command": "GoTo",
+                    "x": 0.0,
+                    "y": -1.0,
+                    "z": 0.0,
+                    "rotation": 0.0
+                },
+                {
+                    "command": "GoTo",
+                    "x": -4.0,
+                    "y": -1.0,
+                    "z": 0.0,
+                    "rotation": 270.0
+                }
+            ]
+        }
+    ],
+    "layout": "receiving_dock",
+    "layout_params": null
+}

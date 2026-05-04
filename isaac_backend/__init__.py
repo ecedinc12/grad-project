@@ -1,7 +1,7 @@
 from isaac_backend.config_loader import load_config
 from isaac_backend.camera import positions_for_angles, pick_look_at_target
 from isaac_backend.lighting import setup_camera_and_lighting
-from isaac_backend.semantics import apply_usd_semantics, clear_unwanted_warehouse_semantics, apply_scene_semantics
+from isaac_backend.semantics import apply_usd_semantics, clear_unwanted_warehouse_semantics
 from isaac_backend.spawner import get_geofenced_spawner, spawn_hazard_zones, spawn_at_fixed_position, resolve_anchor_zone_bounds
 from isaac_backend.warehouse import spawn_warehouse_layout, hide_driver_prims
 from isaac_backend.workers import spawn_workers

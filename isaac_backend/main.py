@@ -13,7 +13,7 @@ import glob
 import time
 import random
 import argparse
-import subprocess
+from pathlib import Path
 
 
 def _patch_fast_importer():
@@ -41,15 +41,15 @@ def _patch_kit_anim_schema():
         return
     with open(KIT_FILE, "r") as f:
         src = f.read()
-    if '"omni.anim.graph.schema"' in src:
+    if '"omni.anim.navigation.core"' in src:
         return
     patched = src.replace(
-        '"isaacsim.exp.base" = {}',
-        '"isaacsim.exp.base" = {}\n"omni.anim.graph.core" = {}\n"omni.anim.graph.schema" = {}',
+        '"omni.anim.graph.schema" = {}',
+        '"omni.anim.graph.schema" = {}\n"omni.anim.navigation.core" = {}\n"omni.anim.navigation.schema" = {}',
     )
     with open(KIT_FILE, "w") as f:
         f.write(patched)
-    _progress("Patched kit file with omni.anim.graph.core and omni.anim.graph.schema")
+    _progress("Patched kit file with omni.anim.navigation.core and omni.anim.navigation.schema")
 
 
 def _progress(msg):
@@ -88,26 +88,32 @@ import omni.replicator.core as rep
 import omni.usd
 import omni.timeline
 from isaacsim.core.api import World
-from pxr import Usd, UsdGeom, Sdf
 
 from isaac_backend.config_loader import load_config
 from isaac_backend.camera import (
-    positions_for_angles, pick_indoor_position, clamp_to_warehouse,
+    positions_for_angles, clamp_to_warehouse,
     pick_look_at_target, pick_camera_placement, compute_ground_visible_area,
+    fit_camera_to_entities,
 )
 from isaac_backend.lighting import setup_camera_and_lighting
-from isaac_backend.semantics import clear_unwanted_warehouse_semantics, apply_scene_semantics
+from isaac_backend.semantics import clear_unwanted_warehouse_semantics
 from isaac_backend.spawner import get_geofenced_spawner, spawn_hazard_zones, spawn_at_fixed_position, resolve_anchor_zone_bounds
 from isaac_backend.warehouse import spawn_warehouse_layout, hide_driver_prims
 from isaac_backend.workers import spawn_workers
-from isaac_backend.animation import (
+from isaac_backend.ira_setup import (
     enable_behavior_extensions,
-    setup_all_behaviors_async,
+    bake_navmesh,
     ensure_biped_setup,
+    setup_all_behaviors_async,
     link_workers_to_animation_graph,
-    inject_commands_after_play,
-    reinject_random_commands,
+    wait_for_animation_graph,
+    force_register_agents,
+    diagnose_behavior_state,
+    diagnose_usdrt_view,
+    bake_animation_graph_into_asset,
 )
+from isaac_backend.command_injection import inject_commands_after_play
+from isaac_backend.vehicle_animation import VehicleAnimator
 
 COCO_CATEGORIES = {
     "person": {"name": "person", "id": 1, "supercategory": "worker", "color": (220, 20, 60)},
@@ -130,7 +136,7 @@ COCO_CATEGORIES = {
 
 NUM_FRAMES = 200
 SIM_STEPS_PER_FRAME = 2
-REINJECT_INTERVAL = 80
+CAMERA_RANDOMIZE_INTERVAL = 50
 
 
 # --- Helpers ---
@@ -159,50 +165,6 @@ def intersect_bounds(spawn_min, spawn_max, visible_bounds):
     )
 
 
-def compute_scene_centroid(stage, known_positions=None):
-    """Compute average position of scene entities and collect positions for camera framing.
-
-    known_positions is an optional list of (x, y) tuples for entities whose
-    USD positions may not be resolved yet (e.g. Replicator-randomized prims).
-
-    Returns ((cx, cy, cz), entity_positions, worker_positions).
-    """
-    known_positions = known_positions or []
-    xs, ys, zs = [], [], []
-    entity_positions, worker_positions = [], []
-
-    for px, py in known_positions:
-        xs.append(px)
-        ys.append(py)
-        zs.append(0.0)
-        entity_positions.append((px, py))
-
-    for prim in stage.Traverse():
-        path = str(prim.GetPath())
-        if not (path.startswith("/World/Characters/") or path.startswith("/World/Layout/") or path.startswith("/Replicator/")):
-            continue
-        xf = UsdGeom.Xformable(prim)
-        if not xf:
-            continue
-        mat = xf.ComputeLocalToWorldTransform(Usd.TimeCode.Default())
-        pos = mat.ExtractTranslation()
-        dup = any(abs(pos[0] - ex) < 0.1 and abs(pos[1] - ey) < 0.1 for ex, ey in known_positions)
-        if dup:
-            continue
-        xs.append(pos[0])
-        ys.append(pos[1])
-        zs.append(pos[2])
-        entity_positions.append((pos[0], pos[1]))
-        if path.startswith("/World/Characters/"):
-            worker_positions.append((pos[0], pos[1]))
-
-    if not xs:
-        _progress("[WARN] No entities for centroid, defaulting to (0, 0, 1.2)")
-        return (0.0, 0.0, 1.2), entity_positions, worker_positions
-    cx, cy, cz = sum(xs) / len(xs), sum(ys) / len(ys), sum(zs) / len(zs)
-    _progress(f"Scene centroid: ({cx:.2f}, {cy:.2f}, {cz:.2f}) from {len(xs)} entities")
-    return (cx, cy, cz), entity_positions, worker_positions
-
 
 def _configure_sdg_settings():
     """Apply recommended settings for synthetic data generation."""
@@ -229,10 +191,11 @@ def _setup_coco_writer():
     return writer
 
 
-def _configure_camera_trigger(camera, scene_config, cam_pos, look_at_target):
+def _configure_camera_trigger(camera, scene_config, cam_pos, look_at_target, focal_length=None):
     """Set up the frame trigger with either fixed indoor position or orbit distribution.
 
     cam_pos and look_at_target are pre-computed from pick_camera_placement().
+    focal_length is the final computed focal length (mm) to apply to the camera prim.
     """
     angle_hints = scene_config.get("camera_angles", [])
     hazard_zones = scene_config.get("hazard_zones", [])
@@ -240,11 +203,14 @@ def _configure_camera_trigger(camera, scene_config, cam_pos, look_at_target):
 
     if camera_mode == "indoor":
         _progress(f"Camera indoor: ({cam_pos[0]:.2f}, {cam_pos[1]:.2f}, {cam_pos[2]:.2f}), "
-                  f"look_at=({look_at_target[0]:.2f}, {look_at_target[1]:.2f}, {look_at_target[2]:.2f})")
+                  f"look_at=({look_at_target[0]:.2f}, {look_at_target[1]:.2f}, {look_at_target[2]:.2f})"
+                  f" focal_length={focal_length}mm")
 
-        with rep.trigger.on_frame(num_frames=NUM_FRAMES):
+        with rep.trigger.on_frame(num_frames=NUM_FRAMES, interval=CAMERA_RANDOMIZE_INTERVAL):
             with camera:
                 rep.modify.pose(position=cam_pos, look_at=look_at_target)
+                if focal_length is not None:
+                    rep.modify.attribute("focalLength", focal_length)
     else:
         scene_positions = positions_for_angles(
             angle_hints, hazard_zones=hazard_zones,
@@ -256,7 +222,7 @@ def _configure_camera_trigger(camera, scene_config, cam_pos, look_at_target):
         camera_pos_dist = orbit_distribution(scene_positions)
         _progress(f"Camera orbit: {len(scene_positions)} positions")
 
-        with rep.trigger.on_frame(num_frames=NUM_FRAMES):
+        with rep.trigger.on_frame(num_frames=NUM_FRAMES, interval=CAMERA_RANDOMIZE_INTERVAL):
             with camera:
                 rep.modify.pose(position=camera_pos_dist, look_at=look_at_target)
 
@@ -304,7 +270,7 @@ def _spawn_entities(scene_config, asset_library, stage, spawn_bounds_min, spawn_
 
     for entity in others:
         asset_id = entity.get("asset_id", "")
-        if asset_id == "zone":
+        if entity.get("type") == "zone":
             continue
         usd_path = asset_library.get(asset_id)
         if usd_path is None:
@@ -316,30 +282,49 @@ def _spawn_entities(scene_config, asset_library, stage, spawn_bounds_min, spawn_
         anchor_zone = entity.get("anchor_zone")
 
         if asset_type == "vehicle":
-            zone_bounds = resolve_anchor_zone_bounds(anchor_zone, hazard_zones)
-            if zone_bounds is not None:
-                bmin, bmax = zone_bounds
-                cx = (bmin[0] + bmax[0]) / 2.0
-                cy = (bmin[1] + bmax[1]) / 2.0
-                cx += random.uniform(-0.5, 0.5)
-                cy += random.uniform(-0.5, 0.5)
-            else:
-                if visible_bounds is not None:
-                    cx = random.uniform(visible_bounds[0], visible_bounds[1])
-                    cy = random.uniform(visible_bounds[2], visible_bounds[3])
-                else:
-                    cx, cy = random.uniform(-3.0, 3.0), random.uniform(-3.0, 3.0)
-                print(f"[INFO] Vehicle '{asset_id}' has no anchor_zone, placing at ({cx:.2f}, {cy:.2f})")
+            vehicle_count = sum(1 for a, _ in spawned_asset_ids if a == asset_id)
+            prim_name = f"{asset_id}_{vehicle_count + 1:02d}"
 
-            if visible_bounds is not None:
-                cx = max(visible_bounds[0], min(visible_bounds[1], cx))
-                cy = max(visible_bounds[2], min(visible_bounds[3], cy))
+            # Check if there is a behavior with a first GoTo command to use as spawn pos
+            spawn_x, spawn_y = None, None
+            for vb in scene_config.get("vehicle_behaviors", []):
+                if vb.get("vehicle_id") == prim_name:
+                    for cmd in vb.get("commands", []):
+                        if cmd.get("command") == "GoTo":
+                            spawn_x, spawn_y = cmd.get("x"), cmd.get("y")
+                            break
+                    break
+            
+            if spawn_x is not None and spawn_y is not None:
+                cx, cy = spawn_x, spawn_y
+                if visible_bounds is not None:
+                    cx = max(visible_bounds[0], min(visible_bounds[1], cx))
+                    cy = max(visible_bounds[2], min(visible_bounds[3], cy))
+            else:
+                zone_bounds = resolve_anchor_zone_bounds(anchor_zone, hazard_zones)
+                if zone_bounds is not None:
+                    bmin, bmax = zone_bounds
+                    cx = (bmin[0] + bmax[0]) / 2.0
+                    cy = (bmin[1] + bmax[1]) / 2.0
+                    cx += random.uniform(-0.5, 0.5)
+                    cy += random.uniform(-0.5, 0.5)
+                else:
+                    if visible_bounds is not None:
+                        cx = random.uniform(visible_bounds[0], visible_bounds[1])
+                        cy = random.uniform(visible_bounds[2], visible_bounds[3])
+                    else:
+                        cx, cy = random.uniform(-3.0, 3.0), random.uniform(-3.0, 3.0)
+                    print(f"[INFO] Vehicle '{asset_id}' has no anchor_zone, placing at ({cx:.2f}, {cy:.2f})")
+
+                if visible_bounds is not None:
+                    cx = max(visible_bounds[0], min(visible_bounds[1], cx))
+                    cy = max(visible_bounds[2], min(visible_bounds[3], cy))
 
             prim_path, spawn_pos = spawn_at_fixed_position(
-                usd_path, position=(cx, cy, 0.0), semantic_class=semantic_class
+                usd_path, position=(cx, cy, 0.0), semantic_class=semantic_class, prim_name=prim_name
             )
             known_positions.append(spawn_pos)
-            _progress(f"Vehicle '{asset_id}' anchored to '{anchor_zone}' at ({cx:.2f}, {cy:.2f})")
+            _progress(f"Vehicle '{prim_name}' anchored to '{anchor_zone}' at ({cx:.2f}, {cy:.2f})")
         else:
             _progress(f"Spawning '{asset_id}' (type={asset_type}) with random placement")
             spawner = get_geofenced_spawner(
@@ -367,20 +352,38 @@ def _setup_workers(scene_config, asset_library, stage, visible_bounds=None):
     if not workers:
         return set(), worker_behaviors
 
-    _progress("Enabling behavior extensions...")
-    enable_behavior_extensions(simulation_app=simulation_app)
+    # Load Biped_Setup BEFORE spawning workers so we have the AnimationGraph prim path.
+    _progress("Loading Biped_Setup for AnimationGraph (before worker spawn)...")
+    ensure_biped_setup(simulation_app=simulation_app)
+
+    # Biped_Setup has nested USD references — the AnimationGraph prim may not be
+    # traversable yet.  Poll until it appears so the wrapper can reference it.
+    _progress("Waiting for AnimationGraph prim to resolve...")
+    anim_graph_prim = wait_for_animation_graph(stage, simulation_app)
+    if anim_graph_prim is None:
+        _progress("[ERROR] AnimationGraph not found — workers will spawn without animation")
+
+    # Bake AnimationGraphAPI into a copy of the worker asset before any prim references
+    # it on the live stage. Fabric seals apiSchemas at first prefetch, and ApplyAPI at
+    # runtime never reaches Fabric — so the API has to be a layer-baked opinion in the
+    # USD file the spawner references.
+    spawn_library = asset_library
+    if anim_graph_prim is not None:
+        baked_path = bake_animation_graph_into_asset(
+            asset_library["worker"], str(anim_graph_prim.GetPath())
+        )
+        if baked_path != asset_library["worker"]:
+            spawn_library = dict(asset_library)
+            spawn_library["worker"] = baked_path
 
     _progress(f"Spawning {len(workers)} workers...")
-    spawned_names = spawn_workers(workers, worker_behaviors, asset_library, stage, simulation_app, visible_bounds=visible_bounds)
-
-    _progress("Loading Biped_Setup for AnimationGraph...")
-    ensure_biped_setup(simulation_app=simulation_app)
+    spawned_names = spawn_workers(workers, worker_behaviors, spawn_library, stage, simulation_app, visible_bounds=visible_bounds)
 
     _progress("Attaching IRA behavior scripts to workers...")
     attached, failed = setup_all_behaviors_async(spawned_names, worker_behaviors, stage)
     _progress(f"IRA behaviors: {attached} attached, {failed} failed")
 
-    _progress("Linking workers to AnimationGraph...")
+    _progress("Verifying AnimationGraph links...")
     linked, link_failed = link_workers_to_animation_graph(spawned_names, stage, simulation_app)
     _progress(f"AnimationGraph linking: {linked} linked, {link_failed} failed")
 
@@ -402,6 +405,21 @@ def main():
     scene_config, asset_library = load_config(args.config, args.library)
     _progress(f"Layout: {scene_config.get('layout', 'standard_warehouse')}")
 
+    # Enable behavior extensions FIRST, before any stage event fires.
+    # omni.anim.graph.core boots ~21s after SimulationApp init even when listed
+    # in the eager extensions list, so without this its CharacterManager misses
+    # the StageEventType.OPENED from new_stage()/World() and never calls
+    # Initialize(). The downstream symptom: getCharacter() returns None, the
+    # behavior script's character binding fails, and workers T-pose forever.
+    _progress("Enabling behavior extensions (must precede stage open)...")
+    enable_behavior_extensions(simulation_app=simulation_app)
+
+    # Now fire the stage-open event with the plugin's observers in place.
+    _progress("Opening empty stage so CharacterManager observes the open event...")
+    omni.usd.get_context().new_stage()
+    for _ in range(5):
+        simulation_app.update()
+
     _progress("Creating World...")
     world = World(stage_units_in_meters=1.0)
     _tick(5)
@@ -411,17 +429,18 @@ def main():
     _configure_sdg_settings()
 
     _progress("Loading warehouse zone...")
-    rep.create.from_usd(asset_library["zone"])
+    warehouse_prim = rep.create.from_usd(asset_library["zone"])
+    with warehouse_prim:
+        rep.modify.pose(scale=(1.7, 1.7, 2.0))
     _tick(5)
 
-    _progress("Clearing semantics and spawning warehouse layout...")
-    clear_unwanted_warehouse_semantics(stage)
+    _progress("Spawning warehouse layout...")
     spawn_bounds_min, spawn_bounds_max = spawn_warehouse_layout(scene_config, asset_library, stage)
     _tick(10)
 
     _progress("Computing camera placement (camera-first)...")
     hazard_zones = scene_config.get("hazard_zones", [])
-    cam_pos, look_at_target, focal_length = pick_camera_placement(scene_config, hazard_zones=hazard_zones)
+    cam_pos, look_at_target, focal_length, chosen_mount = pick_camera_placement(scene_config, hazard_zones=hazard_zones)
     visible_bounds = compute_ground_visible_area(cam_pos, look_at_target, focal_length=focal_length)
     _progress(f"Camera position: ({cam_pos[0]:.2f}, {cam_pos[1]:.2f}, {cam_pos[2]:.2f})")
     _progress(f"Camera look_at: ({look_at_target[0]:.2f}, {look_at_target[1]:.2f}, {look_at_target[2]:.2f})")
@@ -438,6 +457,16 @@ def main():
     spawned_asset_ids, entity_known_positions = _spawn_entities(
         scene_config, asset_library, stage, spawn_bounds_min, spawn_bounds_max,
         visible_bounds=visible_bounds,
+    )
+
+    # Bake navmesh after static clutter is spawned but before workers are set up.
+    # Calling bake after worker behavior scripts are attached causes start_navmesh_baking()
+    # to deadlock in native code. Workers are dynamic obstacles handled at runtime anyway.
+    _progress("Baking navmesh (static obstacles included, before worker setup)...")
+    bake_navmesh(
+        simulation_app=simulation_app,
+        bounds_min=spawn_bounds_min,
+        bounds_max=spawn_bounds_max,
     )
 
     spawned_worker_names, worker_behaviors = _setup_workers(
@@ -464,46 +493,86 @@ def main():
     _progress("Hiding driver prims...")
     hide_driver_prims(stage)
 
-    _progress("Applying USD-level semantics to all scene prims...")
-    apply_scene_semantics(stage, spawned_asset_ids, workers)
-
     _progress("Adjusting camera look_at to center on all spawned entities...")
     all_known_positions = entity_known_positions + [(wx, wy) for _, wx, wy in _worker_known_positions]
-    _, post_entity_positions, post_worker_positions = compute_scene_centroid(
-        stage, known_positions=all_known_positions
+    look_at_target = pick_look_at_target(
+        entity_known_positions,
+        [(wx, wy) for _, wx, wy in _worker_known_positions],
+        hazard_zones,
     )
-    look_at_target = pick_look_at_target(post_entity_positions, post_worker_positions, hazard_zones)
+    cam_pos, focal_length = fit_camera_to_entities(
+        cam_pos, look_at_target, all_known_positions, focal_length=focal_length
+    )
     visible_bounds = compute_ground_visible_area(cam_pos, look_at_target, focal_length=focal_length)
+    _progress(f"Adjusted camera position: ({cam_pos[0]:.2f}, {cam_pos[1]:.2f}, {cam_pos[2]:.2f})")
     _progress(f"Adjusted look_at: ({look_at_target[0]:.2f}, {look_at_target[1]:.2f}, {look_at_target[2]:.2f})")
     _progress(f"Adjusted visible area: x=[{visible_bounds[0]:.2f}, {visible_bounds[1]:.2f}] y=[{visible_bounds[2]:.2f}, {visible_bounds[3]:.2f}]")
 
     _progress("Starting timeline for behavior scripts...")
     omni.timeline.get_timeline_interface().play()
-    for _ in range(100):
+
+    # Let BehaviorScript instances populate ScriptManager before force-register.
+    # IRA's own test waits 2 ticks; we match that and let force_register_agents
+    # extend if needed.
+    for _ in range(2):
+        simulation_app.update()
+
+    _worker_skelroot_paths = [
+        f"/World/Characters/{n}/male_adult_construction_03/ManRoot/male_adult_construction_03"
+        for n in sorted(spawned_worker_names)
+    ]
+    diagnose_usdrt_view(_worker_skelroot_paths, "after-play-2-ticks")
+
+    if spawned_worker_names:
+        _progress("Force-registering agents with AgentManager (IRA test pattern)...")
+        force_register_agents(stage, simulation_app=simulation_app)
+        diagnose_usdrt_view(_worker_skelroot_paths, "after-force-register")
+
+    _progress("Warming up simulation for behavior initialization (300 steps)...")
+    for _ in range(300):
         world.step(render=True)
+
+    diagnose_behavior_state("post-warmup")
+    diagnose_usdrt_view(_worker_skelroot_paths, "post-warmup")
 
     _progress("Injecting commands via AgentManager...")
     injected, inj_failed = inject_commands_after_play(
         spawned_worker_names, worker_behaviors, simulation_app=simulation_app,
-        visible_bounds=visible_bounds,
+        visible_bounds=visible_bounds, stage=stage,
     )
     _progress(f"Command injection: {injected} succeeded, {inj_failed} failed")
+
+    _progress("Clearing unwanted semantics before generation...")
+    clear_unwanted_warehouse_semantics(stage)
+
+    _progress("Final semantic sync (60 steps)...")
+    for _ in range(60):
+        world.step(render=True)
 
     _progress("Initializing CocoWriter...")
     writer = _setup_coco_writer()
     writer.attach([render_product])
 
     _progress("Configuring camera trigger...")
-    _configure_camera_trigger(camera, scene_config, cam_pos, look_at_target)
+    _configure_camera_trigger(camera, scene_config, cam_pos, look_at_target, focal_length=focal_length)
+
+    _progress("Initializing vehicle animator...")
+    vehicle_animator = VehicleAnimator(
+        scene_config.get("vehicle_behaviors", []), stage, fps=30,
+        layout_bounds_min=spawn_bounds_min, layout_bounds_max=spawn_bounds_max,
+    )
+
+    diagnose_behavior_state("pre-loop")
 
     _progress("Running simulation loop...")
     for step in range(NUM_FRAMES):
         if step % 100 == 0:
             _progress(f"Frame {step}/{NUM_FRAMES}")
-        if step > 0 and step % REINJECT_INTERVAL == 0 and spawned_worker_names:
-            reinject_random_commands(spawned_worker_names, visible_bounds=visible_bounds)
         for _ in range(SIM_STEPS_PER_FRAME):
             world.step(render=False)
+        # Update vehicle after physics so the animated position is not overridden
+        # by rigid-body simulation before rep.orchestrator.step() captures the frame.
+        vehicle_animator.update(step, NUM_FRAMES)
         rep.orchestrator.step()
 
     _progress("Waiting for orchestrator to finish...")
@@ -519,8 +588,8 @@ def main():
         time.sleep(0.1)
         simulation_app.update()
 
-    result = subprocess.run(["find", "/tmp/dataset", "-type", "f"], capture_output=True, text=True)
-    _progress(f"Files written to /tmp/dataset: {len(result.stdout.strip().splitlines()) if result.stdout.strip() else 0}")
+    file_count = sum(1 for p in Path("/tmp/dataset").rglob("*") if p.is_file())
+    _progress(f"Files written to /tmp/dataset: {file_count}")
 
     _teardown(rep, writer, world, simulation_app)
 

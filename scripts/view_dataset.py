@@ -46,12 +46,12 @@ def _find_file(dataset_dir, pattern):
 def find_frames(dataset_dir):
     top_dir, session_dir = _resolve_dir(dataset_dir)
 
-    npy_files = sorted(glob.glob(os.path.join(session_dir, "bounding_box_2d_tight_*.npy")))
-    if not npy_files:
-        npy_files = sorted(glob.glob(os.path.join(top_dir, "bounding_box_2d_tight_*.npy")))
+    txt_files = sorted(glob.glob(os.path.join(session_dir, "rgb_*.txt")))
+    if not txt_files:
+        txt_files = sorted(glob.glob(os.path.join(top_dir, "rgb_*.txt")))
 
     frames = []
-    for p in npy_files:
+    for p in txt_files:
         frame_str = os.path.splitext(os.path.basename(p))[0].split("_")[-1]
         if _find_file(dataset_dir, f"rgb_{frame_str}.png"):
             frames.append(frame_str)
@@ -60,23 +60,37 @@ def find_frames(dataset_dir):
 
 def draw_frame(dataset_dir, frame_str, max_width=None):
     rgb_path = _find_file(dataset_dir, f"rgb_{frame_str}.png")
-    npy_path = _find_file(dataset_dir, f"bounding_box_2d_tight_{frame_str}.npy")
+    txt_path = _find_file(dataset_dir, f"rgb_{frame_str}.txt")
     img = Image.open(rgb_path).convert("RGB")
+    original_width, original_height = img.width, img.height
+
     if max_width and img.width > max_width:
         scale = max_width / img.width
         img = img.resize((max_width, int(img.height * scale)), Image.LANCZOS)
     else:
         scale = 1.0
+        
     draw = ImageDraw.Draw(img)
-    bboxes = np.load(npy_path, allow_pickle=True)
-    for row in bboxes:
-        x_min = float(row["x_min"]) * scale
-        y_min = float(row["y_min"]) * scale
-        x_max = float(row["x_max"]) * scale
-        y_max = float(row["y_max"]) * scale
-        cid = int(row["semanticId"])
-        color = PALETTE[cid % len(PALETTE)]
-        draw.rectangle([x_min, y_min, x_max, y_max], outline=color, width=2)
+    
+    if os.path.exists(txt_path):
+        with open(txt_path, 'r') as f:
+            for line in f:
+                parts = line.strip().split()
+                if len(parts) >= 5:
+                    cid = int(parts[0])
+                    x_center = float(parts[1])
+                    y_center = float(parts[2])
+                    width = float(parts[3])
+                    height = float(parts[4])
+                    
+                    x_min = (x_center - width / 2.0) * original_width * scale
+                    y_min = (y_center - height / 2.0) * original_height * scale
+                    x_max = (x_center + width / 2.0) * original_width * scale
+                    y_max = (y_center + height / 2.0) * original_height * scale
+                    
+                    color = PALETTE[cid % len(PALETTE)]
+                    draw.rectangle([x_min, y_min, x_max, y_max], outline=color, width=2)
+                    
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     return buf.getvalue()
@@ -163,8 +177,8 @@ def main():
     if not frames:
         print(f"No frames found in {dataset_dir}")
         top, sess = _resolve_dir(dataset_dir)
-        print(f"  .npy in top: {len(glob.glob(os.path.join(top, 'bounding_box_2d_tight_*.npy')))}")
-        print(f"  .npy in session: {len(glob.glob(os.path.join(sess, 'bounding_box_2d_tight_*.npy')))}")
+        print(f"  .txt in top: {len(glob.glob(os.path.join(top, 'rgb_*.txt')))}")
+        print(f"  .txt in session: {len(glob.glob(os.path.join(sess, 'rgb_*.txt')))}")
         return
 
     print(f"Found {len(frames)} frames in {dataset_dir}")

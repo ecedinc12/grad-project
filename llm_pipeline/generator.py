@@ -1,11 +1,15 @@
 import os
 import sys
 import json
+import time
 import argparse
 import instructor
-from google import genai
+from openai import OpenAI
 from pydantic import ValidationError
-from schemas import SceneConfig, Entity, PPEState, WorkerBehavior, BehaviorCommand, ClutterZone, LayoutParams
+
+# schemas.py is in the same directory; adjust path for both direct and module invocation
+sys.path.insert(0, os.path.dirname(__file__))
+from schemas import SceneConfig
 
 LAYOUTS_PATH = os.path.join(os.path.dirname(__file__), "..", "assets", "layouts.json")
 _LAYOUTS_DESCRIPTION = ""
@@ -29,23 +33,19 @@ except Exception:
         "- storage_yard: 4 rack clusters with wide lanes, outdoor-style yard."
     )
 
-def generate_scene_config(prompt: str, output_path: str):
-    # Retrieve the API key from environment variable
-    # Use Gemini's OpenAI compatible endpoint
-    api_key = os.environ.get("GEMINI_API_KEY")
-    if not api_key:
-        print("Error: GEMINI_API_KEY environment variable is not set.", file=sys.stderr)
-        print("Please export your key: export GEMINI_API_KEY='your_api_key_here'", file=sys.stderr)
-        sys.exit(1)
+NIM_BASE_URL = "https://integrate.api.nvidia.com/v1"
 
-    model = os.environ.get("LLM_MODEL", "gemini-2.5-flash")
+# Fallback chain: tried in order on 429/503/timeout
+FALLBACK_MODELS = [
+    "mistralai/mistral-nemotron",
+    "stepfun-ai/step-3.5-flash",
+    "meta/llama-4-maverick-17b-128e-instruct",
+]
 
-    genai_client = genai.Client(api_key=api_key)
-    client = instructor.from_genai(genai_client, mode=instructor.Mode.GENAI_STRUCTURED_OUTPUTS)
-    
-    system_prompt = """
-    You are an expert industrial safety simulation configurator.
-    Your job is to extract entities, PPE states, hazard zones, scene configuration, and worker behavior sequences from user prompts.
+_SYSTEM_PROMPT = """
+    You are an expert industrial safety simulation configurator for a photorealistic synthetic data generation pipeline.
+    Your job is to produce detailed, realistic scene configs from user prompts — not minimal ones.
+    The output directly drives a 3D warehouse simulation; more detail = more realistic training data.
 
     AVAILABLE LAYOUT PRESETS:
 """ + _LAYOUTS_DESCRIPTION + """
@@ -59,88 +59,193 @@ def generate_scene_config(prompt: str, output_path: str):
     - Match keywords: "cramped/tight/dense" → narrow_aisle, "open/spacious" → open_floor,
       "loading/truck/shipping" → loading_dock, "maintenance/repair" → maintenance_bay,
       "yard/outdoor/container" → storage_yard, "cold/freezer" → cold_storage,
-      "cross-dock/transfer" → cross_dock.
+      "cross-dock/transfer" → cross_dock,
+      "hazmat/chemical/drum/spill" → hazmat_storage,
+      "evacuation/egress/blocked exit/muster" → emergency_egress,
+      "pedestrian/crosswalk/walkway/vehicle lane" → pedestrian_crossing,
+      "receiving/inbound/truck apron/unloading" → receiving_dock,
+      "high-density/tall storage/packed/crammed" → high_density_storage.
 
     LAYOUT PARAMS RULES (only set layout_params if overriding preset defaults or using layout="custom"):
     - rack_rows: number of rack rows (1-12). Default 5.
     - rack_cols: number of rack columns (1-3). Default 1.
     - aisle_width: distance between rack rows in meters (1.0-5.0). Default 2.0.
-    - bounds_min/bounds_max: overall layout footprint in meters. Must fit within ±7m X, ±7m Y.
-    - clutter_density: "low" (0-5 props), "medium" (6-12 props), "high" (13-20 props).
+    - bounds_min/bounds_max: overall layout footprint in meters. The warehouse.usd is scaled 1.7× so the actual interior is ~±9m. Use bounds_min=(-9,-9) and bounds_max=(9,9) for standard layouts. NEVER exceed ±9m.
+    - clutter_density: "low" (8 props), "medium" (18 props), "high" (30 props).
     - clutter_zones: optional list of area-specific clutter overrides.
       Each zone needs: area name, bounds_min, bounds_max, density, and types list.
-      Types must be from: "box", "barrel", "cone", "pallet".
-    - pallet_rows/pallet_cols: pallet staging grid size. Default 2x1.
+      Types can be any combination of: "box", "box_small", "box_large", "barrel", "drum", "cone", "pallet", "crate".
+    - pallet_rows/pallet_cols: pallet staging grid size. Always set to at least 2x2 for realism.
+    - dock_area: set to true for any scenario involving a loading dock, forklift, or staging area.
+    - rack_fill: controls how full rack shelves appear. Use "empty" for abandoned/unused areas, "sparse" for low-activity, "medium" for normal operations (default), "full" for busy high-density storage.
 
-    RULES:
+    ENTITY & PPE RULES:
     - ONLY include entities the user explicitly mentions. Do NOT add background props, vehicles, or workers that were not requested.
+    - EXPLICIT COUNTS ARE ABSOLUTE. If the user states a number ("3 workers", "1 forklift", "2 pallets"), emit EXACTLY that many entries — never round, never reduce, never expand. Generic mentions ("workers", "a few workers") may default to 2–3 with varied PPE.
+    - Each worker should have a distinct PPE compliance state (e.g. one fully compliant, one missing hardhat, one missing vest).
     - Default PPEState: Workers default to hardhat=True and vest=True UNLESS the user explicitly states they are missing.
     - Entities types: 'worker', 'vehicle', 'zone'.
     - The asset_id field MUST be exactly one of: 'worker', 'forklift', 'pallet', 'rack', 'box', 'barrel', 'cone'. Never invent an asset_id. If an entity does not match, omit it.
-    - Set logical anchor_zones if mentioned (e.g., 'loading dock', 'aisle 3').
+    - anchor_zone determines WHERE an entity SPAWNS (its initial position). It does NOT constrain where the entity walks/drives later — that is controlled by behavior commands. Set anchor_zone to the zone where the entity should appear at the start of the simulation.
     - IMPORTANT: Vehicles (forklifts, carts) MUST have anchor_zone set to the zone they operate in. For example, a forklift in "forklift_aisle" should have anchor_zone="forklift_aisle". This ensures the vehicle spawns in the correct location instead of randomly.
-    - camera_angles values MUST each be exactly one of: 'overhead', 'high_angle', 'eye_level', 'low_angle'. Choose based on the user's description; default to ['eye_level'] if unspecified.
-    - camera_mode MUST be 'indoor' for all warehouse scenes. This places the camera at a fixed position inside the warehouse at realistic surveillance heights. Do NOT use 'orbit'.
+    - Zone entities (type="zone") are LOGICAL ANCHORS only — set asset_id to the zone's name (e.g. "forklift_aisle", "loading_dock"). Do NOT set asset_id="cone" for zone entities; cone markers are placed automatically by the layout system.
+
+    CAMERA RULES:
+    - camera_angles values MUST each be exactly one of: 'overhead', 'high_angle', 'eye_level', 'low_angle'. Match to scenario:
+      * Wide area surveillance / forklift patrol / multiple workers → 'high_angle'
+      * PPE inspection / close-up violation / single worker focus → 'eye_level'
+      * Ceiling-mounted CCTV / full floor overview → 'overhead'
+      * Ground-level dramatic / near-miss → 'low_angle'
+      * Default (unspecified) → ['high_angle']
+    - camera_mode MUST be 'indoor' by default (fixed surveillance position). However, if the user explicitly asks for "multiple angles", "different points of view", or "orbit", you MUST set it to 'orbit'.
     - camera_position is optional. If omitted, it is auto-derived from worker and hazard zone positions. Only set it if the user specifies an exact viewpoint.
-    - focal_length is optional. Default is 14.0 (wide indoor FOV ~90deg). Use 10-12 for very wide shots showing the entire warehouse, 18-24 for narrower focus on specific areas. Do NOT set it unless the user specifies a field of view preference.
+    - focal_length is optional. Default is 14.0 (wide indoor FOV ~90deg). Use 10-12 to guarantee wide shots that include all described assets, 18-24 for narrower focus on specific areas. Do NOT set it unless the user specifies a field of view preference or requests a scene with many distributed assets.
     - lighting_conditions MUST be exactly one of: 'daylight', 'overcast', 'dusk', 'night'. Choose based on the user's description; default to 'daylight' if unspecified.
 
     HAZARD ZONE RULES:
     - When the user mentions danger zones, restricted areas, or hazard areas, create HazardZone entries.
-    - Each HazardZone needs: name (snake_case identifier), bounds_min/bounds_max (x,y in meters, within warehouse bounds ±6m x, ±6m y), and danger_level.
+    - Each HazardZone needs: name (snake_case identifier), bounds_min/bounds_max (x,y in meters, within warehouse bounds ±9m x, ±9m y), and danger_level.
     - danger_level: "warning" for caution areas, "restricted" for authorized-only zones, "critical" for lethal hazards (e.g., active forklift aisle).
     - Common zone placements:
-      * "forklift aisle" / "vehicle path" → bounds_min=(-5, -2), bounds_max=(5, 2), danger_level="critical"
-      * "loading dock" → bounds_min=(-5, -6), bounds_max=(5, -4), danger_level="restricted"
-      * "storage area" / "racking zone" → bounds_min=(-6, 3), bounds_max=(6, 7), danger_level="warning"
+      * "forklift aisle" / "vehicle path" → bounds_min=(-8, -2.5), bounds_max=(8, 2.5), danger_level="critical"
+      * "loading dock" → bounds_min=(-8, -9), bounds_max=(8, -4), danger_level="restricted"
+      * "storage area" / "racking zone" → bounds_min=(-8, 3), bounds_max=(8, 9), danger_level="warning"
       * "inspection point" → small area bounds_min=(-1, -1), bounds_max=(1, 1), danger_level="warning"
-    - Also create a zone entity for each hazard_zone with asset_id="cone" (to mark the zone visually with cones).
+    - Create a zone entity for each hazard_zone with type="zone" and asset_id equal to the zone's name (e.g. asset_id="forklift_aisle"). This is a logical anchor — do NOT use asset_id="cone" here.
 
     WORKER BEHAVIOR RULES:
     - Generate one WorkerBehavior entry per worker entity in the scene, in the same order they appear in entities.
     - Assign worker_id sequentially: "worker_01", "worker_02", etc.
-    - Each WorkerBehavior must have at least 3 commands.
-    - GoTo commands: x and y MUST be within [-6, 6] (warehouse bounds). Set rotation to a sensible facing direction (degrees, 0–360). z is always 0.0 (set x and y only; the field named z in the command file is always 0.0).
-    - Idle/LookAround commands: set duration in seconds (1–5 s). Do NOT set x, y, or rotation for these.
+    - Each WorkerBehavior must have at least 4 commands for realism.
+    - GoTo commands: x and y MUST be within [-8.5, 8.5] (keep clear of walls). Set rotation to a sensible facing direction (degrees, 0–360). z is always 0.0.
+    - Idle/LookAround commands: set duration in seconds (1.5–4 s). Do NOT set x, y, or rotation for these.
+    - Spread workers across different zones — do NOT cluster them all in the same location.
     - Tailor behavior to the scenario:
-      * "danger zone" or "forklift" → worker GoTo path crosses the forklift aisle (y near 0, x sweeping across)
+      * Worker in "loading dock" zone → GoTo waypoints within y=-3 to y=-6 range, facing pallets (inspection pattern)
+      * Worker in "storage area" → GoTo waypoints within y=3 to y=6 range, LookAround pauses (picking/checking inventory)
+      * Worker crossing "forklift aisle" → GoTo path crosses y=0 line (hazard scenario: worker in vehicle zone)
+      * Worker "walking to" / "entering" / "approaching" a hazard zone → the FINAL GoTo destination MUST be a point inside that zone's bounds_min/bounds_max. Place earlier waypoints just outside the zone so the approach is visible.
       * "patrol" → 4+ GoTo waypoints forming a loop around the warehouse perimeter
       * "inspection" → alternating short GoTo hops (1–2 m apart) and LookAround pauses
-      * Default (no scenario) → mix of GoTo waypoints and Idle breaks covering different quadrants
+      * "waiting" / "stopped" / "standing" → 1 GoTo to the waiting spot, then alternating Idle (3–5s) and LookAround (2–3s) commands. Do NOT issue further GoTo commands — workers should stay put.
+      * "waiting at crosswalk / crossing" → cluster the GoTo destinations within 1.5 m of each other on the pedestrian-side edge of the crosswalk (not inside the vehicle lane).
+
+    VEHICLE BEHAVIOR RULES:
+    - ALWAYS generate a VehicleBehavior for every vehicle entity — vehicles must always move, static forklifts look unrealistic.
+    - Assign vehicle_id as "forklift_01" for the first forklift, "forklift_02" for the second, etc.
+    - Multiple forklifts MUST take different, non-overlapping routes (different x corridors) to avoid collision.
+    - Forklift route MUST be a realistic patrol through the warehouse:
+      1. Start at loading dock (y ≈ -4)
+      2. Drive up through the forklift aisle (y from -4 to 0)
+      3. Continue to storage area (y ≈ 4–5), with a brief Idle stop
+      4. Return via a laterally offset path (different x) to create a loop
+      5. End back at dock
+    - Keep x within [-7, 7] and y within [-8.5, 8.5].
+    - Use at least 6 GoTo waypoints + 2 Idle stops for a convincing route.
+    - Set rotation at each waypoint to face the direction of travel.
+    - PROXIMITY HAZARD: If the scenario involves "forklift near worker", "near miss", or "close pass", route the forklift through a waypoint within 1.5m of a worker's GoTo position to create a realistic near-miss frame. Worker and forklift should both be present in that location within the same simulation window.
     """
 
-    print(f"Generating configuration for prompt: '{prompt}'...")
-    
-    try:
-        config: SceneConfig = client.chat.completions.create(
-            model=model,
-            response_model=SceneConfig,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": prompt},
-            ],
-            config={"temperature": 0.0},
-        )
-        
-        # Ensure directory exists
-        os.makedirs(os.path.dirname(output_path), exist_ok=True)
-        
-        # Save validated output
-        with open(output_path, "w") as f:
-            f.write(config.model_dump_json(indent=4))
-        print(f"Successfully saved SceneConfig to {output_path}")
-        
-    except ValidationError as e:
-        print(f"Schema validation error: {e}", file=sys.stderr)
-        sys.exit(1)
-    except Exception as e:
-        print(f"Error during generation: {e}", file=sys.stderr)
-        sys.exit(1)
+
+class NIMUnavailableError(RuntimeError):
+    """Raised when all NIM models in the fallback chain are exhausted."""
+
+
+def _is_auth_failure(exc: Exception) -> bool:
+    """True for 401 errors — same key used for all models, no point retrying."""
+    status = getattr(getattr(exc, "response", None), "status_code", None)
+    if status == 401:
+        return True
+    # instructor wraps errors as XML strings; scan the text too
+    msg = str(exc)
+    return "401" in msg and ("unauthorized" in msg.lower() or "authentication failed" in msg.lower())
+
+
+def _is_retriable(exc: Exception) -> bool:
+    """True for 429/503 rate-limit / overload errors and network timeouts."""
+    msg = str(exc).lower()
+    if "timeout" in msg or "timed out" in msg:
+        return True
+    status = getattr(getattr(exc, "response", None), "status_code", None)
+    return status in (429, 503)
+
+
+def generate_scene_config(prompt: str, nim_api_key: str, output_path: str) -> None:
+    """Generate a SceneConfig JSON from a text prompt using NVIDIA NIM.
+
+    Tries FALLBACK_MODELS in order. Each model gets up to 2 attempts on retriable
+    errors (429/503/timeout) with exponential backoff. Raises NIMUnavailableError
+    if all models are exhausted.
+    """
+    client = instructor.from_openai(
+        OpenAI(base_url=NIM_BASE_URL, api_key=nim_api_key),
+        mode=instructor.Mode.JSON,
+    )
+
+    messages = [
+        {"role": "system", "content": _SYSTEM_PROMPT},
+        {"role": "user", "content": prompt},
+    ]
+
+    last_error: Exception | None = None
+
+    for model in FALLBACK_MODELS:
+        for attempt in range(2):
+            try:
+                print(f"[LLM] Trying {model} (attempt {attempt + 1}/2)...")
+                config: SceneConfig = client.chat.completions.create(
+                    model=model,
+                    response_model=SceneConfig,
+                    messages=messages,
+                    temperature=0.4,
+                    max_tokens=4096,
+                )
+                # Success — write output and return
+                os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
+                with open(output_path, "w") as f:
+                    f.write(config.model_dump_json(indent=4))
+                print(f"[LLM] SceneConfig saved to {output_path} (model: {model})")
+                return
+
+            except Exception as exc:
+                last_error = exc
+                if _is_auth_failure(exc):
+                    raise NIMUnavailableError(
+                        "NIM API key is invalid or expired (401 Unauthorized). "
+                        "Please verify your NIM API key in Settings."
+                    )
+                if _is_retriable(exc):
+                    wait = 2 ** attempt
+                    print(f"[LLM] {model} unavailable (attempt {attempt + 1}): retrying in {wait}s...")
+                    time.sleep(wait)
+                else:
+                    print(f"[LLM] {model} failed (non-retriable): {exc}")
+                    break  # skip remaining attempts for this model
+
+        print(f"[LLM] {model} exhausted, trying next model...")
+
+    raise NIMUnavailableError(
+        f"All NIM models failed. Last error: {last_error}"
+    )
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate SceneConfig JSON from text prompt.")
     parser.add_argument("--prompt", type=str, required=True, help="User prompt describing the scene.")
     parser.add_argument("--output", type=str, default="configs/current_scene.json", help="Output path for the JSON config.")
-    
+    parser.add_argument("--nim-api-key", type=str, default=None, help="NVIDIA NIM API key (overrides NIM_API_KEY env var).")
     args = parser.parse_args()
-    generate_scene_config(args.prompt, args.output)
+
+    key = args.nim_api_key or os.environ.get("NIM_API_KEY", "")
+    if not key:
+        print("Error: NIM API key required. Pass --nim-api-key or set NIM_API_KEY env var.", file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        generate_scene_config(args.prompt, key, args.output)
+    except NIMUnavailableError as e:
+        print(f"[ERROR] {e}", file=sys.stderr)
+        sys.exit(1)
+    except ValidationError as e:
+        print(f"[ERROR] Schema validation failed: {e}", file=sys.stderr)
+        sys.exit(1)

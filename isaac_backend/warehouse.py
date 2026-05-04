@@ -4,6 +4,7 @@ Warehouse Layout Spawner
 Delegates to the procedural layout generator in layouts.py.
 """
 
+from pxr import UsdGeom
 from isaac_backend.layouts import generate_layout
 
 
