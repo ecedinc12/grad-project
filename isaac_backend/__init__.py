@@ -1,4 +1,3 @@
-"""isaac_backend — Isaac Sim 5.1 headless SDG pipeline (Isaac Python only)."""
 from isaac_backend.config_loader import load_config
 from isaac_backend.camera import positions_for_angles, pick_look_at_target
 from isaac_backend.lighting import setup_camera_and_lighting

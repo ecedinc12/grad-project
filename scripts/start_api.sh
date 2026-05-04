@@ -28,10 +28,6 @@ fi
 
 cd "$PROJECT_ROOT"
 
-# pip bağımlılıklarını yükle (yeni pod başlangıcında)
-echo "[*] API bağımlılıkları kontrol ediliyor..."
-pip install -q --break-system-packages -r "$PROJECT_ROOT/requirements.txt"
-
 if [ "$1" = "--foreground" ]; then
     echo "[*] API sunucusu ön planda başlatılıyor (port 8000)..."
     exec uvicorn api.server:app --host 0.0.0.0 --port 8000 --log-level info

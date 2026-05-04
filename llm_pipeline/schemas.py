@@ -1,4 +1,3 @@
-"""Pydantic schemas for scene configuration: PPEState, Entity, HazardZone, WorkerBehavior, SceneConfig."""
 from pydantic import BaseModel, Field
 from typing import List, Optional, Literal
 
