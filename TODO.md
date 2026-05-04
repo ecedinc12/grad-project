@@ -134,3 +134,15 @@
 - [ ] **Task 11.1: Kullanıcı kaydı ve kimlik doğrulama.** `api/server.py`'e `POST /auth/register` ve `POST /auth/login` endpoint'leri ekle. Login başarılıysa imzalı JWT dön (`PyJWT`). Kullanıcı verisi şimdilik JSON dosyasında tutulabilir.
 - [ ] **Task 11.2: API key saklama endpoint'i.** `PUT /user/nim-key`: JWT doğrula, NIM key'i Fernet ile şifreli kaydet (`SECRET_KEY` env var'ından türetilir). `GET /user/nim-key`: `{"saved": true/false}` döndür — key'in kendisini asla expose etme.
 - [ ] **Task 11.3: `/run` endpoint'ini güncelle.** `X-NIM-API-Key` header yoksa JWT'den kullanıcıyı belirle, saklanan key'i çöz ve pipeline'a ilet. Header varsa öncelik header'da. Her ikisi de yoksa `HTTP 400`.
+
+---
+
+#### Phase 12: Kullanıcı Tanımlı Çıktı Konfigürasyonu — Backend
+> Kullanıcı video isteyip istemediğini, kaç kare üretileceğini, annotate edilip edilmeyeceğini
+> ve hangi formatta (COCO/YOLO/ikisi) çıktı alacağını seçebilmeli.
+> Frontend görevleri: grad-project-front/.tasks.md Phase 9.
+
+- [ ] **Task 12.1: `RunRequest` şemasını genişlet.** `api/server.py` — mevcut `frames: int = 100`'e ek olarak: `generate_video: bool = True`, `annotate_video: bool = True`, `output_formats: list[str] = ["coco", "yolo"]` (geçerli değerler: `"coco"`, `"yolo"`).
+- [ ] **Task 12.2: `run_pipeline.sh` parametreli hale getir.** Script argümanları: `$1=prompt`, `$2=frames`, `$3=generate_video` (true/false), `$4=annotate_video` (true/false), `$5=output_formats` (virgülle ayrılmış). Adımları koşullu çalıştır: video adımı yalnızca `generate_video=true` ise, annotate adımı yalnızca `annotate_video=true` ise, YOLO dönüşümü yalnızca `output_formats` içinde `yolo` varsa, `gen_dataset_yaml.py` yalnızca `yolo` seçiliyse çalışsın.
+- [ ] **Task 12.3: `_run_job` fonksiyonunu güncelle.** `api/server.py` — `RunRequest`'ten gelen parametreleri `run_pipeline.sh`'a argüman olarak ilet. Job store'a `config` alanı ekle (`{generate_video, annotate_video, output_formats}`) — frontend sonuç panelinde neyin gösterileceğine karar vermek için kullanır.
+- [ ] **Task 12.4: `/status/{jobId}` yanıtına `config` ekle.** Job tamamlandığında `resultUrl` yanında hangi çıktıların üretildiğini döndür: `{"videoUrl": "/video" | null, "annotatedVideoUrl": "/annotated-video" | null, "formats": ["coco","yolo"]}`. Frontend bu bilgiyle download butonlarını koşullu gösterir.
