@@ -7,7 +7,7 @@
 #   DROPLET_API_KEY — API bearer token (leave empty to disable auth)
 
 REPO_HTTPS="https://github.com/ecedinc12/grad-project.git"
-BRANCH="rewrite"
+BRANCH="master"
 DIR="/workspace/grad-project"
 
 echo "╔══════════════════════════════════════════╗"

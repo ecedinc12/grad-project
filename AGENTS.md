@@ -106,9 +106,11 @@ The pipeline patches `/isaac-sim/kit/kernel/py/omni/ext/_impl/fast_importer.py` 
 
 ## Environment Variables
 
-- `GEMINI_API_KEY` — Required for LLM generation (Gemini via OpenAI-compatible API)
-- `GEMINI_BASE_URL` — Optional, defaults to `https://generativelanguage.googleapis.com/v1beta/openai/`
-- `LLM_MODEL` — Optional, defaults to `gemini-2.5-flash`
+- `DROPLET_API_KEY` — Bearer token for API auth (`Authorization: Bearer <key>`). Leave empty to disable auth in dev.
+- `ACCEPT_EULA` — Set to `Y` for Isaac Sim headless runs.
+- `NIM_API_KEY` — NVIDIA NIM API key. Passed at runtime via `X-NIM-API-Key` request header; injected into the subprocess env by `api/server.py`. Never stored in `.env`.
+
+See `.env.example` for the minimal env file. Frontend integration contract: `docs/FRONTEND_INTEGRATION.md`.
 
 ## Key Architecture
 
