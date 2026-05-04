@@ -50,7 +50,7 @@ RUN pip3 install --no-cache-dir --break-system-packages \
     "python-dotenv>=1.0.0"
 
 # ── Startup script ───────────────────────────────────────────
-COPY docker/start.sh /start.sh
+COPY start.sh /start.sh
 RUN chmod +x /start.sh
 
 WORKDIR /workspace
