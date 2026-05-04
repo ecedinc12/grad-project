@@ -1,35 +1,57 @@
 # Containers
 
-Bu dizin altındaki diğer klasörlerde bulunan `Dockerfile`’ları build edip registry’ye push etmek için kısa notlar.
+VisionForge projesinde kullanılan Docker imajları. Tümü `nvcr.io/nvidia/isaac-sim:5.1.0` base imajı üzerine kuruludur.
 
-## Önkoşullar
-- Docker kurulu olmalı
-- Docker login yapılmış olmalı
+## Mevcut Konteynerler
 
-## Build (tek bir klasör için)
-`Dockerfile` hangi klasördeyse o klasöre girip build alabilirsiniz:
+| Klasör | Amaç | Entrypoint |
+|--------|------|-----------|
+| `production/` | RunPod GPU pod — API otomatik başlar | `start.sh` |
+| `development/` | Lokal geliştirme — interaktif kullanım | yok |
+| `isaac_sim_dev_tools/` | Isaac Sim minimal araç seti | yok |
+
+---
+
+## Build
+
 ```bash
-cd <KLASOR_ADI>
-docker build -t <REGISTRY>/<NAMESPACE>/<IMAGE_NAME>:<TAG> .
-```
+# Production
+docker build -t <DOCKERHUB_USER>/visionforge:production -f containers/production/Dockerfile .
 
-Örnek:
-```bash
-cd api
-docker build -t ghcr.io/username/api:latest .
+# Development
+docker build -t <DOCKERHUB_USER>/visionforge:development -f containers/development/Dockerfile .
+
+# Isaac Sim Dev Tools
+docker build -t <DOCKERHUB_USER>/visionforge:isaac-dev -f containers/isaac_sim_dev_tools/dockerfile .
 ```
 
 ## Push
-Build aldığınız image’ı push edin:
+
 ```bash
-docker push <REGISTRY>/<NAMESPACE>/<IMAGE_NAME>:<TAG>
+docker push <DOCKERHUB_USER>/visionforge:production
+docker push <DOCKERHUB_USER>/visionforge:development
+docker push <DOCKERHUB_USER>/visionforge:isaac-dev
 ```
 
-Örnek:
+## Pull & Çalıştır
+
 ```bash
-docker push ghcr.io/your-org/api:latest
+# Production (RunPod — API port 8000'de otomatik ayağa kalkar)
+docker pull <DOCKERHUB_USER>/visionforge:production
+
+# Development (interaktif)
+docker pull <DOCKERHUB_USER>/visionforge:development
+docker run --gpus all -it --rm \
+  -v $(pwd):/workspace/grad-project \
+  -p 8000:8000 \
+  <DOCKERHUB_USER>/visionforge:development bash
+
+# Isaac Sim Dev Tools (interaktif)
+docker pull <DOCKERHUB_USER>/visionforge:isaac-dev
+docker run --gpus all -it --rm \
+  <DOCKERHUB_USER>/visionforge:isaac-dev bash
 ```
 
-## Notlar
-- `<TAG>` için `latest` yerine sürüm kullanmanız önerilir (örn. `1.0.0`).
-- Her klasör için aynı adımları tekrarlayın (ilgili klasöre gir → `docker build` → `docker push`).
+---
+
+Daha önce push edilmiş hazır imajlar için: [`pre-built_containers.md`](./pre-built_containers.md)
