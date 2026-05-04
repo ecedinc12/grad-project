@@ -396,10 +396,13 @@ def _setup_workers(scene_config, asset_library, stage, visible_bounds=None):
 # --- Main ---
 
 def main():
+    global NUM_FRAMES
     parser = argparse.ArgumentParser(description="Run Isaac Sim Headless Generation")
     parser.add_argument("--config", type=str, default="configs/current_scene.json")
     parser.add_argument("--library", type=str, default="assets/library.json")
+    parser.add_argument("--frames", type=int, default=NUM_FRAMES)
     args = parser.parse_args()
+    NUM_FRAMES = args.frames
 
     _progress("Loading configs...")
     scene_config, asset_library = load_config(args.config, args.library)

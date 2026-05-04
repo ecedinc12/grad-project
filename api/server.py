@@ -113,12 +113,15 @@ def _build_env(nim_api_key: str) -> dict:
 # ---------------------------------------------------------------------------
 # Background task
 # ---------------------------------------------------------------------------
-async def _run_job(job_id: str, prompt: str, nim_api_key: str) -> None:
+async def _run_job(job_id: str, prompt: str, nim_api_key: str,
+                   frames: int = 100, generate_video: bool = True,
+                   annotation_format: str = "both") -> None:
     _jobs[job_id].update(status="running", message="Starting pipeline...")
     env = _build_env(nim_api_key)
     try:
         proc = await asyncio.create_subprocess_exec(
             "/bin/bash", str(RUN_SCRIPT), prompt,
+            str(frames), str(generate_video).lower(), annotation_format,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
             cwd=str(PROJECT_ROOT), env=env,
@@ -155,6 +158,8 @@ class RunRequest(BaseModel):
     preset: str = ""
     frames: int = 100
     labels: list[str] = []
+    generate_video: bool = True
+    annotation_format: str = "both"  # coco | yolo | both
 
 
 @app.post("/run", status_code=202)
@@ -170,7 +175,8 @@ async def run(req: RunRequest, request: Request, background_tasks: BackgroundTas
 
     job_id = str(uuid.uuid4())
     _jobs[job_id] = {"status": "queued", "progress": 0, "message": "Job queued", "resultUrl": None, "logs": []}
-    background_tasks.add_task(_run_job, job_id, req.prompt.strip(), nim_api_key)
+    background_tasks.add_task(_run_job, job_id, req.prompt.strip(), nim_api_key,
+                               req.frames, req.generate_video, req.annotation_format)
     return {"jobId": job_id, "status": "queued"}
 
 
