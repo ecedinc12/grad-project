@@ -126,13 +126,11 @@
 
 ---
 
-#### Phase 11: Kullanıcıya Bağlı Kalıcı API Key Saklama
+#### Phase 11: Kullanıcıya Bağlı Kalıcı API Key Saklama — Backend
 > Şu an NIM API key her oturumda yeniden isteniyor. Kullanıcı farklı cihaz veya tarayıcıdan
 > giriş yapsa bile key'i tekrar girmemeli; hesabına bağlı olarak sunucuda saklanmalı.
+> Frontend görevleri: grad-project-front/.tasks.md Phase 8.
 
-- [ ] **Task 11.1: Backend — kullanıcı kaydı ve kimlik doğrulama.** `api/server.py`'e `POST /auth/register` ve `POST /auth/login` endpoint'leri ekle. Login başarılıysa imzalı JWT dön (`python-jose` veya `PyJWT`). Şimdilik kullanıcı verisi in-memory veya basit JSON dosyasında tutulabilir.
-- [ ] **Task 11.2: Backend — API key saklama endpoint'i.** `PUT /user/nim-key` endpoint'i: Authorization header'dan JWT doğrula, body'den gelen NIM key'i kullanıcıya ait kayıtta şifreli olarak sakla (`cryptography.fernet` ile symmetric encryption; key `SECRET_KEY` env var'ından). `GET /user/nim-key` ile kayıtlı key'in var olup olmadığını döndür (key'in kendisini değil, sadece `{"saved": true/false}`).
-- [ ] **Task 11.3: Backend — `/run` endpoint'ini güncelle.** `X-NIM-API-Key` header'ı yoksa JWT'den kullanıcıyı belirle ve saklanan key'i çöz, pipeline'a ilet. Header varsa öncelik header'da (override). Her ikisi de yoksa `HTTP 400`.
-- [ ] **Task 11.4: Frontend — auth akışı.** Login/register ekranı. Başarılı girişte JWT'yi `localStorage`'a kaydet; her API isteğinde `Authorization: Bearer <jwt>` header'ı gönder.
-- [ ] **Task 11.5: Frontend — Settings ekranı.** NIM key giriş alanı: kaydet butonu `PUT /user/nim-key`'i çağırsın. Sayfa açıldığında `GET /user/nim-key` ile key'in kayıtlı olup olmadığını kontrol et; kayıtlıysa alanı `••••••••` ile dolu göster. "Değiştir" butonu alanı temizlesin.
-- [ ] **Task 11.6: Frontend — Run akışını güncelle.** `POST /run` isteğinde artık `X-NIM-API-Key` header'ı gönderme; sunucu kayıtlı key'i kullansın. Kullanıcının kayıtlı key'i yoksa Settings'e yönlendir.
+- [ ] **Task 11.1: Kullanıcı kaydı ve kimlik doğrulama.** `api/server.py`'e `POST /auth/register` ve `POST /auth/login` endpoint'leri ekle. Login başarılıysa imzalı JWT dön (`PyJWT`). Kullanıcı verisi şimdilik JSON dosyasında tutulabilir.
+- [ ] **Task 11.2: API key saklama endpoint'i.** `PUT /user/nim-key`: JWT doğrula, NIM key'i Fernet ile şifreli kaydet (`SECRET_KEY` env var'ından türetilir). `GET /user/nim-key`: `{"saved": true/false}` döndür — key'in kendisini asla expose etme.
+- [ ] **Task 11.3: `/run` endpoint'ini güncelle.** `X-NIM-API-Key` header yoksa JWT'den kullanıcıyı belirle, saklanan key'i çöz ve pipeline'a ilet. Header varsa öncelik header'da. Her ikisi de yoksa `HTTP 400`.
