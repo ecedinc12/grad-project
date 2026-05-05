@@ -1,10 +1,9 @@
 #!/bin/bash
-set -euo pipefail
 # VisionForge RunPod auto-start script
 # Runs automatically when the container starts.
 # Set these env vars in your RunPod template:
-#   GITHUB_TOKEN  — personal access token if repo is private (repo scope only)
-#   NIM_API_KEY   — NVIDIA NIM key (optional; users can also enter via UI)
+#   GITHUB_TOKEN    — personal access token if repo is private (repo scope only)
+#   NIM_API_KEY     — NVIDIA NIM key (optional; users can also enter via UI)
 #   DROPLET_API_KEY — API bearer token (leave empty to disable auth)
 
 REPO_HTTPS="https://github.com/ecedinc12/grad-project.git"
@@ -18,7 +17,7 @@ echo "╚═══════════════════════�
 # ── 1. Install ffmpeg if missing ────────────────────────────
 if ! command -v ffmpeg &>/dev/null; then
     echo "[startup] Installing ffmpeg..."
-    apt-get update -qq && apt-get install -y -qq ffmpeg git curl \
+    apt-get update -qq && apt-get install -y -qq ffmpeg git curl supervisor \
         && rm -rf /var/lib/apt/lists/*
 fi
 
@@ -60,19 +59,38 @@ pip3 install --break-system-packages -q \
 
 echo "[startup] All dependencies ready."
 
-# ── 5. Start API with auto-restart loop ─────────────────────
-cd "$DIR"
-echo "[startup] Starting VisionForge API on port 8000..."
-echo ""
+# ── 5. Write supervisord config ─────────────────────────────
+mkdir -p /etc/supervisor/conf.d
+cat > /etc/supervisor/conf.d/api.conf << 'EOF'
+[supervisord]
+nodaemon=true
+logfile=/dev/null
+logfile_maxbytes=0
+pidfile=/tmp/supervisord.pid
 
-while true; do
-    uvicorn api.server:app \
-        --host 0.0.0.0 \
-        --port 8000 \
-        --timeout-keep-alive 600 \
-        --log-level warning
-    CODE=$?
-    echo ""
-    echo "[startup] API exited (code $CODE) — restarting in 5s..."
-    sleep 5
-done
+[unix_http_server]
+file=/tmp/supervisor.sock
+
+[rpcinterface:supervisor]
+supervisor.rpcinterface_factory = supervisor.rpcinterface:make_main_rpcinterface
+
+[supervisorctl]
+serverurl=unix:///tmp/supervisor.sock
+
+[program:api]
+command=uvicorn api.server:app --host 0.0.0.0 --port 8000 --timeout-keep-alive 600 --log-level warning
+directory=/workspace/grad-project
+autostart=true
+autorestart=true
+startretries=10
+stopasgroup=true
+killasgroup=true
+stdout_logfile=/dev/stdout
+stdout_logfile_maxbytes=0
+stderr_logfile=/dev/stderr
+stderr_logfile_maxbytes=0
+EOF
+
+# ── 6. Start supervisord ─────────────────────────────────────
+echo "[startup] Starting supervisord..."
+exec supervisord -c /etc/supervisor/conf.d/api.conf
