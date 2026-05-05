@@ -24,6 +24,7 @@ load_dotenv()
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 RUN_SCRIPT   = PROJECT_ROOT / "scripts" / "run_pipeline.sh"
 DATASET_DIR  = Path("/tmp/dataset")
+FRAMES_DIR   = DATASET_DIR / "Replicator"
 
 DROPLET_API_KEY = os.environ.get("DROPLET_API_KEY", "")
 
@@ -72,7 +73,7 @@ _state: dict = {
 # Helpers
 # ---------------------------------------------------------------------------
 def _rgb_frames(limit: int = 12) -> list[str]:
-    paths = sorted(glob.glob(str(DATASET_DIR / "rgb_*.png")))
+    paths = sorted(glob.glob(str(FRAMES_DIR / "rgb_*.png")))
     return paths if len(paths) <= limit else sorted(random.sample(paths, limit))
 
 
@@ -217,7 +218,7 @@ async def frame(filename: str, request: Request):
     _verify_key(request)
     if "/" in filename or ".." in filename:
         raise HTTPException(400, "Invalid filename")
-    path = DATASET_DIR / filename
+    path = FRAMES_DIR / filename
     if not path.is_file():
         raise HTTPException(404, "Frame not found")
     return FileResponse(str(path), media_type="image/png")

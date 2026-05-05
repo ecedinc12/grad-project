@@ -1,4 +1,5 @@
 #!/bin/bash
+set -euo pipefail
 # VisionForge RunPod auto-start script
 # Runs automatically when the container starts.
 # Set these env vars in your RunPod template:

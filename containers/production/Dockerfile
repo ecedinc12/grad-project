@@ -56,4 +56,4 @@ RUN chmod +x /start.sh
 WORKDIR /workspace
 EXPOSE 8000
 
-CMD ["/start.sh"]
+ENTRYPOINT ["/start.sh"]
