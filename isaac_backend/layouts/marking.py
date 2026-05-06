@@ -6,6 +6,8 @@ import random
 from .geometry import (
     DEFAULT_CEILING_Z,
     RACK_DEPTH,
+    _build_aisle_records,
+    _build_rack_groups,
 )
 from .placement import (
     _place,
@@ -27,23 +29,21 @@ def _spawn_floor_markings(rack_positions, params, stage, idx):
     yellow = (0.92, 0.78, 0.10)
     count = 0
 
-    # Group racks by row (same y, allowing for clusters/grid). Keys snapped to 0.5m.
-    rows = {}
-    for (rx, ry, rrot) in rack_positions:
-        if rrot == 90:
-            key = round(ry * 2) / 2.0
-            rows.setdefault(key, []).append(rx)
-
-    sorted_ys = sorted(rows.keys())
-    for i in range(len(sorted_ys) - 1):
-        y_a, y_b = sorted_ys[i], sorted_ys[i + 1]
-        y_mid = (y_a + y_b) / 2.0
-        xs = rows[y_a] + rows[y_b]
-        x_lo, x_hi = min(xs) - 1.0, max(xs) + 1.0
-        # Two parallel yellow stripes 0.4m apart bracketing the aisle centerline.
+    # Aisle stripes for both EW (rrot=90) and NS (rrot=0) rack groups.
+    aisles = _build_aisle_records(rack_positions, pad=1.0)
+    for a in aisles:
+        cx_a = (a["lo"] + a["hi"]) / 2.0
+        length = a["hi"] - a["lo"]
         for offset in (-0.20, 0.20):
-            idx = _paint_floor_stripe(stage, idx, (x_lo + x_hi) / 2.0,
-                                      y_mid + offset, x_hi - x_lo, 0.10, yellow)
+            if a["axis"] == "x":
+                # Stripe runs along X; offset in Y from aisle centerline.
+                idx = _paint_floor_stripe(stage, idx, cx_a,
+                                          a["mid"] + offset,
+                                          length, 0.10, yellow)
+            else:
+                # Stripe runs along Y; offset in X.
+                idx = _paint_floor_stripe(stage, idx, a["mid"] + offset,
+                                          cx_a, 0.10, length, yellow)
             count += 1
 
     # Perimeter safety border just inside the warehouse walls.
@@ -103,61 +103,75 @@ def _spawn_main_aisle_treatment(rack_positions, params, asset_library, stage, id
     bmin = params["bounds_min"]
     bmax = params["bounds_max"]
 
-    rows = {}
-    for (rx, ry, rrot) in rack_positions:
-        if rrot == 90:
-            key = round(ry * 2) / 2.0
-            rows.setdefault(key, []).append(rx)
-    sorted_ys = sorted(rows.keys())
-    if len(sorted_ys) < 2:
+    aisles = _build_aisle_records(rack_positions, pad=0.9)
+    if not aisles:
         return idx, 0
-
-    aisles = []
-    for i in range(len(sorted_ys) - 1):
-        y_a, y_b = sorted_ys[i], sorted_ys[i + 1]
-        gap = abs(y_b - y_a) - RACK_DEPTH
-        y_mid = (y_a + y_b) / 2.0
-        xs = rows[y_a] + rows[y_b]
-        x_lo, x_hi = min(xs) - 0.9, max(xs) + 0.9
-        aisles.append({"y": y_mid, "x_lo": x_lo, "x_hi": x_hi, "gap": gap})
 
     main = max(aisles, key=lambda a: a["gap"])
     count = 0
 
     # Heavy yellow centerline (in addition to the existing edge stripes).
     yellow_hi = (0.97, 0.84, 0.10)
-    cx = (main["x_lo"] + main["x_hi"]) / 2.0
-    length = main["x_hi"] - main["x_lo"]
-    idx = _paint_floor_stripe(stage, idx, cx, main["y"],
-                              length, 0.20, yellow_hi, z=0.014)
+    long_center = (main["lo"] + main["hi"]) / 2.0
+    length = main["hi"] - main["lo"]
+
+    if main["axis"] == "x":
+        idx = _paint_floor_stripe(stage, idx, long_center, main["mid"],
+                                  length, 0.20, yellow_hi, z=0.014)
+    else:
+        idx = _paint_floor_stripe(stage, idx, main["mid"], long_center,
+                                  0.20, length, yellow_hi, z=0.014)
     count += 1
 
     # Bollards / cones at each end of the main aisle to channel approach.
-    for end_x in (main["x_lo"] - 0.8, main["x_hi"] + 0.8):
-        if abs(end_x - bmin[0]) < 0.5 or abs(end_x - bmax[0]) < 0.5:
+    if main["axis"] == "x":
+        wall_lo, wall_hi = bmin[0], bmax[0]
+    else:
+        wall_lo, wall_hi = bmin[1], bmax[1]
+
+    for end_long in (main["lo"] - 0.8, main["hi"] + 0.8):
+        if abs(end_long - wall_lo) < 0.5 or abs(end_long - wall_hi) < 0.5:
             continue  # too close to wall
-        idx = _place_hi_vis_bollard(stage, idx, end_x, main["y"] - 0.6, height=0.95)
-        idx = _place_hi_vis_bollard(stage, idx, end_x, main["y"] + 0.6, height=0.95)
+        if main["axis"] == "x":
+            idx = _place_hi_vis_bollard(stage, idx, end_long, main["mid"] - 0.6, height=0.95)
+            idx = _place_hi_vis_bollard(stage, idx, end_long, main["mid"] + 0.6, height=0.95)
+        else:
+            idx = _place_hi_vis_bollard(stage, idx, main["mid"] - 0.6, end_long, height=0.95)
+            idx = _place_hi_vis_bollard(stage, idx, main["mid"] + 0.6, end_long, height=0.95)
         count += 2
         if "cone" in asset_library:
-            idx = _place("cone", end_x + 0.4 * (1 if end_x > cx else -1),
-                         main["y"], 0, 0, asset_library, stage, idx)
+            sign = 1 if end_long > long_center else -1
+            if main["axis"] == "x":
+                idx = _place("cone", end_long + 0.4 * sign, main["mid"],
+                             0, 0, asset_library, stage, idx)
+            else:
+                idx = _place("cone", main["mid"], end_long + 0.4 * sign,
+                             0, 0, asset_library, stage, idx)
             count += 1
 
     # Overhead aisle sign — orange band so it stands out from the picker
     # signs already placed by realism extras.
     sign_z = params.get("ceiling_z", DEFAULT_CEILING_Z) - 1.0
-    idx = _place_aisle_sign(stage, idx, cx, main["y"], (0.95, 0.45, 0.05), z=sign_z)
+    if main["axis"] == "x":
+        sign_x, sign_y = long_center, main["mid"]
+    else:
+        sign_x, sign_y = main["mid"], long_center
+    idx = _place_aisle_sign(stage, idx, sign_x, sign_y, (0.95, 0.45, 0.05), z=sign_z)
     count += 2
 
     # Floor direction arrows at the entrance from the dock side.
-    arrow_y = main["y"] - 1.0 if main["y"] > 0 else main["y"] + 1.0
-    idx = _place_floor_arrow(stage, idx, cx - 1.5, arrow_y, rot_z=0)
-    idx = _place_floor_arrow(stage, idx, cx + 1.5, arrow_y, rot_z=0)
+    if main["axis"] == "x":
+        arrow_y = main["mid"] - 1.0 if main["mid"] > 0 else main["mid"] + 1.0
+        idx = _place_floor_arrow(stage, idx, long_center - 1.5, arrow_y, rot_z=0)
+        idx = _place_floor_arrow(stage, idx, long_center + 1.5, arrow_y, rot_z=0)
+    else:
+        arrow_x = main["mid"] - 1.0 if main["mid"] > 0 else main["mid"] + 1.0
+        idx = _place_floor_arrow(stage, idx, arrow_x, long_center - 1.5, rot_z=90)
+        idx = _place_floor_arrow(stage, idx, arrow_x, long_center + 1.5, rot_z=90)
     count += 2
 
-    print(f"[INFO] Main drive aisle identified at y={main['y']:.2f} "
-          f"(gap={main['gap']:.2f}m), {count} treatment items spawned")
+    print(f"[INFO] Main drive aisle identified axis={main['axis']} "
+          f"mid={main['mid']:.2f} (gap={main['gap']:.2f}m), {count} treatment items spawned")
     return idx, count
 
 

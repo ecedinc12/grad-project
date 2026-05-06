@@ -8,6 +8,8 @@ from isaac_backend.layouts.geometry import (
     RACK_X_EXTENT,
     RACK_DEPTH,
     CLUTTER_PROPS,
+    _build_aisle_records,
+    _build_rack_groups,
 )
 from isaac_backend.layouts.placement import (
     _place,
@@ -65,21 +67,17 @@ def _spawn_realism_extras(params, rack_positions, stage, idx):
     aisle-number placards, mop bucket near bins."""
     bmin = params["bounds_min"]
     bmax = params["bounds_max"]
-    cx = (bmin[0] + bmax[0]) / 2.0
     count = 0
 
-    # Caution signs scattered in 1-3 aisle midpoints.
-    rows = {}
-    for (rx, ry, rrot) in rack_positions:
-        if rrot == 90:
-            key = round(ry * 2) / 2.0
-            rows.setdefault(key, []).append(rx)
-    sorted_ys = sorted(rows.keys())
+    # Caution signs scattered in 1-3 aisle midpoints (both EW and NS aisles).
+    aisle_records = _build_aisle_records(rack_positions, pad=0.0)
     aisle_mids = []
-    for i in range(len(sorted_ys) - 1):
-        y_mid = (sorted_ys[i] + sorted_ys[i + 1]) / 2.0
-        xs = rows[sorted_ys[i]] + rows[sorted_ys[i + 1]]
-        aisle_mids.append((sum(xs) / len(xs), y_mid))
+    for a in aisle_records:
+        long_center = (a["lo"] + a["hi"]) / 2.0
+        if a["axis"] == "x":
+            aisle_mids.append((long_center, a["mid"]))
+        else:
+            aisle_mids.append((a["mid"], long_center))
     random.shuffle(aisle_mids)
     for (ax, ay) in aisle_mids[:min(2, len(aisle_mids))]:
         idx = _place_caution_sign(stage, idx, ax + random.uniform(-0.5, 0.5),
@@ -98,26 +96,48 @@ def _spawn_realism_extras(params, rack_positions, stage, idx):
         idx = _place_wall_junction_box(stage, idx, bmax[0] - margin, wy, z=1.55)
         count += 2
 
-    # Ceiling strip lights on a grid above the aisle rows.
+    # Ceiling strip lights on a grid above the rack rows. Use EW-row Y keys
+    # if any; fall back to NS-col X keys; finally a single warehouse-center
+    # crossbar so layouts without racks (maintenance_bay) still get lit.
+    ew_rows, ns_cols = _build_rack_groups(rack_positions)
     light_zs = params.get("ceiling_z", DEFAULT_CEILING_Z) - 0.15
     n_lights_x = max(2, int((bmax[0] - bmin[0]) / 4.0))
-    light_ys = sorted_ys if sorted_ys else [(bmin[1] + bmax[1]) / 2.0]
-    for ly in light_ys:
+    n_lights_y = max(2, int((bmax[1] - bmin[1]) / 4.0))
+    if ew_rows:
+        light_ys = sorted(ew_rows.keys())
+        for ly in light_ys:
+            for k in range(n_lights_x):
+                frac = (k + 0.5) / n_lights_x
+                lx = bmin[0] + frac * (bmax[0] - bmin[0])
+                idx = _place_overhead_light(stage, idx, lx, ly, z=light_zs, length=2.4)
+                count += 1
+    if ns_cols:
+        light_xs = sorted(ns_cols.keys())
+        for lx in light_xs:
+            for k in range(n_lights_y):
+                frac = (k + 0.5) / n_lights_y
+                ly = bmin[1] + frac * (bmax[1] - bmin[1])
+                idx = _place_overhead_light(stage, idx, lx, ly, z=light_zs, length=2.4)
+                count += 1
+    if not ew_rows and not ns_cols:
+        cy_mid = (bmin[1] + bmax[1]) / 2.0
         for k in range(n_lights_x):
             frac = (k + 0.5) / n_lights_x
             lx = bmin[0] + frac * (bmax[0] - bmin[0])
-            idx = _place_overhead_light(stage, idx, lx, ly, z=light_zs, length=2.4)
+            idx = _place_overhead_light(stage, idx, lx, cy_mid, z=light_zs, length=2.4)
             count += 1
 
     # Aisle-number sign at the entry side of each aisle.
     band_palette = [(0.20, 0.55, 0.90), (0.90, 0.40, 0.20),
                     (0.30, 0.70, 0.35), (0.85, 0.20, 0.55),
                     (0.95, 0.78, 0.10)]
-    for i, (_, ay) in enumerate(aisle_mids):
+    sign_z = params.get("ceiling_z", DEFAULT_CEILING_Z) - 1.0
+    for i, (ax, ay) in enumerate(aisle_mids):
         color = band_palette[i % len(band_palette)]
-        # Hang aisle signs ~1m below the ceiling so they read as suspended.
-        sign_z = params.get("ceiling_z", DEFAULT_CEILING_Z) - 1.0
-        idx = _place_aisle_sign(stage, idx, cx, ay, color, z=sign_z)
+        # Sign hangs over the warehouse center coord on the long axis,
+        # tracking the aisle's perpendicular position.
+        # ax/ay are already aisle midpoints; place the sign there.
+        idx = _place_aisle_sign(stage, idx, ax, ay, color, z=sign_z)
         count += 2
 
     # Mop + bucket tucked next to the bin corner used in _spawn_wall_details.
@@ -147,17 +167,9 @@ def _spawn_human_imperfection(rack_positions, params, asset_library, stage, idx)
     bmin = params["bounds_min"]
     bmax = params["bounds_max"]
 
-    # Group racks by row to find aisle midlines and rack endpoints.
-    rows = {}
-    for (rx, ry, rrot) in rack_positions:
-        if rrot == 90:
-            key = round(ry * 2) / 2.0
-            rows.setdefault(key, []).append(rx)
-    sorted_ys = sorted(rows.keys())
-    aisle_mids = []
-    for i in range(len(sorted_ys) - 1):
-        y_mid = (sorted_ys[i] + sorted_ys[i + 1]) / 2.0
-        aisle_mids.append((y_mid, sorted_ys[i], sorted_ys[i + 1]))
+    # Build aisle records spanning both EW and NS rack groups.
+    ew_rows, ns_cols = _build_rack_groups(rack_positions)
+    aisle_records = _build_aisle_records(rack_positions, pad=0.0)
 
     count = 0
     box_props = [p for p in ("box", "box_small", "crate") if p in asset_library]
@@ -167,33 +179,40 @@ def _spawn_human_imperfection(rack_positions, params, asset_library, stage, idx)
     # 1. Crooked pallets parked askew against a rack face. 2-4 across the
     #    warehouse. Sit at the front edge of a rack with 8-25° rotation off
     #    the rack's long axis.
-    if has_pallet and aisle_mids:
+    if has_pallet and aisle_records:
         for _ in range(random.randint(2, 4)):
-            y_mid, ya, yb = random.choice(aisle_mids)
-            face_y_choice = random.choice([ya, yb])
-            xs = rows[face_y_choice]
-            x_pick = random.choice(xs) + random.uniform(-0.4, 0.4)
-            # Pallet sits in the aisle, just in front of the rack face.
-            offset_into_aisle = random.uniform(0.55, 0.95)
-            if face_y_choice == ya:
-                py = ya - offset_into_aisle  # ya is the back row → step toward y_mid
-                if ya > y_mid:
-                    py = ya - offset_into_aisle
-                else:
-                    py = ya + offset_into_aisle
+            a = random.choice(aisle_records)
+            if a["axis"] == "x":
+                # EW aisle — pick a flanking row's y, then a rack x along it.
+                row_keys = [k for k in ew_rows.keys()
+                            if abs(k - (a["mid"] - a["gap"] / 2 - RACK_DEPTH / 2)) < 1.0
+                            or abs(k - (a["mid"] + a["gap"] / 2 + RACK_DEPTH / 2)) < 1.0]
+                if not row_keys:
+                    row_keys = list(ew_rows.keys())
+                face_y = random.choice(row_keys)
+                x_pick = random.choice(ew_rows[face_y]) + random.uniform(-0.4, 0.4)
+                offset = random.uniform(0.55, 0.95)
+                py = face_y + offset if face_y < a["mid"] else face_y - offset
+                crooked_rot = 90 + random.uniform(-25, 25)
+                px = x_pick
             else:
-                if yb > y_mid:
-                    py = yb - offset_into_aisle
-                else:
-                    py = yb + offset_into_aisle
-            crooked_rot = 90 + random.uniform(-25, 25)
-            idx = _place("pallet", x_pick, py, 0, crooked_rot, asset_library, stage, idx)
+                # NS aisle — pick a flanking col's x, then a rack y along it.
+                col_keys = [k for k in ns_cols.keys()
+                            if abs(k - (a["mid"] - a["gap"] / 2 - RACK_DEPTH / 2)) < 1.0
+                            or abs(k - (a["mid"] + a["gap"] / 2 + RACK_DEPTH / 2)) < 1.0]
+                if not col_keys:
+                    col_keys = list(ns_cols.keys())
+                face_x = random.choice(col_keys)
+                y_pick = random.choice(ns_cols[face_x]) + random.uniform(-0.4, 0.4)
+                offset = random.uniform(0.55, 0.95)
+                px = face_x + offset if face_x < a["mid"] else face_x - offset
+                py = y_pick
+                crooked_rot = random.uniform(-25, 25)
+            idx = _place("pallet", px, py, 0, crooked_rot, asset_library, stage, idx)
             count += 1
-            # Half the time the crooked pallet has cargo, half the time it's
-            # bare (someone dropped it and walked away).
             if random.random() < 0.5 and box_props:
                 idx = _place(random.choice(box_props),
-                             x_pick + random.uniform(-0.10, 0.10),
+                             px + random.uniform(-0.10, 0.10),
                              py + random.uniform(-0.10, 0.10),
                              0.14, crooked_rot + random.uniform(-15, 15),
                              asset_library, stage, idx)

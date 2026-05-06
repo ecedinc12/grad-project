@@ -8,6 +8,7 @@ from isaac_backend.layouts.geometry import (
     RACK_X_EXTENT,
     RACK_DEPTH,
     CLUTTER_PROPS,
+    _build_aisle_records,
 )
 from isaac_backend.layouts.placement import (
     _place,
@@ -92,39 +93,40 @@ def _spawn_mid_aisle_forklift(rack_positions, params, asset_library, stage, idx)
     """Drop a second forklift parked mid-aisle to imply active operations."""
     if "forklift" not in asset_library or not rack_positions:
         return idx, 0
-    rows = {}
-    for (rx, ry, rrot) in rack_positions:
-        if rrot == 90:
-            key = round(ry * 2) / 2.0
-            rows.setdefault(key, []).append(rx)
-    sorted_ys = sorted(rows.keys())
-    if len(sorted_ys) < 2:
+    aisles = _build_aisle_records(rack_positions, pad=0.0)
+    if not aisles:
         return idx, 0
-    # Pick the aisle nearest the warehouse center.
-    cy = (params["bounds_min"][1] + params["bounds_max"][1]) / 2.0
-    aisle_mids = []
-    for i in range(len(sorted_ys) - 1):
-        y_mid = (sorted_ys[i] + sorted_ys[i + 1]) / 2.0
-        xs = rows[sorted_ys[i]] + rows[sorted_ys[i + 1]]
-        aisle_mids.append((y_mid, sum(xs) / len(xs)))
-    aisle_mids.sort(key=lambda t: abs(t[0] - cy))
-    y_mid, x_center = aisle_mids[0]
-    fx = x_center + random.uniform(-1.5, 1.5)
-    fy = y_mid + random.uniform(-0.15, 0.15)
-    rot = random.choice([0, 180]) + random.uniform(-8, 8)
+
+    # Pick the aisle whose perpendicular center is closest to warehouse center.
+    bmin = params["bounds_min"]
+    bmax = params["bounds_max"]
+    cx = (bmin[0] + bmax[0]) / 2.0
+    cy = (bmin[1] + bmax[1]) / 2.0
+    def _aisle_dist(a):
+        return abs(a["mid"] - (cy if a["axis"] == "x" else cx))
+    aisles.sort(key=_aisle_dist)
+    a = aisles[0]
+    long_center = (a["lo"] + a["hi"]) / 2.0
+    long_p = long_center + random.uniform(-1.5, 1.5)
+    perp_p = a["mid"] + random.uniform(-0.15, 0.15)
+
+    if a["axis"] == "x":
+        fx, fy = long_p, perp_p
+        rot = random.choice([0, 180]) + random.uniform(-8, 8)
+    else:
+        fx, fy = perp_p, long_p
+        rot = random.choice([90, 270]) + random.uniform(-8, 8)
+
     idx = _place("forklift", fx, fy, 0, rot, asset_library, stage, idx)
     count = 1
-    # Loaded pallet on the forks if available.
     if "pallet" in asset_library:
         ang = math.radians(rot)
         cos_a, sin_a = math.cos(ang), math.sin(ang)
-        # Forks extend along +X in the forklift's local frame.
         local_fx = 1.2
         px = fx + local_fx * cos_a
         py = fy + local_fx * sin_a
         idx = _place("pallet", px, py, 0.18, rot, asset_library, stage, idx)
         count += 1
-        # Stack of boxes on the pallet.
         idx, n = _stack_boxes(px, py, (1.0, 0.7, 0.35),
                               (0.06, 0.08, 0.10), asset_library, stage, idx)
         count += n

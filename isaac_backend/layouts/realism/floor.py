@@ -8,6 +8,9 @@ from isaac_backend.layouts.geometry import (
     RACK_X_EXTENT,
     RACK_DEPTH,
     CLUTTER_PROPS,
+    _build_aisle_records,
+    _build_rack_groups,
+    _zone_in_dock_band,
 )
 from isaac_backend.layouts.placement import (
     _place,
@@ -75,17 +78,25 @@ def _spawn_floor_filling(params, rack_positions, asset_library, stage, idx):
     """
     bmin = params["bounds_min"]
     bmax = params["bounds_max"]
-    if not rack_positions:
-        return idx, 0
 
-    rxs = [p[0] for p in rack_positions]
-    rys = [p[1] for p in rack_positions]
-    # Rack body extends ±RACK_X_EXTENT/2 along X and ±RACK_DEPTH/2 along Y
-    # for racks rotated 90°, so pad by those when computing the dead-zone.
-    rzone_xmin = min(rxs) - RACK_X_EXTENT / 2.0 - 0.4
-    rzone_xmax = max(rxs) + RACK_X_EXTENT / 2.0 + 0.4
-    rzone_ymin = min(rys) - RACK_DEPTH / 2.0 - 0.5
-    rzone_ymax = max(rys) + RACK_DEPTH / 2.0 + 0.5
+    rack_pattern = params.get("rack_pattern", "rows")
+    use_zone_fallback = (
+        not rack_positions
+        or rack_pattern in ("none", "perimeter", "clusters")
+        or len(rack_positions) < 4
+    )
+
+    rxs = [p[0] for p in rack_positions] if rack_positions else []
+    rys = [p[1] for p in rack_positions] if rack_positions else []
+    if rxs and rys:
+        # Rack body extends ±RACK_X_EXTENT/2 along X and ±RACK_DEPTH/2 along Y
+        # for racks rotated 90°, so pad by those when computing the dead-zone.
+        rzone_xmin = min(rxs) - RACK_X_EXTENT / 2.0 - 0.4
+        rzone_xmax = max(rxs) + RACK_X_EXTENT / 2.0 + 0.4
+        rzone_ymin = min(rys) - RACK_DEPTH / 2.0 - 0.5
+        rzone_ymax = max(rys) + RACK_DEPTH / 2.0 + 0.5
+    else:
+        rzone_xmin = rzone_xmax = rzone_ymin = rzone_ymax = 0.0
 
     has_dock = params.get("dock_area", False)
     dock_frac = params.get("dock_zone_frac", 0.25)
@@ -162,6 +173,48 @@ def _spawn_floor_filling(params, rack_positions, asset_library, stage, idx):
         idx = _place(prop, x, y, height, random.uniform(0, 360),
                      asset_library, stage, idx)
         count += 1
+
+    if use_zone_fallback:
+        # Layouts without a contiguous rack block (perimeter / clusters / none /
+        # very few racks) can't carve "front/back/side strips" from a rack bbox.
+        # Fill the preset's clutter_zones directly with staging pallets and
+        # drum clusters. Skip zones owned by the dock-band populator.
+        zones = params.get("clutter_zones", []) or []
+        for zone in zones:
+            zmin = zone.get("bounds_min")
+            zmax = zone.get("bounds_max")
+            if zmin is None or zmax is None:
+                continue
+            if _zone_in_dock_band(zmin, zmax, params):
+                continue
+            density = zone.get("density", params.get("clutter_density", "medium"))
+            n_slots = {"low": 4, "medium": 9, "high": 16}.get(density, 9)
+            zw = zmax[0] - zmin[0]
+            zh = zmax[1] - zmin[1]
+            # Slot the zone with a loose grid; jitter each slot heavily so the
+            # fill reads as accumulated staging, not CAD-snap.
+            cols = max(1, int(round((zw / max(zh, 0.1)) ** 0.5 * (n_slots ** 0.5))))
+            rows = max(1, (n_slots + cols - 1) // cols)
+            cell_w = zw / cols
+            cell_h = zh / rows
+            for r in range(rows):
+                for c in range(cols):
+                    if random.random() < 0.18:
+                        continue  # gap rate
+                    sx = zmin[0] + (c + 0.5) * cell_w + random.uniform(-cell_w * 0.30, cell_w * 0.30)
+                    sy = zmin[1] + (r + 0.5) * cell_h + random.uniform(-cell_h * 0.30, cell_h * 0.30)
+                    roll = random.random()
+                    if roll < 0.45:
+                        _drop_loaded_pallet(sx, sy)
+                    elif roll < 0.75:
+                        _drop_drum(sx, sy)
+                    else:
+                        prop = random.choice([p for p in ("crate", "box_large", "box")
+                                              if p in asset_library] or ["box"])
+                        idx = _place(prop, sx, sy, 0, random.uniform(0, 360),
+                                     asset_library, stage, idx)
+                        count += 1
+        return idx, count
 
     # ---------- 1) FRONT STAGING (between racks and dock zone) ----------
     # Only fills the *gap* between the rack block and dock_y_top — never the
@@ -267,23 +320,7 @@ def _spawn_aisle_floor_wear(rack_positions, params, stage, idx):
     """
     if not rack_positions:
         return idx, 0
-    bmin = params["bounds_min"]
-    bmax = params["bounds_max"]
-    rows = {}
-    for (rx, ry, rrot) in rack_positions:
-        if rrot == 90:
-            key = round(ry * 2) / 2.0
-            rows.setdefault(key, []).append(rx)
-    sorted_ys = sorted(rows.keys())
-    aisle_info = []
-    for i in range(len(sorted_ys) - 1):
-        y_a, y_b = sorted_ys[i], sorted_ys[i + 1]
-        gap = abs(y_b - y_a) - RACK_DEPTH
-        y_mid = (y_a + y_b) / 2.0
-        xs = rows[y_a] + rows[y_b]
-        x_lo, x_hi = min(xs) - 0.8, max(xs) + 0.8
-        aisle_info.append({"y": y_mid, "x_lo": x_lo, "x_hi": x_hi, "gap": gap})
-
+    aisle_info = _build_aisle_records(rack_positions, pad=0.8)
     if not aisle_info:
         return idx, 0
 
@@ -291,56 +328,69 @@ def _spawn_aisle_floor_wear(rack_positions, params, stage, idx):
     main_aisle = max(aisle_info, key=lambda a: a["gap"])
     count = 0
 
+    def _scuff_along_aisle(a, length, offset, jitter_long=0.0):
+        long_mid = (a["lo"] + a["hi"]) / 2.0 + jitter_long
+        if a["axis"] == "x":
+            return _place_tire_scuff(stage, idx, long_mid, a["mid"] + offset,
+                                     length, rot_z=0)
+        return _place_tire_scuff(stage, idx, a["mid"] + offset, long_mid,
+                                 length, rot_z=90)
+
     for a in aisle_info:
         is_main = a is main_aisle
-        x_mid = (a["x_lo"] + a["x_hi"]) / 2.0
-        length = a["x_hi"] - a["x_lo"]
+        length = a["hi"] - a["lo"]
         if is_main:
-            # Two full-length wheel tracks, slightly wider apart (heavier veh.).
             for offset in (-0.55, 0.55):
-                idx = _place_tire_scuff(stage, idx, x_mid, a["y"] + offset,
-                                        length, rot_z=0)
+                idx = _scuff_along_aisle(a, length, offset)
                 count += 1
-            # A faint third "trail" off-center where forks scrape on turn-in.
             if random.random() < 0.5:
-                idx = _place_tire_scuff(stage, idx, x_mid,
-                                        a["y"] + random.choice([-0.20, 0.20]),
-                                        length * 0.6, rot_z=0)
+                idx = _scuff_along_aisle(a, length * 0.6,
+                                         random.choice([-0.20, 0.20]))
                 count += 1
         else:
-            # Picker aisles: lighter, shorter intermittent scuffs (foot/walk
-            # behind not constant traffic). 60% chance the picker has any
-            # visible track at all.
             if random.random() < 0.6:
                 seg_len = length * random.uniform(0.4, 0.7)
-                seg_x = x_mid + random.uniform(-length * 0.15, length * 0.15)
+                jitter = random.uniform(-length * 0.15, length * 0.15)
                 offset = random.choice([-0.40, 0.40])
-                idx = _place_tire_scuff(stage, idx, seg_x, a["y"] + offset,
-                                        seg_len, rot_z=0)
+                idx = _scuff_along_aisle(a, seg_len, offset, jitter_long=jitter)
                 count += 1
 
-    # Rack-end turnaround scuffs: forklifts pivot at the end of every aisle,
-    # creating dense overlapping scuffing 1–2 rack-widths out from the row
-    # endpoints. Place a short transverse scuff at each row's leftmost and
-    # rightmost rack.
-    for ry_key, xs in rows.items():
+    # Rack-end turnaround scuffs at both endpoints for each rack row,
+    # regardless of orientation.
+    ew_rows, ns_cols = _build_rack_groups(rack_positions)
+    for ry_key, xs in ew_rows.items():
         for end_x in (min(xs) - 1.4, max(xs) + 1.4):
             if random.random() < 0.55:
                 idx = _place_tire_scuff(stage, idx, end_x, ry_key,
                                         1.4, rot_z=90 + random.uniform(-15, 15))
                 count += 1
+    for rx_key, ys in ns_cols.items():
+        for end_y in (min(ys) - 1.4, max(ys) + 1.4):
+            if random.random() < 0.55:
+                idx = _place_tire_scuff(stage, idx, rx_key, end_y,
+                                        1.4, rot_z=random.uniform(-15, 15))
+                count += 1
 
     # Oil stains: prefer the main aisle, with one plausible drip path.
+    def _aisle_random_point(a, edge_inset=1.0, perp_jitter=0.20):
+        long_lo = a["lo"] + edge_inset
+        long_hi = a["hi"] - edge_inset
+        if long_hi <= long_lo:
+            long_lo, long_hi = a["lo"], a["hi"]
+        long_p = random.uniform(long_lo, long_hi)
+        perp = a["mid"] + random.uniform(-perp_jitter, perp_jitter)
+        if a["axis"] == "x":
+            return long_p, perp
+        return perp, long_p
+
     n_stains = random.randint(2, 3)
     for _ in range(n_stains):
-        if random.random() < 0.75:  # main aisle bias
-            ox = random.uniform(main_aisle["x_lo"] + 1.0, main_aisle["x_hi"] - 1.0)
-            oy = main_aisle["y"] + random.uniform(-0.25, 0.25)
+        if random.random() < 0.75:
+            ox, oy = _aisle_random_point(main_aisle, perp_jitter=0.25)
             radius = random.uniform(0.28, 0.45)
         else:
             a = random.choice(aisle_info)
-            ox = random.uniform(a["x_lo"] + 1.0, a["x_hi"] - 1.0)
-            oy = a["y"] + random.uniform(-0.20, 0.20)
+            ox, oy = _aisle_random_point(a, perp_jitter=0.20)
             radius = random.uniform(0.20, 0.30)
         idx = _place_oil_stain(stage, idx, ox, oy, radius=radius)
         count += 1

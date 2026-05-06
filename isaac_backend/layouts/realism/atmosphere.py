@@ -8,6 +8,8 @@ from isaac_backend.layouts.geometry import (
     RACK_X_EXTENT,
     RACK_DEPTH,
     CLUTTER_PROPS,
+    _build_aisle_records,
+    _zone_in_dock_band,
 )
 from isaac_backend.layouts.placement import (
     _place,
@@ -67,24 +69,6 @@ def _spawn_clutter(params, asset_library, stage, idx):
     bmax = params["bounds_max"]
     count = 0
 
-    # Zone-ownership guard: when dock_area=True, _spawn_dock_area is the
-    # canonical populator for the dock Y-band. Skip any clutter zone that
-    # sits mostly inside that band so the LLM-generated "dock_staging" zone
-    # doesn't overlay the dock layout with another 30 props.
-    has_dock = params.get("dock_area", False)
-    dock_y_top = None
-    if has_dock:
-        dock_frac = params.get("dock_zone_frac", 0.25)
-        dock_y_top = bmin[1] + dock_frac * (bmax[1] - bmin[1])
-
-    def _zone_in_dock_band(zmin, zmax):
-        if dock_y_top is None:
-            return False
-        zone_h = max(1e-3, zmax[1] - zmin[1])
-        # Fraction of the zone's Y span that falls below dock_y_top.
-        overlap = max(0.0, min(zmax[1], dock_y_top) - zmin[1])
-        return (overlap / zone_h) >= 0.6
-
     if zones:
         for zone in zones:
             n = _count_clutter_for_density(zone.get("density", density))
@@ -96,7 +80,7 @@ def _spawn_clutter(params, asset_library, stage, idx):
                     available_types = ["box"]
             zbmin = tuple(zone.get("bounds_min", bmin))
             zbmax = tuple(zone.get("bounds_max", bmax))
-            if _zone_in_dock_band(zbmin, zbmax):
+            if _zone_in_dock_band(zbmin, zbmax, params):
                 print(f"[INFO] Skipping clutter_zone '{zone.get('area', '?')}' "
                       f"— overlaps dock band (owned by _spawn_dock_area)")
                 continue
@@ -220,17 +204,21 @@ def _spawn_atmosphere_clutter(rack_positions, params, asset_library, stage, idx)
     dock_y_top = bmin[1] + dock_frac * span_y
     count = 0
 
-    # Build aisle band Y-keys from rack rows (rot=90 racks lie along X).
-    rack_ys = sorted({round(ry * 2) / 2.0
-                      for (rx, ry, rrot) in rack_positions if rrot == 90})
+    # Build aisle records spanning both EW and NS rack groups so the
+    # randomized "aisle XY" picks plausible spots regardless of rack
+    # orientation. Falls back to a generic interior point when no aisles.
+    aisle_records = _build_aisle_records(rack_positions, pad=0.0)
 
     def _rand_aisle_xy():
-        if len(rack_ys) >= 2:
-            i = random.randint(0, len(rack_ys) - 2)
-            y = (rack_ys[i] + rack_ys[i + 1]) / 2.0 + random.uniform(-0.3, 0.3)
-        else:
-            y = random.uniform(bmin[1] + 1.0, bmax[1] - 1.0)
+        if aisle_records:
+            a = random.choice(aisle_records)
+            long_p = random.uniform(a["lo"], a["hi"])
+            perp = a["mid"] + random.uniform(-0.3, 0.3)
+            if a["axis"] == "x":
+                return long_p, perp
+            return perp, long_p
         x = random.uniform(bmin[0] + 1.5, bmax[0] - 1.5)
+        y = random.uniform(bmin[1] + 1.0, bmax[1] - 1.0)
         return x, y
 
     # 1) Fallen single boxes — 1-layer stacks with strong tilt baked in.

@@ -8,6 +8,8 @@ from isaac_backend.layouts.geometry import (
     RACK_X_EXTENT,
     RACK_DEPTH,
     CLUTTER_PROPS,
+    _build_aisle_records,
+    _build_rack_groups,
 )
 from isaac_backend.layouts.placement import (
     _place,
@@ -106,12 +108,9 @@ def _spawn_realism_layer(rack_positions, params, asset_library, stage, idx):
                                    cv_x, cv_y_end, height=0.80)
         count += 1
 
-    rows = {}
-    for (rx, ry, rrot) in rack_positions:
-        if rrot == 90:
-            key = round(ry * 2) / 2.0
-            rows.setdefault(key, []).append(rx)
-    for key, xs in rows.items():
+    ew_rows, ns_cols = _build_rack_groups(rack_positions)
+    # Mirrors at both endpoints of each rack row (EW and NS).
+    for key, xs in ew_rows.items():
         x_lo = min(xs) - 1.6
         x_hi = max(xs) + 1.6
         if x_lo > bmin[0] + 0.4:
@@ -120,23 +119,48 @@ def _spawn_realism_layer(rack_positions, params, asset_library, stage, idx):
         if x_hi < bmax[0] - 0.4:
             idx = _place_aisle_mirror(stage, idx, x_hi, key)
             count += 1
+    for key, ys in ns_cols.items():
+        y_lo = min(ys) - 1.6
+        y_hi = max(ys) + 1.6
+        if y_lo > bmin[1] + 0.4:
+            idx = _place_aisle_mirror(stage, idx, key, y_lo)
+            count += 1
+        if y_hi < bmax[1] - 0.4:
+            idx = _place_aisle_mirror(stage, idx, key, y_hi)
+            count += 1
 
     palette = [(0.95, 0.78, 0.10), (0.95, 0.45, 0.05),
                (0.30, 0.70, 0.35), (0.20, 0.55, 0.90),
                (0.85, 0.20, 0.55), (0.55, 0.30, 0.75)]
-    for ri, key in enumerate(sorted(rows.keys())):
-        xs = rows[key]
+    code_idx = 0
+    for key in sorted(ew_rows.keys()):
+        xs = ew_rows[key]
         code_x = max(xs) + 2.4
         if code_x > bmax[0] - 0.6:
             code_x = min(xs) - 2.4
             if code_x < bmin[0] + 0.6:
                 continue
-        letter = chr(ord("A") + (ri % 26))
-        code = f"{letter}-{ri + 1}"
+        letter = chr(ord("A") + (code_idx % 26))
+        code = f"{letter}-{code_idx + 1}"
         idx = _place_painted_aisle_code(stage, idx, code_x, key, code,
                                          rot_z=0,
-                                         tile_color=palette[ri % len(palette)])
+                                         tile_color=palette[code_idx % len(palette)])
         count += 1
+        code_idx += 1
+    for key in sorted(ns_cols.keys()):
+        ys = ns_cols[key]
+        code_y = max(ys) + 2.4
+        if code_y > bmax[1] - 0.6:
+            code_y = min(ys) - 2.4
+            if code_y < bmin[1] + 0.6:
+                continue
+        letter = chr(ord("A") + (code_idx % 26))
+        code = f"{letter}-{code_idx + 1}"
+        idx = _place_painted_aisle_code(stage, idx, key, code_y, code,
+                                         rot_z=90,
+                                         tile_color=palette[code_idx % len(palette)])
+        count += 1
+        code_idx += 1
 
     print(f"[INFO] Spawned realism layer: {count} grouped items "
           f"(zone signs / office / conveyor / mirrors / aisle codes)")
@@ -227,11 +251,7 @@ def _spawn_realism_layer_2(rack_positions, params, asset_library, stage, idx):
     count += 2
 
     # 5) Pallet jacks: 3 rack-end + up to 2 mid-aisle + (dock-only) marshalling.
-    rows = {}
-    for (rx, ry, rrot) in rack_positions:
-        if rrot == 90:
-            key = round(ry * 2) / 2.0
-            rows.setdefault(key, []).append(rx)
+    ew_rows, ns_cols = _build_rack_groups(rack_positions)
     jack_palette = [
         (0.85, 0.20, 0.20),
         (0.20, 0.45, 0.65),
@@ -239,31 +259,42 @@ def _spawn_realism_layer_2(rack_positions, params, asset_library, stage, idx):
         (0.30, 0.55, 0.30),
         (0.55, 0.30, 0.55),
     ]
-    if rows:
-        row_keys = list(rows.keys())
-        random.shuffle(row_keys)
-        for row_key in row_keys[:3]:
-            xs = rows[row_key]
-            side = random.choice((-1, 1))
+    # Pool both orientations as candidate rack-end anchors.
+    rack_end_candidates = []  # list of (anchor_x, anchor_y, rot)
+    for row_key, xs in ew_rows.items():
+        for side in (-1, 1):
             anchor_x = (max(xs) + 1.55) if side > 0 else (min(xs) - 1.55)
-            idx = _place_pallet_jack(stage, idx,
-                                      anchor_x,
-                                      row_key + random.uniform(-0.30, 0.30),
-                                      rot_z=random.uniform(-30, 30) + (0 if side > 0 else 180),
-                                      color=random.choice(jack_palette))
-            count += 1
-        sorted_keys = sorted(rows.keys())
-        # Up to 2 mid-aisle jacks in the gaps between adjacent rack rows.
-        gap_pairs = list(zip(sorted_keys, sorted_keys[1:]))
-        random.shuffle(gap_pairs)
-        for (a, b) in gap_pairs[:2]:
-            mid_y = (a + b) / 2.0
-            xs0 = rows[a] + rows[b]
-            mid_x = sum(xs0) / len(xs0) + random.uniform(-1.5, 1.5)
-            idx = _place_pallet_jack(stage, idx, mid_x, mid_y,
-                                      rot_z=random.uniform(0, 360),
-                                      color=random.choice(jack_palette))
-            count += 1
+            rot = random.uniform(-30, 30) + (0 if side > 0 else 180)
+            rack_end_candidates.append((anchor_x,
+                                        row_key + random.uniform(-0.30, 0.30),
+                                        rot))
+    for col_key, ys in ns_cols.items():
+        for side in (-1, 1):
+            anchor_y = (max(ys) + 1.55) if side > 0 else (min(ys) - 1.55)
+            rot = random.uniform(-30, 30) + (90 if side > 0 else 270)
+            rack_end_candidates.append((col_key + random.uniform(-0.30, 0.30),
+                                        anchor_y,
+                                        rot))
+    random.shuffle(rack_end_candidates)
+    for (ax, ay, ar) in rack_end_candidates[:3]:
+        idx = _place_pallet_jack(stage, idx, ax, ay, rot_z=ar,
+                                  color=random.choice(jack_palette))
+        count += 1
+
+    # Mid-aisle jacks: pick up to 2 aisles across both orientations.
+    aisles = _build_aisle_records(rack_positions, pad=0.0)
+    random.shuffle(aisles)
+    for a in aisles[:2]:
+        long_center = (a["lo"] + a["hi"]) / 2.0
+        long_p = long_center + random.uniform(-1.5, 1.5)
+        if a["axis"] == "x":
+            mid_x, mid_y = long_p, a["mid"]
+        else:
+            mid_x, mid_y = a["mid"], long_p
+        idx = _place_pallet_jack(stage, idx, mid_x, mid_y,
+                                  rot_z=random.uniform(0, 360),
+                                  color=random.choice(jack_palette))
+        count += 1
     if has_dock:
         idx = _place_pallet_jack(stage, idx, cx + 3.0,
                                   dock_y_top + 0.9,

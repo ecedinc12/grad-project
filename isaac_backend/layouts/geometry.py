@@ -219,6 +219,85 @@ def _measure_floor_bounds(stage):
     return None, None
 
 
+def _build_rack_groups(rack_positions):
+    """Group rack positions by orientation.
+
+    Returns (ew_rows, ns_cols) where:
+      ew_rows: {y_key: [rx, ...]}  — rrot==90 racks (long axis along X)
+      ns_cols: {x_key: [ry, ...]}  — rrot==0  racks (long axis along Y)
+    Keys are snapped to 0.5m so adjacent racks within a row group together.
+    """
+    ew_rows = {}
+    ns_cols = {}
+    for (rx, ry, rrot) in rack_positions:
+        if rrot == 90:
+            key = round(ry * 2) / 2.0
+            ew_rows.setdefault(key, []).append(rx)
+        elif rrot == 0:
+            key = round(rx * 2) / 2.0
+            ns_cols.setdefault(key, []).append(ry)
+    return ew_rows, ns_cols
+
+
+def _build_aisle_records(rack_positions, pad=0.8):
+    """Build aisle records spanning both EW and NS rack groups.
+
+    Each record is a dict:
+      axis: "x" if aisle runs along X (between EW rows), "y" if along Y.
+      mid:  perpendicular-axis coord of aisle center.
+      lo, hi: long-axis extent of the aisle.
+      gap:  perpendicular distance between flanking racks minus RACK_DEPTH.
+      rrot: rotation of the flanking racks (90 for EW, 0 for NS).
+
+    Layouts can have both EW and NS rack groups; both contribute aisles."""
+    ew_rows, ns_cols = _build_rack_groups(rack_positions)
+    aisles = []
+
+    sorted_ys = sorted(ew_rows.keys())
+    for i in range(len(sorted_ys) - 1):
+        y_a, y_b = sorted_ys[i], sorted_ys[i + 1]
+        xs = ew_rows[y_a] + ew_rows[y_b]
+        aisles.append({
+            "axis": "x",
+            "mid": (y_a + y_b) / 2.0,
+            "lo": min(xs) - pad,
+            "hi": max(xs) + pad,
+            "gap": abs(y_b - y_a) - RACK_DEPTH,
+            "rrot": 90,
+        })
+
+    sorted_xs = sorted(ns_cols.keys())
+    for i in range(len(sorted_xs) - 1):
+        x_a, x_b = sorted_xs[i], sorted_xs[i + 1]
+        ys = ns_cols[x_a] + ns_cols[x_b]
+        aisles.append({
+            "axis": "y",
+            "mid": (x_a + x_b) / 2.0,
+            "lo": min(ys) - pad,
+            "hi": max(ys) + pad,
+            "gap": abs(x_b - x_a) - RACK_DEPTH,
+            "rrot": 0,
+        })
+
+    return aisles
+
+
+def _zone_in_dock_band(zmin, zmax, params, threshold=0.6):
+    """True if at least `threshold` of the zone's Y span sits inside the
+    dock Y-band defined by params['dock_zone_frac'].
+
+    Returns False when dock_area is False or zone has no extent."""
+    if not params.get("dock_area", False):
+        return False
+    bmin = params["bounds_min"]
+    bmax = params["bounds_max"]
+    dock_frac = params.get("dock_zone_frac", 0.25)
+    dock_y_top = bmin[1] + dock_frac * (bmax[1] - bmin[1])
+    zone_h = max(1e-3, zmax[1] - zmin[1])
+    overlap = max(0.0, min(zmax[1], dock_y_top) - zmin[1])
+    return (overlap / zone_h) >= threshold
+
+
 def _affine_remap(pt, src_min, src_max, dst_min, dst_max):
     """Map a 2D point from one axis-aligned rectangle to another, per-axis."""
     out = []

@@ -1,0 +1,20 @@
+98:    def spawn_character_by_idx(self, spawn_location, spawn_rotation, idx):
+100:        Spawns character according to index in the character folder list at provided spawn_location and spawn_rotation.
+101:        Ensures duplicate characters are not spawned, until all character assets have been utilized.
+102:        If all character assets have been utilized, duplicates will be spawned.
+106:        # Characters will be spawned in the same order again if all unique assets are used
+109:            carb.log_error("Unable to spawn character due to no character assets found.")
+118:            carb.log_error("Unable to spawn character due to invalid character asset path.")
+125:            carb.log_error("Unable to spawn character due to no character usd present in folder.")
+129:        return CharacterUtil.load_character_usd_to_stage(character_usd_path, spawn_location, spawn_rotation, char_name)
+665:            carb.log_info(f"{robot_type} robots already exist in stage ({robot_count_in_stage}/{robot_count}). Skipping spawn.")
+675:        spawn_area = self.get_config_file_valid_value("robot", "spawn_area")
+684:                new_pos = randomizer.get_random_position(spawn_area)
+685:                robot_prim = RobotUtil.spawn_robot(robot_type, new_pos, 0, robot_path)
+689:                    carb.log_error(f"Failed to spawn {robot_type} robot at {robot_path}")
+695:            dp.print(f"Robot is spawned, type = {robot_type}, prim = {robot_path}")
+763:                cam_prim = CameraUtil.spawn_camera(cam_path)
+817:        spawn_area = self.get_config_file_valid_value("character", "spawn_area")
+823:                new_pos = self._character_randomizer.get_random_position(spawn_area)
+824:                character_prim = self.spawn_character_by_idx(new_pos, 0, i)
+826:                    carb.log_error(f"Failed to spawn character {character_name}.")

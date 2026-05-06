@@ -200,7 +200,7 @@ def _stack_boxes(x, y, probs, jitters, asset_library, stage, idx):
 
 
 def _count_clutter_for_density(density):
-    return {"low": 8, "medium": 18, "high": 30}.get(density, 18)
+    return {"low": 8, "medium": 24, "high": 40}.get(density, 24)
 
 
 def aw_dump(zone):

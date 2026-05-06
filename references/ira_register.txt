@@ -1,0 +1,14 @@
+/isaac-sim/extscache/isaacsim.replicator.agent.core-0.7.28+107.3.3/isaacsim/replicator/agent/core/agent_manager.py:101:        self._agent_registered_sub = carb.eventdispatcher.get_eventdispatcher().observe_event(
+/isaac-sim/extscache/isaacsim.replicator.agent.core-0.7.28+107.3.3/isaacsim/replicator/agent/core/agent_manager.py:102:            event_name=AgentEvent.AgentRegistered, on_event=self.on_agent_registered,
+/isaac-sim/extscache/isaacsim.replicator.agent.core-0.7.28+107.3.3/isaacsim/replicator/agent/core/agent_manager.py:106:        self._metadata_updated_sub = carb.eventdispatcher.get_eventdispatcher().observe_event(
+/isaac-sim/extscache/isaacsim.replicator.agent.core-0.7.28+107.3.3/isaacsim/replicator/agent/core/agent_manager.py:113:            self._stage_closing_event_sub = carb.eventdispatcher.get_eventdispatcher().observe_event(
+/isaac-sim/extscache/isaacsim.replicator.agent.core-0.7.28+107.3.3/isaacsim/replicator/agent/core/agent_manager.py:118:            self._stage_opened_event_sub = carb.eventdispatcher.get_eventdispatcher().observe_event(
+/isaac-sim/extscache/isaacsim.replicator.agent.core-0.7.28+107.3.3/isaacsim/replicator/agent/core/agent_manager.py:123:            self._stage_animation_stop_event_sub = carb.eventdispatcher.get_eventdispatcher().observe_event(
+/isaac-sim/extscache/isaacsim.replicator.agent.core-0.7.28+107.3.3/isaacsim/replicator/agent/core/agent_manager.py:182:        self.register_agent(agent_name, agent_prim_path)
+/isaac-sim/extscache/isaacsim.replicator.agent.core-0.7.28+107.3.3/isaacsim/replicator/agent/core/agent_manager.py:200:    def register_agent(self, agent_name, agent_prim_path):
+/isaac-sim/extscache/isaacsim.replicator.agent.core-0.7.28+107.3.3/isaacsim/replicator/agent/core/agent_manager.py:214:    def deregister_agent(self, agent_name):
+/isaac-sim/extscache/isaacsim.replicator.agent.core-0.7.28+107.3.3/isaacsim/replicator/agent/core/incident_bridge.py:17:        self._stage_sub = carb.eventdispatcher.get_eventdispatcher().observe_event(
+/isaac-sim/extscache/isaacsim.replicator.agent.core-0.7.28+107.3.3/isaacsim/replicator/agent/core/simulation.py:501:        return carb.eventdispatcher.get_eventdispatcher().observe_event(
+/isaac-sim/extscache/isaacsim.replicator.agent.core-0.7.28+107.3.3/isaacsim/replicator/agent/core/simulation.py:552:        return carb.eventdispatcher.get_eventdispatcher().observe_event(
+/isaac-sim/extscache/isaacsim.replicator.agent.core-0.7.28+107.3.3/isaacsim/replicator/agent/core/simulation.py:578:            self._load_stage_handle = carb.eventdispatcher.get_eventdispatcher().observe_event(
+/isaac-sim/extscache/isaacsim.replicator.agent.core-0.7.28+107.3.3/isaacsim/replicator/agent/core/tests/test_command_injection.py:104:                        agent_manager.register_agent(agent_name, agent_path)
