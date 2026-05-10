@@ -465,11 +465,19 @@ def main():
     # Bake navmesh after static clutter is spawned but before workers are set up.
     # Calling bake after worker behavior scripts are attached causes start_navmesh_baking()
     # to deadlock in native code. Workers are dynamic obstacles handled at runtime anyway.
+    # Animated vehicles are kept walkable so their own start cell isn't blocked
+    # by a stale ghost hole at the spawn pose.
+    animated_vehicle_paths = {
+        f"/World/Entities/{vb['vehicle_id']}"
+        for vb in scene_config.get("vehicle_behaviors", [])
+        if vb.get("vehicle_id")
+    }
     _progress("Baking navmesh (static obstacles included, before worker setup)...")
     bake_navmesh(
         simulation_app=simulation_app,
         bounds_min=spawn_bounds_min,
         bounds_max=spawn_bounds_max,
+        skip_paths=animated_vehicle_paths,
     )
 
     spawned_worker_names, worker_behaviors = _setup_workers(

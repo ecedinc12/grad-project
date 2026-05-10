@@ -304,13 +304,75 @@ def _define_navmesh_volume(stage, bounds_min, bounds_max, height=4.0,
     return vol_prim
 
 
+def _apply_navmesh_excludes(stage, obstacle_roots, skip_paths=None,
+                             floor_height_threshold=0.1):
+    """Tag obstacle prims with NavMeshExcludeAPI so the bake carves them out.
+
+    Without this the rasterizer treats every imageable prim inside the include
+    volume as walkable floor — workers walk straight through racks and
+    forklifts drive over pallets. Applying NavMeshExcludeAPI to each obstacle
+    group before start_navmesh_baking_and_wait() turns them into holes in the
+    resulting navmesh, which is what makes query_shortest_path actually curve
+    around them.
+
+    skip_paths: prim paths to leave walkable — typically the currently-animated
+        vehicle prims, since excluding them would leave a stale ghost hole at
+        their spawn pose and block their own start cell.
+    """
+    try:
+        import omni.anim.navigation.core as nav
+        NavMeshExcludeAPI = nav.NavSchema.NavMeshExcludeAPI
+    except Exception as e:
+        print(f"[WARN] _apply_navmesh_excludes: NavSchema unavailable ({e})")
+        return 0
+
+    from pxr import Usd, UsdGeom
+    skip = set(skip_paths or ())
+    bbox_cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(),
+                                   [UsdGeom.Tokens.default_])
+    applied = 0
+    for root_path in obstacle_roots:
+        root = stage.GetPrimAtPath(root_path)
+        if not root or not root.IsValid():
+            continue
+        for child in root.GetChildren():
+            path = str(child.GetPath())
+            if path in skip:
+                continue
+            if not UsdGeom.Imageable(child):
+                continue
+            try:
+                rng = bbox_cache.ComputeWorldBound(child).ComputeAlignedRange()
+            except Exception:
+                continue
+            if rng.IsEmpty():
+                continue
+            # Skip flat floor decals (stripes, glyphs, hazard volumes).
+            if rng.GetMax()[2] < floor_height_threshold:
+                continue
+            try:
+                NavMeshExcludeAPI.Apply(child)
+                applied += 1
+            except Exception as e:
+                print(f"[WARN] _apply_navmesh_excludes: Apply failed on {path}: {e}")
+    print(f"[INFO] _apply_navmesh_excludes: tagged {applied} obstacle prims across "
+          f"{list(obstacle_roots)} (skipped {len(skip)} animated paths)")
+    return applied
+
+
 def bake_navmesh(simulation_app=None, bounds_min=None, bounds_max=None,
-                 height=4.0, max_ticks=600):
+                 height=4.0, max_ticks=600,
+                 obstacle_roots=("/World/Layout", "/World/Entities"),
+                 skip_paths=None):
     """Define a NavMeshVolume covering the warehouse and bake the navmesh.
 
     Non-blocking: calls start_navmesh_baking() then polls is_navmesh_baking()
     each tick with a bounded budget so a failed bake can't hang the process.
     Returns True if get_navmesh() is non-None after the bake settles.
+
+    obstacle_roots: stage paths whose direct children should be carved out of
+        the navmesh as obstacles via NavMeshExcludeAPI.
+    skip_paths: prim paths to keep walkable (animated vehicles).
     """
     _probe_navmesh_environment()
 
@@ -346,6 +408,11 @@ def bake_navmesh(simulation_app=None, bounds_min=None, bounds_max=None,
         print(f"[ERROR] Failed to define NavMeshVolume: {e}")
         _disable_navmesh_settings()
         return False
+
+    # Carve obstacles out of the walkable surface BEFORE the bake reads the
+    # stage. Without this the rasterizer sees racks and pallets as flat floor
+    # and query_shortest_path returns straight lines through them.
+    _apply_navmesh_excludes(stage, obstacle_roots, skip_paths=skip_paths)
 
     # Let the extension observe the new volume prim before requesting a bake.
     if simulation_app is not None:

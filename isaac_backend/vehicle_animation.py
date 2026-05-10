@@ -29,13 +29,24 @@ class VehicleAnimator:
         self.fps = fps
         self.vehicles = []
 
+        # Prefer the baked navmesh — once obstacles are tagged with
+        # NavMeshExcludeAPI it routes around them in 3D and shares one set of
+        # tunables with the worker pathfinder. LayoutPlanner stays as a 2D-grid
+        # fallback for the case where the bake failed and get_navmesh() is None.
+        self._use_navmesh = self._navmesh_available()
         self._planner = None
-        if layout_bounds_min is not None and layout_bounds_max is not None and vehicle_behaviors:
+        if (not self._use_navmesh
+                and layout_bounds_min is not None
+                and layout_bounds_max is not None
+                and vehicle_behaviors):
             try:
                 from isaac_backend.layout_planner import LayoutPlanner
                 self._planner = LayoutPlanner(stage, layout_bounds_min, layout_bounds_max)
+                print("[INFO] VehicleAnimator: navmesh unavailable, using LayoutPlanner fallback")
             except Exception as e:
-                print(f"[WARN] VehicleAnimator: LayoutPlanner unavailable ({e}); falling back to navmesh")
+                print(f"[WARN] VehicleAnimator: LayoutPlanner unavailable ({e})")
+        elif self._use_navmesh:
+            print("[INFO] VehicleAnimator: routing via baked navmesh")
 
         for vb in vehicle_behaviors:
             v_id = vb.get("vehicle_id")
@@ -50,10 +61,10 @@ class VehicleAnimator:
                 print(f"[WARN] VehicleAnimator: Not enough waypoints for {v_id}")
                 continue
 
-            if self._planner is not None:
-                waypoints = self._expand_via_layout(waypoints, v_id)
-            else:
+            if self._use_navmesh:
                 waypoints = self._expand_via_navmesh(waypoints, v_id)
+            elif self._planner is not None:
+                waypoints = self._expand_via_layout(waypoints, v_id)
 
             # Cache XformOp references once at init — looking them up every frame
             # via GetOrderedXformOps() can return stale or reordered results when
@@ -95,6 +106,14 @@ class VehicleAnimator:
                 "current_rot": None,
             })
             print(f"[INFO] VehicleAnimator tracking {v_id} with {len(waypoints)} waypoints (total dist {total_dist:.1f}m)")
+
+    @staticmethod
+    def _navmesh_available():
+        try:
+            import omni.anim.navigation.core as nav_core
+            return nav_core.acquire_interface().get_navmesh() is not None
+        except Exception:
+            return False
 
     def _extract_waypoints(self, commands):
         """Build waypoint list from GoTo/Idle command dicts."""
